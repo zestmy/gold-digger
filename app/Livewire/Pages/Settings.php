@@ -49,14 +49,14 @@ class Settings extends Component
         $settings = Auth::user()->botSettings;
 
         if ($settings) {
-            $this->is_active = $settings->is_active;
-            $this->risk_percentage = $settings->risk_percentage;
-            $this->max_daily_loss_percentage = $settings->max_daily_loss_percentage;
-            $this->max_concurrent_trades = $settings->max_concurrent_trades;
+            $this->is_active = $settings->is_active ?? false;
+            $this->risk_percentage = $settings->risk_percentage ?? '1.00';
+            $this->max_daily_loss_percentage = $settings->max_daily_loss_percentage ?? '5.00';
+            $this->max_concurrent_trades = $settings->max_concurrent_trades ?? 3;
             $this->allowed_sessions = $settings->allowed_sessions ?? [];
-            $this->min_atr_threshold = $settings->min_atr_threshold;
-            $this->news_filter_enabled = $settings->news_filter_enabled;
-            $this->capture_screenshots = $settings->capture_screenshots;
+            $this->min_atr_threshold = $settings->min_atr_threshold ?? '0.50';
+            $this->news_filter_enabled = $settings->news_filter_enabled ?? true;
+            $this->capture_screenshots = $settings->capture_screenshots ?? true;
         }
     }
 
