@@ -13,40 +13,41 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+
       - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          port: 22
-          script_stop: true
-          debug: true
-          script: |
-            set -e
-            cd /var/www/gold-digger
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'DEPLOY'
+          set -e
+          cd /var/www/gold-digger
 
-            echo "Starting deployment..."
-            php artisan down --retry=60 || true
+          echo "Starting deployment..."
+          php artisan down --retry=60 || true
 
-            git config --global --add safe.directory /var/www/gold-digger
-            git fetch origin main
-            git reset --hard origin/main
+          git config --global --add safe.directory /var/www/gold-digger
+          git fetch origin main
+          git reset --hard origin/main
 
-            export COMPOSER_ALLOW_SUPERUSER=1
-            composer install --no-dev --optimize-autoloader --no-interaction
+          export COMPOSER_ALLOW_SUPERUSER=1
+          composer install --no-dev --optimize-autoloader --no-interaction
 
-            npm ci
-            npm run build
+          npm ci
+          npm run build
 
-            php artisan migrate --force
-            php artisan config:cache
-            php artisan route:cache
-            php artisan view:cache
-            php artisan storage:link --force || true
+          php artisan migrate --force
+          php artisan config:cache
+          php artisan route:cache
+          php artisan view:cache
+          php artisan storage:link --force || true
 
-            chown -R www-data:www-data /var/www/gold-digger
-            systemctl reload php8.3-fpm
+          chown -R www-data:www-data /var/www/gold-digger
+          systemctl reload php8.3-fpm
 
-            php artisan up
-            echo "Deployment completed at $(date)"
+          php artisan up
+          echo "Deployment completed at $(date)"
+          DEPLOY
