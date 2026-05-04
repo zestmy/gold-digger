@@ -46,7 +46,9 @@ jobs:
             cd /var/www/gold-digger
             php artisan down --retry=60 || true
 
-            git pull origin main
+            git config --global --add safe.directory /var/www/gold-digger
+            git fetch origin main
+            git reset --hard origin/main
 
             export COMPOSER_ALLOW_SUPERUSER=1
             composer install --no-dev --optimize-autoloader --no-interaction
