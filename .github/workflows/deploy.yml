@@ -45,3 +45,4 @@ jobs:
 
             php artisan up
             echo "Deployment completed at $(date)"
+# Trigger deployment - Mon May  4 15:59:15 +08 2026
