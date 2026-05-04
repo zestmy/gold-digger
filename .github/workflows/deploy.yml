@@ -44,10 +44,11 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             cd /var/www/gold-digger
-            php artisan down --retry=60
+            php artisan down --retry=60 || true
 
-            git pull origin ${{ github.ref_name }}
+            git pull origin main
 
+            export COMPOSER_ALLOW_SUPERUSER=1
             composer install --no-dev --optimize-autoloader --no-interaction
 
             npm ci
@@ -57,9 +58,11 @@ jobs:
             php artisan config:cache
             php artisan route:cache
             php artisan view:cache
-            php artisan storage:link --force
+            php artisan storage:link --force 2>/dev/null || true
 
-            sudo systemctl reload php8.2-fpm
+            sudo systemctl reload php8.3-fpm
+
+            chown -R www-data:www-data /var/www/gold-digger
 
             php artisan up
 
