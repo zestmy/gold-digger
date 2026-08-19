@@ -6,8 +6,12 @@ Personal automated gold scalping trading bot with Laravel web dashboard.
 
 Gold Digger is a multi-component trading system designed for XAUUSD (gold) scalping:
 - **Laravel Dashboard**: Web interface for monitoring, configuration, and analytics
-- **Python Bot** (Phase 2+): Trading engine connecting to MT5 broker
+- **Python Bot** (Phase 2+): Trading engine connecting to MT5 broker — see [`bot/`](bot/)
 - **MySQL Database**: Shared data store for trades, signals, and logs
+
+> **Trades not executing?** [`docs/MT5_EXECUTION.md`](docs/MT5_EXECUTION.md) ranks the causes of
+> MT5 order rejections and compares the alternatives to the Python→MT5 path.
+> `bot/mt5_preflight.py` tells you which cause applies to your account.
 
 ## Prerequisites
 
@@ -189,7 +193,9 @@ gold-digger/
 │   │   └── Pages/             # Full-page Livewire components
 │   ├── Models/                # Eloquent models
 │   └── Observers/             # Model observers
+├── bot/                       # Python trading bot (MT5 diagnostics + executor)
 ├── database/migrations/       # Database schema
+├── docs/                      # Design notes and analysis
 ├── resources/views/
 │   ├── layouts/               # App layout with sidebar
 │   └── livewire/              # Livewire component views

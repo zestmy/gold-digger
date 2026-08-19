@@ -1,0 +1,11 @@
+# Windows only: MetaTrader5 is an IPC wrapper around a running MT5 terminal.
+# There is no Linux/macOS build - see docs/MT5_EXECUTION.md section 4 for alternatives.
+MetaTrader5==5.0.4993
+
+# Used by the strategy layer (indicators, resampling). Not needed by the
+# diagnostic or the executor themselves.
+pandas>=2.2,<3
+numpy>=1.26,<3
+
+# Reads bot credentials from bot/.env instead of shell history.
+python-dotenv>=1.0,<2
