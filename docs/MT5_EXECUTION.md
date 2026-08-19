@@ -148,7 +148,7 @@ This is implemented in `bot/mt5_executor.py` in this branch. It removes causes B
 *Pick this if:* you can run a Windows VPS. It is the cheapest path and keeps credentials in-house.
 *Blocker:* the `MetaTrader5` package is Windows-only, and the terminal must stay logged in.
 
-### B. MQL5 Expert Advisor as the executor *(most robust; recommended target)*
+### B. MQL5 Expert Advisor as the executor — **CHOSEN AND BUILT**
 
 The EA runs **inside** the terminal, so the entire Python-IPC failure class (A1–A5, and `order_send`
 returning `None`) disappears. The EA polls Laravel with `WebRequest`, executes, and posts fills back.
@@ -163,6 +163,11 @@ returning `None`) disappears. The EA polls Laravel with `WebRequest`, executes, 
 *Pick this if:* you want the most reliable execution without paying a third party.
 *Caveat:* `WebRequest` is synchronous and can stall the EA's tick handler — keep the timeout short
 (1–2 s) and poll on a timer, not on every tick. Algo Trading must still be enabled.
+
+**As built:** `mql5/Experts/GoldDigger/GoldDiggerBridge.mq5` plus `mql5/Include/GoldDigger/GDExecutor.mqh`,
+against the `trade_commands` queue and the `/api/v1/bot/*` endpoints. Fill reports are buffered and
+flushed on the timer rather than sent from `OnTradeTransaction`, precisely because of the caveat
+above. Full detail in [`MT5_EA_BRIDGE.md`](MT5_EA_BRIDGE.md).
 
 ### C. EA + socket / ZeroMQ bridge
 
@@ -212,14 +217,18 @@ while the execution work proceeds.
 *Pick this if:* you want value out of the system now. It is a sequencing decision, not a compromise —
 `signals.was_executed` and `skip_reason` already exist to support exactly this mode.
 
-### Recommendation
+### Decision
 
-1. **Now:** run the preflight script and identify the actual retcode. Most likely `10027` (Algo Trading
-   off), `10030` (filling mode) or `10016` (the pip trap).
-2. **Short term:** Option A on a Windows VPS, plus Option G so the dashboard becomes useful immediately.
-3. **Target:** Option B — move execution into an EA, keep strategy in Python, Laravel as the source of
-   truth. Immune to the whole IPC failure class and costs nothing beyond the VPS you already need.
-4. **Only if you refuse to run Windows:** Option E, demo account first.
+**Option B.** Execution lives in an MQL5 EA; Laravel is the source of truth; the terminal polls
+outward from a Windows VPS. This skips Option A entirely — hardening the Python path would have been
+work thrown away once the EA existed, and the EA is immune to a failure class that Python only
+mitigates.
+
+Option A's artefacts are still worth keeping: `bot/mt5_preflight.py` diagnoses an account faster than
+attaching an EA does, and `bot/mt5_executor.py` remains the reference the MQL5 executor mirrors.
+
+Options E and F stay on the shelf. Revisit E only if running a Windows VPS becomes untenable, and
+accept that it means handing a third party your live credentials.
 
 ---
 
@@ -231,28 +240,30 @@ while the execution work proceeds.
 - [x] Commit a hardened order executor covering the known rejection causes
 - [ ] Run `mt5_preflight.py` against the Octa account and record the actual retcode
 
-### Phase 2.1 — Make the bot a first-class part of the repo
+### Phase 2.1 — Make the bot a first-class part of the repo ✓
 
-- [ ] `bot/` package with `requirements.txt`, config loader, structured logging
-- [ ] `POST /api/v1/logs` + a `BotLog` writer so failures appear on `/logs` instead of a console
-- [ ] `POST /api/v1/heartbeat` + `bot_heartbeats` table, wired to `BotStatusCard` (replaces the
+- [x] `bot/` package with `requirements.txt` and the diagnostic/executor pair
+- [x] `POST /api/v1/bot/logs` + a `BotLog` writer so failures appear on `/logs` instead of a console
+- [x] `POST /api/v1/bot/heartbeat` + `bot_heartbeats` table, wired to `BotStatusCard` (replaces the
       hardcoded `$isOnline = false`)
-- [ ] Token auth for the API (`PYTHON_BOT_API_KEY` is already in `.env.example` but unused)
+- [x] Token auth for the API — `bot_tokens`, issued with `php artisan bot:token`
 
-### Phase 2.2 — Command queue
+### Phase 2.2 — Command queue ✓
 
-- [ ] `trade_commands` migration: `type` (start/stop/close_all/open/modify/close_partial), `payload`,
-      `status`, `attempts`, `result`, `executed_at`
-- [ ] `GET /api/v1/commands` (claim) and `POST /api/v1/commands/{id}/result`
-- [ ] Replace the three `QuickActionsCard` stubs with real command enqueues
-- [ ] Idempotency key per command so a retry cannot double-fill
+- [x] `trade_commands` migration with `type`, `payload`, `status`, `attempts`, `result`, `expires_at`
+- [x] `GET /api/v1/bot/commands` (atomic claim) and `POST /api/v1/bot/commands/{id}/result`
+- [x] The three `QuickActionsCard` stubs replaced with real command enqueues
+- [x] Idempotency key per command so a retry cannot double-fill
 
-### Phase 2.3 — Executor
+### Phase 2.3 — Executor ✓ (partly)
 
-- [ ] Decide A vs B vs E (see §4) and implement the chosen adapter behind one interface
-- [ ] Symbol resolution persisted per `broker_account` (store the resolved name, e.g. `XAUUSDm`)
-- [ ] Pip↔point conversion helper shared by strategy and executor, unit-tested per digit count
-- [ ] Position sizing from `bot_settings.risk_percentage`, normalised to `volume_step`
+- [x] Option B implemented: `mql5/` EA against the queue
+- [x] Symbol resolution at runtime; the resolved name is reported on every heartbeat and shown
+      on the dashboard
+- [x] Pip↔point conversion in the executor, with an explicit `PipSize` input and a warning when inferred
+- [ ] Position sizing from `bot_settings.risk_percentage` — the EA executes the volume it is told,
+      and nothing computes that volume yet
+- [ ] Signal generation: nothing enqueues `open` commands except by hand
 
 ### Phase 2.4 — Reconciliation
 
@@ -263,9 +274,9 @@ while the execution work proceeds.
 
 ### Phase 2.5 — Safety before any live capital
 
-- [ ] Kill switch honouring `bot_settings.is_active`, checked before every order
+- [x] Kill switch honouring `bot_settings.is_active`, checked in the EA before every entry
+- [x] Demo-only guard: the EA refuses to start on a live account unless `DemoOnly` is turned off
 - [ ] `max_daily_loss_percentage` and `max_concurrent_trades` enforced in the executor, not just stored
-- [ ] Demo-only guard: refuse live orders unless an explicit flag is set
 - [ ] Alert on heartbeat loss (Telegram/email) — a silently dead bot with open positions is the real risk
 
 ### Deferred
@@ -280,13 +291,14 @@ while the execution work proceeds.
 | File | Purpose |
 |---|---|
 | `docs/MT5_EXECUTION.md` | This document |
-| `bot/mt5_preflight.py` | Diagnostic walking every cause in §2; prints PASS/WARN/FAIL with the exact remedy and runs an `order_check()` dry run |
-| `bot/mt5_executor.py` | Reusable executor: symbol resolution, filling autodetect, volume normalisation, stops clamping, requote retry, retcode mapping |
-| `bot/requirements.txt` | Pinned dependencies |
-| `bot/README.md` | How to run both on the Windows VPS |
-
-Nothing here touches the Laravel application. The API and command queue are **proposed** in §5, not
-built, because the right shape depends on which executor you choose in §4.
+| `docs/MT5_EA_BRIDGE.md` | Setup, wire protocol, and troubleshooting for the chosen executor |
+| `mql5/Experts/GoldDigger/GoldDiggerBridge.mq5` | The EA: polls, executes, reports fills and heartbeats |
+| `mql5/Include/GoldDigger/GDExecutor.mqh` | MQL5 order primitives — the guards from §2, in the terminal |
+| `bot/mt5_preflight.py` | Diagnostic walking every cause in §2; prints PASS/WARN/FAIL with the exact remedy |
+| `bot/mt5_executor.py` | Python reference executor the MQL5 one mirrors |
+| `app/Models/TradeCommand.php` etc. | Command queue, tokens, heartbeats |
+| `routes/api.php` | `/api/v1/bot/*` — the contract between dashboard and executor |
+| `tests/Feature/Bot/` | 41 tests covering the API, the dashboard controls, and the cross-language protocol contract |
 
 ---
 

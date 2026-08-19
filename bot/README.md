@@ -1,7 +1,13 @@
-# Gold Digger — Python bot
+# Gold Digger — Python MT5 tooling
 
-Execution-side tooling for the MT5 leg of the trading bot. Start with
-[`docs/MT5_EXECUTION.md`](../docs/MT5_EXECUTION.md) — it explains why orders get
+> **Execution now runs through the MQL5 Expert Advisor in [`../mql5/`](../mql5/)**, not through
+> this package. See [`docs/MT5_EA_BRIDGE.md`](../docs/MT5_EA_BRIDGE.md).
+>
+> What is here is still worth keeping: `mt5_preflight.py` diagnoses a broken account faster than
+> attaching an EA does, and `mt5_executor.py` is the reference implementation the MQL5 executor
+> mirrors — when the two disagree about how a request should be built, that is a bug.
+
+Start with [`docs/MT5_EXECUTION.md`](../docs/MT5_EXECUTION.md) — it explains why orders get
 rejected and what the alternatives to this path are.
 
 ## Platform constraint (read this first)
@@ -84,8 +90,11 @@ code assumes the broker's point, every stop lands inside `trade_stops_level` and
 order is rejected with `10016`. **Pass `pip_size` explicitly.** The executor warns when it
 has to infer it for a metal.
 
-## Not built yet
+## Relationship to the EA
 
-The Laravel side of this — the `trade_commands` queue, `/api/v1/*` endpoints, heartbeats,
-and `bot_logs` writes — is proposed in `docs/MT5_EXECUTION.md` §5, not implemented. Its
-shape depends on which executor you pick in §4.
+The Laravel side — `trade_commands`, `/api/v1/bot/*`, heartbeats, `bot_logs` — is built, and the
+MQL5 EA is what consumes it. This package is not wired into that queue; it is a diagnostic and a
+reference.
+
+`WireProtocolContractTest` asserts that both executors explain the same critical retcodes, so the
+two stay in step.
