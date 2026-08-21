@@ -6,8 +6,25 @@ Personal automated gold scalping trading bot with Laravel web dashboard.
 
 Gold Digger is a multi-component trading system designed for XAUUSD (gold) scalping:
 - **Laravel Dashboard**: Web interface for monitoring, configuration, and analytics
-- **Python Bot** (Phase 2+): Trading engine connecting to MT5 broker
+- **Python Bot** (Phase 2+): Trading engine connecting to MT5 broker — see [`bot/`](bot/)
 - **MySQL Database**: Shared data store for trades, signals, and logs
+
+Trade execution runs through an **MQL5 Expert Advisor** in [`mql5/`](mql5/) that polls this
+dashboard and reports fills back — see [`docs/MT5_EA_BRIDGE.md`](docs/MT5_EA_BRIDGE.md) for setup.
+
+Entries are decided here, not in the terminal: the EA pushes closed bars, the dashboard
+computes the indicators and queues the order. See
+[`docs/SIGNAL_GENERATION.md`](docs/SIGNAL_GENERATION.md), and
+[`docs/TRADE_MANAGEMENT.md`](docs/TRADE_MANAGEMENT.md) for the take-profit ladder, the
+reversal and time exits, and the break-even stop. Positions the dashboard did not open
+are picked up by [`docs/RECONCILIATION.md`](docs/RECONCILIATION.md).
+
+> **Picking this work back up?** Start at [`docs/HANDOFF.md`](docs/HANDOFF.md) — what is built,
+> what is deliberately not, what has never been verified, and the next actions in order.
+
+> **Orders being rejected?** [`docs/MT5_EXECUTION.md`](docs/MT5_EXECUTION.md) ranks the causes of
+> MT5 order rejections with a full retcode reference. `bot/mt5_preflight.py` tells you which one
+> applies to your account.
 
 ## Prerequisites
 
@@ -100,11 +117,32 @@ The system automatically creates:
 | `/trades/live` | Live trades (Phase 1B) |
 | `/trades/history` | Trade history (Phase 1B) |
 | `/strategies` | Strategy configuration (Phase 1B) |
-| `/broker-accounts` | MT5 account management (Phase 2) |
+| `/broker-accounts` | MT5 account management |
 | `/analytics` | Performance analytics (Phase 1C) |
 | `/settings` | Bot settings (Phase 1B) |
-| `/logs` | Bot logs (Phase 3) |
+| `/logs` | Bot logs (written by the EA) |
 | `/admin` | Filament admin panel |
+
+## Bot API
+
+The Expert Advisor talks to these endpoints, authenticated with a bearer token from
+`bot_tokens`. Issue one with:
+
+```bash
+php artisan bot:token you@example.com --name="Windows VPS" --account=1
+```
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET` | `/api/v1/bot/commands` | Claim queued commands |
+| `POST` | `/api/v1/bot/commands/{id}/result` | Report the broker's answer |
+| `POST` | `/api/v1/bot/fills` | Record opens and closes |
+| `POST` | `/api/v1/bot/heartbeat` | Liveness, account snapshot, symbol spec + kill-switch state |
+| `POST` | `/api/v1/bot/logs` | Write to `bot_logs` |
+| `POST` | `/api/v1/bot/candles` | Push closed bars; a new bar triggers signal generation |
+| `POST` | `/api/v1/bot/positions` | Snapshot of open positions, so `trades` can be corrected |
+
+Protocol details: [`docs/MT5_EA_BRIDGE.md`](docs/MT5_EA_BRIDGE.md).
 
 ## Admin Panel
 
@@ -189,7 +227,11 @@ gold-digger/
 │   │   └── Pages/             # Full-page Livewire components
 │   ├── Models/                # Eloquent models
 │   └── Observers/             # Model observers
+├── bot/                       # Python MT5 diagnostics + reference executor
 ├── database/migrations/       # Database schema
+├── docs/                      # Design notes and analysis
+├── mql5/                      # MetaTrader 5 Expert Advisor (the executor)
+├── routes/api.php             # Bot API: /api/v1/bot/*
 ├── resources/views/
 │   ├── layouts/               # App layout with sidebar
 │   └── livewire/              # Livewire component views

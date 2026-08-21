@@ -65,6 +65,17 @@
                     </a>
                 </li>
 
+                <!-- Signals -->
+                <li>
+                    <a href="{{ route('signals') }}"
+                       class="{{ request()->routeIs('signals') ? 'bg-gray-800 text-yellow-400' : 'text-gray-400 hover:text-white hover:bg-gray-800' }} group flex gap-x-3 rounded-md p-2 text-sm leading-6 font-semibold">
+                        <svg class="h-6 w-6 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9.348 14.652a3.75 3.75 0 010-5.304m5.304 0a3.75 3.75 0 010 5.304m-7.425 2.121a6.75 6.75 0 010-9.546m9.546 0a6.75 6.75 0 010 9.546M5.106 18.894c-3.808-3.807-3.808-9.98 0-13.788m13.788 0c3.808 3.807 3.808 9.98 0 13.788M12 12h.008v.008H12V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                        </svg>
+                        Signals
+                    </a>
+                </li>
+
                 <!-- Strategies -->
                 <li>
                     <a href="{{ route('strategies') }}"
