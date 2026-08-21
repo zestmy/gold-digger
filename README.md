@@ -12,6 +12,9 @@ Gold Digger is a multi-component trading system designed for XAUUSD (gold) scalp
 Trade execution runs through an **MQL5 Expert Advisor** in [`mql5/`](mql5/) that polls this
 dashboard and reports fills back — see [`docs/MT5_EA_BRIDGE.md`](docs/MT5_EA_BRIDGE.md) for setup.
 
+> **Picking this work back up?** Start at [`docs/HANDOFF.md`](docs/HANDOFF.md) — what is built,
+> what is deliberately not, what has never been verified, and the next actions in order.
+
 > **Orders being rejected?** [`docs/MT5_EXECUTION.md`](docs/MT5_EXECUTION.md) ranks the causes of
 > MT5 order rejections with a full retcode reference. `bot/mt5_preflight.py` tells you which one
 > applies to your account.
