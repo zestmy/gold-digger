@@ -82,6 +82,16 @@ datetime     g_last_trend_bar   = 0;
 bool         g_entry_seeded     = false;
 bool         g_trend_seeded     = false;
 
+//--- Why this EA was told to close a position, kept until the resulting deal shows
+//--- up in OnTradeTransaction. A broker deal cannot say which rung of the take-profit
+//--- ladder it was - DEAL_REASON only distinguishes "an expert did it" from a stop or
+//--- a target - so the dashboard states the rung on the command and it is echoed back
+//--- with the fill. Without this every commanded close is recorded as "manual" and the
+//--- ladder is invisible in trade_partials.
+#define GD_MAX_CLOSE_REASONS 32
+ulong        g_close_ticket[];
+string       g_close_reason[];
+
 //--- Fill reports are queued here by OnTradeTransaction and flushed by OnTimer.
 //--- WebRequest is synchronous: calling it inside a trade-transaction handler
 //--- would stall the terminal's event thread on every fill.
@@ -248,6 +258,76 @@ void GDReportResult(const long command_id, const bool ok, const uint retcode,
    string response;
    GDHttp("POST", "/api/v1/bot/commands/" + IntegerToString(command_id) + "/result",
           body, "application/json", response);
+  }
+
+//+------------------------------------------------------------------+
+//| Remember why a commanded close was made.                          |
+//+------------------------------------------------------------------+
+void GDRememberCloseReason(const ulong ticket, const string reason)
+  {
+   if(reason == "")
+      return;
+
+   const int n = ArraySize(g_close_ticket);
+
+   for(int i = 0; i < n; i++)
+      if(g_close_ticket[i] == ticket)
+        {
+         g_close_reason[i] = reason;
+         return;
+        }
+
+   //--- A backlog this size means deals are not arriving at all. Dropping the oldest
+   //--- costs one mislabelled partial; growing without limit costs the terminal.
+   if(n >= GD_MAX_CLOSE_REASONS)
+     {
+      for(int i = 1; i < n; i++)
+        {
+         g_close_ticket[i - 1] = g_close_ticket[i];
+         g_close_reason[i - 1] = g_close_reason[i];
+        }
+      g_close_ticket[n - 1] = ticket;
+      g_close_reason[n - 1] = reason;
+      return;
+     }
+
+   ArrayResize(g_close_ticket, n + 1);
+   ArrayResize(g_close_reason, n + 1);
+   g_close_ticket[n] = ticket;
+   g_close_reason[n] = reason;
+  }
+
+//+------------------------------------------------------------------+
+//| Consume a remembered close reason, or "" if there is none.        |
+//|                                                                   |
+//| Consuming rather than reading: one command produces one deal, and |
+//| a reason left behind would be attached to whatever closed this    |
+//| position next - including a stop loss.                            |
+//+------------------------------------------------------------------+
+string GDTakeCloseReason(const ulong ticket)
+  {
+   const int n = ArraySize(g_close_ticket);
+
+   for(int i = 0; i < n; i++)
+     {
+      if(g_close_ticket[i] != ticket)
+         continue;
+
+      const string reason = g_close_reason[i];
+
+      for(int j = i + 1; j < n; j++)
+        {
+         g_close_ticket[j - 1] = g_close_ticket[j];
+         g_close_reason[j - 1] = g_close_reason[j];
+        }
+
+      ArrayResize(g_close_ticket, n - 1);
+      ArrayResize(g_close_reason, n - 1);
+
+      return reason;
+     }
+
+   return "";
   }
 
 //+------------------------------------------------------------------+
@@ -442,11 +522,13 @@ void GDHeartbeat(void)
       "{\"source\":\"mql5_ea\",\"version\":\"%s\",\"terminal_build\":%d,"
       "\"algo_trading_enabled\":%s,\"broker_connected\":%s,\"resolved_symbol\":\"%s\","
       "\"pip_size\":%s,\"digits\":%d,\"pip_value_per_lot\":%s,"
+      "\"volume_min\":%s,\"volume_step\":%s,"
       "\"balance\":%s,\"equity\":%s,\"margin_free\":%s,\"open_positions\":%d}",
       GD_EA_VERSION, (int)TerminalInfoInteger(TERMINAL_BUILD),
       (algo ? "true" : "false"), (connected ? "true" : "false"),
       GDJsonEscape(g_exec.Symbol()),
       pip_size_json, g_exec.Digits(), pip_value_json,
+      DoubleToString(g_exec.VolumeMin(), 4), DoubleToString(g_exec.VolumeStep(), 4),
       DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2),
       DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2),
       DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_FREE), 2),
@@ -477,6 +559,9 @@ void GDHandleCommand(const string &f[])
    const double tp_prc  = StringToDouble(f[8]);
    const ulong  ticket  = (ulong)StringToInteger(f[9]);
    const string comment = f[10];
+   //--- Which rung of the ladder this close is. Column 11 has been on the wire since
+   //--- the protocol was written and was never read; trade management is what fills it.
+   const string reason  = f[11];
 
    if(DryRun)
      {
@@ -517,10 +602,44 @@ void GDHandleCommand(const string &f[])
    if(type == "close")
      {
       uint retcode = 0;
+
+      //--- Recorded before the call, because the resulting deal can reach
+      //--- OnTradeTransaction as soon as this handler returns.
+      GDRememberCloseReason(ticket, reason);
+
       if(g_exec.ClosePosition(ticket, volume, retcode))
+        {
          GDReportResult(id, true, retcode, ticket, 0.0, volume, "");
+        }
       else
+        {
+         //--- Nothing closed, so nothing will arrive to consume the reason. Left in
+         //--- place it would be attached to whatever closed this position next.
+         GDTakeCloseReason(ticket);
          GDReportResult(id, false, retcode, ticket, 0.0, 0.0, g_exec.LastError());
+        }
+      return;
+     }
+
+   //--- Moving the stop, typically to break-even once the first rung has filled.
+   //--- A zero level means "leave that one alone"; see CGDExecutor::ModifyPosition.
+   if(type == "modify")
+     {
+      uint retcode = 0;
+
+      if(g_exec.ModifyPosition(ticket, sl_prc, tp_prc, retcode))
+        {
+         GDReportResult(id, true, retcode, ticket, 0.0, 0.0, "");
+         GDLog("info", StringFormat("Position #%s stop/target moved (%s)",
+                                    IntegerToString((long)ticket),
+                                    (reason == "" ? "no reason given" : reason)));
+        }
+      else
+        {
+         GDReportResult(id, false, retcode, ticket, 0.0, 0.0, g_exec.LastError());
+         GDLog("error", StringFormat("Modify rejected on #%s: %s",
+                                     IntegerToString((long)ticket), g_exec.LastError()));
+        }
       return;
      }
 
@@ -852,9 +971,26 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    string reason_note = "manual close";
 
    if(reason == DEAL_REASON_SL)      { reason_enum = "sl";  reason_note = "stop loss hit"; }
-   else if(reason == DEAL_REASON_TP) { reason_enum = "tp1"; reason_note = "take profit hit at broker"; }
+   else if(reason == DEAL_REASON_TP) { reason_enum = "tp3"; reason_note = "take profit hit at broker"; }
    else if(reason == DEAL_REASON_SO) { reason_enum = "sl";  reason_note = "stop out (margin call)"; }
-   else if(reason == DEAL_REASON_EXPERT) { reason_enum = "manual"; reason_note = "closed by dashboard command"; }
+   else if(reason == DEAL_REASON_EXPERT)
+     {
+      //--- Only an EXPERT close can have been commanded, so only this branch consults
+      //--- the store. A stop or target that happened to fire on a position with a
+      //--- stale entry must not inherit its rung.
+      const string commanded = GDTakeCloseReason((ulong)position_id);
+
+      if(commanded != "")
+        {
+         reason_enum = commanded;
+         reason_note = "closed by dashboard command (" + commanded + ")";
+        }
+      else
+        {
+         reason_enum = "manual";
+         reason_note = "closed by dashboard command";
+        }
+     }
 
    GDQueueReport(StringFormat(
       "{\"event\":\"%s\",\"ticket\":%s,\"deal_ticket\":%s,\"volume\":%s,\"price\":%s,"

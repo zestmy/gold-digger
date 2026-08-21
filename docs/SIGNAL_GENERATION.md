@@ -5,7 +5,8 @@ How the dashboard decides to enter a trade.
 Until this existed, the handoff's summary was accurate: *"the EA executes; nothing enqueues
 `open` commands except by hand."* This is the piece that enqueues them.
 
-Read [`MT5_EA_BRIDGE.md`](MT5_EA_BRIDGE.md) first for how the EA and the dashboard talk.
+Read [`MT5_EA_BRIDGE.md`](MT5_EA_BRIDGE.md) first for how the EA and the dashboard talk, and
+[`TRADE_MANAGEMENT.md`](TRADE_MANAGEMENT.md) for what happens to a position once it is open.
 
 ---
 
@@ -132,9 +133,9 @@ The price levels are still stored on the signal, because that is what the analyt
 chart. The terminal's numbers remain authoritative.
 
 **The order's target is the final ladder step**, `tp3_pips` (or `tp2_pips` when TP3 is
-unset) — *not* TP1. Closing part of the position at TP1 and TP2 needs a loop that watches
-price, and none exists. Putting TP1 on the order would close the whole position at a level
-meant to take only half of it, and TP2/TP3 would never be reached. See *Not built* below.
+unset) — *not* TP1. Putting TP1 on the order would close the whole position at a level meant
+to take only half of it, and TP2/TP3 would never be reached. The earlier rungs are taken by
+[`TRADE_MANAGEMENT.md`](TRADE_MANAGEMENT.md), which watches bars and closes them at market.
 
 ---
 
@@ -172,10 +173,6 @@ is a poor place to debug "why did that bar not produce a signal".
 
 ## Not built
 
-- **Partial ladder management.** `tp1_close_pct` / `tp2_close_pct` are stored and unused. A
-  loop that watches price and issues partial `close` commands is the next piece.
-- **`exit_on_reversal` and `max_holding_bars`** are stored and unused, for the same reason —
-  both need something watching open positions.
 - **News filter.** `news_filter_enabled` is stored; there is no news source.
 - **`confidence_score`** is always null. Nothing scores setups yet.
 - **Backtesting.** The evaluator answers "is there a signal now", not "where were all the

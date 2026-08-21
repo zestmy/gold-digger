@@ -175,6 +175,10 @@ not guess.
 
 - **`pip_size`** turns the strategy's pip-based targets into the price levels stored on a
   signal.
+- **`volume_min`** and **`volume_step`** are what let trade management decide whether a
+  position can be divided into a ladder at all. Half of a broker's minimum lot is not a
+  tradeable volume, and without these a 0.01-lot position would generate a failing partial
+  close at every rung of every trade.
 - **`pip_value_per_lot`** is the whole of position sizing — `SYMBOL_TRADE_TICK_VALUE *
   (pip_size / SYMBOL_TRADE_TICK_SIZE)`, which depends on contract size and the deposit
   currency.
@@ -187,7 +191,8 @@ wrong value here does not fail loudly — it trades a size nobody chose.
 
 The EA pushes closed bars for the entry and trend timeframes so the dashboard can compute
 indicators and decide entries. See [`SIGNAL_GENERATION.md`](SIGNAL_GENERATION.md) for what
-happens to them.
+happens to them, and [`TRADE_MANAGEMENT.md`](TRADE_MANAGEMENT.md) for the take-profit ladder
+and exits the same bars drive.
 
 | Input | Default | Meaning |
 |---|---|---|
@@ -275,9 +280,10 @@ The Experts tab in the terminal carries the same messages with more detail.
 
 - **The EA executes; it does not decide.** Entries are decided dashboard-side from the
   bars the EA pushes — see [`SIGNAL_GENERATION.md`](SIGNAL_GENERATION.md).
-- **No partial-ladder management.** The order carries the *final* target, so a position
-  runs to TP3 (or TP2) or the stop. Closing part of it at TP1 and TP2 needs a loop that
-  watches price, and none exists yet.
+- **Ladder rungs are filled at market, one bar late.** The order carries the *final*
+  target; TP1 and TP2 are noticed when the bar that touched them closes, then closed at
+  market. A spike through a rung that retraces inside the same bar fills worse than the
+  rung. See [`TRADE_MANAGEMENT.md`](TRADE_MANAGEMENT.md).
 - **No reconciliation sweep.** Positions opened while the EA was detached are not
   back-filled into `trades`. See `MT5_EXECUTION.md` §5, Phase 2.4.
 - **`max_concurrent_trades` and `max_daily_loss_percentage` are enforced when a signal is

@@ -110,6 +110,7 @@ public:
    double            Point(void)       const { return m_point;        }
    double            PipSize(void)     const { return m_pip_size;     }
    double            VolumeMin(void)   const { return m_vol_min;      }
+   double            VolumeStep(void)  const { return m_vol_step;     }
    int               StopsLevel(void)  const { return m_stops_level;  }
    string            LastError(void)   const { return m_last_error;   }
 
@@ -127,6 +128,8 @@ public:
                           uint &out_retcode);
 
    bool              ClosePosition(const ulong ticket, const double volume, uint &out_retcode);
+   bool              ModifyPosition(const ulong ticket, const double sl_price_in,
+                                    const double tp_price_in, uint &out_retcode);
    int               CloseAllOwned(uint &out_retcode);
    int               CountOwnedPositions(void) const;
   };
@@ -476,6 +479,71 @@ bool CGDExecutor::ClosePosition(const ulong ticket, const double volume, uint &o
      }
 
    m_last_error = GDExplainRetcode(out_retcode);
+   return false;
+  }
+
+//+------------------------------------------------------------------+
+//| Move the stop and/or take profit of an open position.             |
+//|                                                                   |
+//| Zero means "leave this one alone", so the dashboard can move the  |
+//| stop to break-even without having to restate a take profit it     |
+//| does not want changed. Passing 0.0 straight to PositionModify     |
+//| would instead *remove* the level, turning a break-even move into  |
+//| a silent removal of the target.                                   |
+//|                                                                   |
+//| The requested levels go through the same ClampStops() as an entry.|
+//| A broker-side stops level is measured from the *current* price,   |
+//| so a break-even stop is rejected with 10016 exactly when price    |
+//| has come back close to entry - which is precisely when it is      |
+//| being asked for.                                                  |
+//+------------------------------------------------------------------+
+bool CGDExecutor::ModifyPosition(const ulong ticket, const double sl_price_in,
+                                 const double tp_price_in, uint &out_retcode)
+  {
+   out_retcode  = 0;
+   m_last_error = "";
+
+   if(!PositionSelectByTicket(ticket))
+     {
+      m_last_error = "Position " + IntegerToString((long)ticket) + " not found (already closed?)";
+      return false;
+     }
+
+   const bool is_buy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+
+   double sl = (sl_price_in > 0.0) ? sl_price_in : PositionGetDouble(POSITION_SL);
+   double tp = (tp_price_in > 0.0) ? tp_price_in : PositionGetDouble(POSITION_TP);
+
+   MqlTick tick;
+   if(!SymbolInfoTick(m_symbol, tick) || tick.ask <= 0.0 || tick.bid <= 0.0)
+     {
+      m_last_error = "No tick data; the market may be closed";
+      return false;
+     }
+
+   //--- Clamp against the price the position would be closed at.
+   const double price = is_buy ? tick.bid : tick.ask;
+   ClampStops(is_buy, price, sl, tp);
+
+   sl = NormalizeDouble(sl, m_digits);
+   tp = NormalizeDouble(tp, m_digits);
+
+   //--- Nothing to do. Reported as success: the position already sits where the
+   //--- dashboard asked it to, and a failure here would be retried for ever.
+   if(MathAbs(sl - PositionGetDouble(POSITION_SL)) < m_point / 2.0
+      && MathAbs(tp - PositionGetDouble(POSITION_TP)) < m_point / 2.0)
+     {
+      out_retcode = TRADE_RETCODE_DONE;
+      return true;
+     }
+
+   const bool sent = m_trade.PositionModify(ticket, sl, tp);
+   out_retcode = m_trade.ResultRetcode();
+
+   if(sent && (out_retcode == TRADE_RETCODE_DONE || out_retcode == TRADE_RETCODE_PLACED))
+      return true;
+
+   m_last_error = GDExplainRetcode(out_retcode) + " | " + m_trade.ResultRetcodeDescription();
    return false;
   }
 

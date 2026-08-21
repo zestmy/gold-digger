@@ -81,13 +81,13 @@ constants. That drift is how this integration breaks silently at 3am.
 
 ## What is NOT built
 
-> **Update.** Signal generation and position sizing have since been built — see
-> [`SIGNAL_GENERATION.md`](SIGNAL_GENERATION.md). What remains is below.
+> **Update.** Signal generation, position sizing and trade management have since been
+> built — see [`SIGNAL_GENERATION.md`](SIGNAL_GENERATION.md) and
+> [`TRADE_MANAGEMENT.md`](TRADE_MANAGEMENT.md). What remains is below.
 
-- **Trade management.** Nothing watches an open position. `tp1_close_pct` /
-  `tp2_close_pct`, `exit_on_reversal` and `max_holding_bars` are all stored and unused, so
-  a position runs to its final target or its stop. This is now the next substantial piece
-  of work.
+- **Trailing stops and intrabar exits.** The stop moves once, to break-even; nothing
+  trails it. Ladder rungs are detected on bar close and filled at market, so a spike that
+  retraces fills worse than the rung. See `TRADE_MANAGEMENT.md`.
 - **Reconciliation sweep** — positions opened while the EA was detached are not back-filled
   into `trades`.
 - **`max_concurrent_trades` / `max_daily_loss_percentage`** are enforced when a signal is

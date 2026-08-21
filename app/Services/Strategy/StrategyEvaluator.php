@@ -78,19 +78,11 @@ final class StrategyEvaluator
         $last = count($closes) - 1;
         $prev = $last - 1;
 
-        // Any null here means the series has a gap the warm-up check did not catch.
-        if ($fast[$last] === null || $slow[$last] === null || $fast[$prev] === null || $slow[$prev] === null) {
+        $direction = $this->crossDirection($entryCandles, $emaFast, $emaSlow);
+
+        if ($direction === null) {
             return null;
         }
-
-        $crossedUp = $fast[$prev] <= $slow[$prev] && $fast[$last] > $slow[$last];
-        $crossedDown = $fast[$prev] >= $slow[$prev] && $fast[$last] < $slow[$last];
-
-        if (! $crossedUp && ! $crossedDown) {
-            return null;
-        }
-
-        $direction = $crossedUp ? 'buy' : 'sell';
 
         // The higher timeframe has a veto. Counter-trend crosses are the ones that whipsaw.
         if ($direction !== $trendDirection) {
@@ -135,6 +127,47 @@ final class StrategyEvaluator
                 'bar_close' => (float) $signalBar->close,
             ],
         );
+    }
+
+    /**
+     * Direction of an EMA crossover on the most recent closed bar, or null if there was none.
+     *
+     * Public because the exit side needs the same question answered: `exit_on_reversal`
+     * closes a position when the EMAs cross *back*, and that has to be the same crossover
+     * this class uses to enter. Two implementations would drift, and a strategy that
+     * entered on one definition and exited on another would behave in ways neither
+     * definition explains.
+     *
+     * @param  array<int, Candle>  $candles  Oldest-first
+     * @return 'buy'|'sell'|null
+     */
+    public function crossDirection(array $candles, int $emaFast, int $emaSlow): ?string
+    {
+        if (count($candles) < $emaSlow + 2) {
+            return null;
+        }
+
+        $closes = Candle::closes($candles);
+        $fast = Indicators::ema($closes, $emaFast);
+        $slow = Indicators::ema($closes, $emaSlow);
+
+        $last = count($closes) - 1;
+        $prev = $last - 1;
+
+        // Any null here means the series has a gap the warm-up check did not catch.
+        if ($fast[$last] === null || $slow[$last] === null || $fast[$prev] === null || $slow[$prev] === null) {
+            return null;
+        }
+
+        if ($fast[$prev] <= $slow[$prev] && $fast[$last] > $slow[$last]) {
+            return 'buy';
+        }
+
+        if ($fast[$prev] >= $slow[$prev] && $fast[$last] < $slow[$last]) {
+            return 'sell';
+        }
+
+        return null;
     }
 
     /**

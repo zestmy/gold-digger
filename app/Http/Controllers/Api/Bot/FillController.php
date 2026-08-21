@@ -160,6 +160,15 @@ class FillController extends Controller
             ], 404);
         }
 
+        // The EA labels a broker-side take-profit fill "tp3", because the order always
+        // carries the *final* rung of the ladder. When the strategy set no TP3 that final
+        // rung is TP2, and the terminal has no way to know which - it never saw the ladder.
+        // TradeManager only ever commands tp1/tp2, so a "tp3" here is always the broker's
+        // own target and correcting it cannot collide with a commanded close.
+        if (($data['reason'] ?? null) === 'tp3' && $trade->tp3_price === null) {
+            $data['reason'] = 'tp2';
+        }
+
         $partial = DB::transaction(function () use ($trade, $data) {
             $gross = $data['profit'] ?? 0;
             $commission = $data['commission'] ?? 0;

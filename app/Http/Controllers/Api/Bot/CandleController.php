@@ -8,9 +8,11 @@ use App\Models\Candle;
 use App\Models\Signal;
 use App\Models\Strategy;
 use App\Services\Strategy\SignalGenerator;
+use App\Services\Strategy\TradeManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 
 /**
  * Candle Controller
@@ -59,7 +61,7 @@ class CandleController extends Controller
      */
     private const MAX_BARS = 1000;
 
-    public function store(Request $request, SignalGenerator $generator): JsonResponse
+    public function store(Request $request, SignalGenerator $generator, TradeManager $manager): JsonResponse
     {
         /** @var BotToken $token */
         $token = $request->attributes->get('bot_token');
@@ -139,8 +141,13 @@ class CandleController extends Controller
         );
 
         $signals = [];
+        $managed = [];
 
         if ($newBars !== []) {
+            // Positions first. A reversal or timeout exit on this bar should be queued
+            // before the same bar's entry is considered, so the two arrive at the EA in the
+            // order the strategy meant them - out of the old trade, then into the new one.
+            $managed = $this->manage($manager, $token->user_id, $timeframe, $accountId);
             $signals = $this->evaluate($generator, $token->user_id, $timeframe, $accountId);
         }
 
@@ -152,7 +159,27 @@ class CandleController extends Controller
                 'direction' => $s->direction,
                 'skip_reason' => $s->skip_reason,
             ], $signals),
+            'managed' => $managed,
         ], 201);
+    }
+
+    /**
+     * Manage open positions for every active strategy on the timeframe that just closed.
+     *
+     * Same timeframe gate as entries, and for the same reason: the ladder, the reversal exit
+     * and the holding-time limit are all defined in terms of the strategy's own entry bars.
+     *
+     * @return array<int, array{trade_id: int, action: string}>
+     */
+    private function manage(TradeManager $manager, int $userId, string $timeframe, ?int $accountId): array
+    {
+        $actions = [];
+
+        foreach ($this->strategiesOn($userId, $timeframe) as $strategy) {
+            $actions = array_merge($actions, $manager->manage($strategy, $accountId));
+        }
+
+        return $actions;
     }
 
     /**
@@ -167,14 +194,9 @@ class CandleController extends Controller
      */
     private function evaluate(SignalGenerator $generator, int $userId, string $timeframe, ?int $accountId): array
     {
-        $strategies = Strategy::where('user_id', $userId)
-            ->where('is_active', true)
-            ->get()
-            ->filter(fn (Strategy $s) => strtoupper($s->timeframe_entry) === $timeframe);
-
         $signals = [];
 
-        foreach ($strategies as $strategy) {
+        foreach ($this->strategiesOn($userId, $timeframe) as $strategy) {
             $signal = $generator->generate($strategy, $accountId);
 
             if ($signal !== null) {
@@ -183,5 +205,18 @@ class CandleController extends Controller
         }
 
         return $signals;
+    }
+
+    /**
+     * Active strategies of one user whose entry timeframe is the one that just closed a bar.
+     *
+     * @return Collection<int, Strategy>
+     */
+    private function strategiesOn(int $userId, string $timeframe): Collection
+    {
+        return Strategy::where('user_id', $userId)
+            ->where('is_active', true)
+            ->get()
+            ->filter(fn (Strategy $s) => strtoupper($s->timeframe_entry) === $timeframe);
     }
 }

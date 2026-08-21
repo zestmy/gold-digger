@@ -266,15 +266,21 @@ accept that it means handing a third party your live credentials.
 - [x] Signal generation: `candles` + `StrategyEvaluator` + `SignalGenerator`. See
       `SIGNAL_GENERATION.md`
 
-### Phase 2.3b — Trade management *(not started)*
+### Phase 2.3b - Trade management
 
-The entry side is complete; nothing manages a position once it is open.
-
-- [ ] Partial closes at TP1/TP2 per `tp1_close_pct` / `tp2_close_pct`. Until this exists the
-      order carries the *final* target and the whole position runs to it or to the stop
-- [ ] `exit_on_reversal` — close when the EMAs cross back
-- [ ] `max_holding_bars` — forced exit after N bars
-- [ ] Move the stop to break-even after TP1
+- [x] Partial closes at TP1/TP2 per `tp1_close_pct` / `tp2_close_pct` - `TradeManager`.
+      See `TRADE_MANAGEMENT.md`
+- [x] `exit_on_reversal` - close when the EMAs cross back
+- [x] `max_holding_bars` - forced exit after N bars
+- [x] Move the stop to break-even after TP1, once the rung has actually filled
+- [x] `modify` implemented in the EA - the type was in the command enum and the EA had been
+      rejecting it as unknown
+- [x] The wire's `reason` column is read by the EA, so a commanded close is recorded as the
+      rung it was rather than as `manual`
+- [ ] Trailing stop. The stop moves once, to break-even, and never follows price
+- [ ] Intrabar rung detection. A rung is noticed when its bar closes and filled at market, so
+      a spike through TP1 that retraces fills worse than TP1. The exact fix is one position
+      per rung with its own broker-side TP, at the cost of tripling position count
 
 ### Phase 2.4 — Reconciliation
 

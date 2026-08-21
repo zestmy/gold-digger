@@ -14,7 +14,9 @@ dashboard and reports fills back — see [`docs/MT5_EA_BRIDGE.md`](docs/MT5_EA_B
 
 Entries are decided here, not in the terminal: the EA pushes closed bars, the dashboard
 computes the indicators and queues the order. See
-[`docs/SIGNAL_GENERATION.md`](docs/SIGNAL_GENERATION.md).
+[`docs/SIGNAL_GENERATION.md`](docs/SIGNAL_GENERATION.md), and
+[`docs/TRADE_MANAGEMENT.md`](docs/TRADE_MANAGEMENT.md) for the take-profit ladder, the
+reversal and time exits, and the break-even stop.
 
 > **Picking this work back up?** Start at [`docs/HANDOFF.md`](docs/HANDOFF.md) — what is built,
 > what is deliberately not, what has never been verified, and the next actions in order.

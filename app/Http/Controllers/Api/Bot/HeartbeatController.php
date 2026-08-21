@@ -39,6 +39,10 @@ class HeartbeatController extends Controller
             'pip_size' => ['nullable', 'numeric', 'gt:0'],
             'digits' => ['nullable', 'integer', 'min:0', 'max:10'],
             'pip_value_per_lot' => ['nullable', 'numeric', 'gt:0'],
+            // Needed before a position can be split into a TP ladder: a partial smaller
+            // than volume_min is snapped to zero by the executor and never sent.
+            'volume_min' => ['nullable', 'numeric', 'gt:0'],
+            'volume_step' => ['nullable', 'numeric', 'gt:0'],
             'balance' => ['nullable', 'numeric'],
             'equity' => ['nullable', 'numeric'],
             'margin_free' => ['nullable', 'numeric'],
@@ -59,6 +63,8 @@ class HeartbeatController extends Controller
                 'pip_size' => $data['pip_size'] ?? null,
                 'digits' => $data['digits'] ?? null,
                 'pip_value_per_lot' => $data['pip_value_per_lot'] ?? null,
+                'volume_min' => $data['volume_min'] ?? null,
+                'volume_step' => $data['volume_step'] ?? null,
                 'balance' => $data['balance'] ?? null,
                 'equity' => $data['equity'] ?? null,
                 'margin_free' => $data['margin_free'] ?? null,

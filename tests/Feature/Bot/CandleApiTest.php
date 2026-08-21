@@ -9,7 +9,9 @@ use App\Models\BrokerAccount;
 use App\Models\Candle;
 use App\Models\Signal;
 use App\Models\Strategy;
+use App\Models\Trade;
 use App\Models\TradeCommand;
+use App\Models\TradePartial;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -66,7 +68,15 @@ class CandleApiTest extends TestCase
         ]);
 
         $this->strategy = Strategy::where('user_id', $this->user->id)->firstOrFail();
-        $this->strategy->update(['is_active' => true, 'adx_threshold' => 0]);
+        $this->strategy->update([
+            'is_active' => true,
+            'adx_threshold' => 0,
+            // The exit rules have their own tests in TradeManagementTest. Left at their
+            // defaults they would fire on these fixtures' long flat runs and answer a
+            // different question than the one each test here is asking.
+            'exit_on_reversal' => false,
+            'max_holding_bars' => null,
+        ]);
 
         BotHeartbeat::create([
             'user_id' => $this->user->id,
@@ -83,6 +93,27 @@ class CandleApiTest extends TestCase
         ]);
 
         $this->lastBar = Carbon::parse('2026-03-10 13:00:00', 'UTC');
+    }
+
+    private function openTrade(): Trade
+    {
+        return Trade::create([
+            'user_id' => $this->user->id,
+            'strategy_id' => $this->strategy->id,
+            'broker_account_id' => $this->account->id,
+            'mt5_ticket' => 910001,
+            'symbol' => self::SYMBOL,
+            'direction' => 'buy',
+            'initial_lot_size' => 1.00,
+            'remaining_lot_size' => 1.00,
+            'entry_price' => 2000.00,
+            'sl_price' => 1995.00,
+            'tp1_price' => 2003.00,
+            'tp2_price' => 2010.00,
+            'tp3_price' => 2020.00,
+            'status' => 'open',
+            'opened_at' => $this->lastBar->copy()->subDays(1),
+        ]);
     }
 
     private function auth(): array
@@ -311,6 +342,108 @@ class CandleApiTest extends TestCase
 
         $this->assertSame(2, Candle::where('broker_account_id', $this->account->id)->count());
         $this->assertSame(2, Candle::where('broker_account_id', $otherAccount->id)->count());
+    }
+
+    // =====================================================================
+    // TRADE MANAGEMENT
+    // =====================================================================
+
+    /**
+     * A new bar drives position management as well as entries, so a rung reached during
+     * that bar is queued without anything else having to poll for it.
+     */
+    public function test_a_new_bar_manages_open_positions(): void
+    {
+        $trade = $this->openTrade();
+
+        // 60 flat bars at entry, then one that trades up through TP1 at 2003.
+        $closes = array_fill(0, 60, 2000.0);
+        $closes[] = 2003.0;
+
+        $response = $this->push($closes, 'M5');
+
+        $response->assertStatus(201)->assertJsonPath('managed.0.trade_id', $trade->id);
+
+        $command = TradeCommand::where('type', 'close')->firstOrFail();
+        $this->assertSame('tp1', $command->payload['reason']);
+    }
+
+    /**
+     * The wire has carried a `reason` column since the protocol was written and the EA
+     * never read it, so every commanded close was recorded as "manual". The ladder is
+     * only visible in trade_partials if that round trip works.
+     */
+    public function test_a_commanded_rung_is_recorded_as_that_rung(): void
+    {
+        $trade = $this->openTrade();
+
+        $closes = array_fill(0, 60, 2000.0);
+        $closes[] = 2003.0;
+        $this->push($closes, 'M5');
+
+        $command = TradeCommand::where('type', 'close')->firstOrFail();
+        $columns = array_combine(TradeCommand::WIRE_COLUMNS, explode("\t", $command->toWireLine()));
+
+        // The EA reads this column and echoes it back with the fill.
+        $this->assertSame('tp1', $columns['reason']);
+
+        $this->postJson('/api/v1/bot/fills', [
+            'event' => 'partial',
+            'command_id' => $command->id,
+            'ticket' => $trade->mt5_ticket,
+            'deal_ticket' => 777001,
+            'volume' => 0.50,
+            'price' => 2003.00,
+            'pips_profit' => 30,
+            'profit' => 150,
+            'reason' => $columns['reason'],
+        ], $this->auth())->assertStatus(200);
+
+        $this->assertSame('tp1', TradePartial::where('trade_id', $trade->id)->firstOrFail()->close_reason);
+    }
+
+    /**
+     * The EA labels every broker-side take-profit "tp3", because the order always carries
+     * the final rung and the terminal never saw the ladder. When the strategy set no TP3,
+     * that final rung was TP2 - and recording it as TP3 would corrupt exactly the analysis
+     * the ladder exists to support.
+     */
+    public function test_a_broker_take_profit_is_recorded_against_the_real_final_rung(): void
+    {
+        $trade = $this->openTrade();
+        $trade->update(['tp3_price' => null]);
+
+        $this->postJson('/api/v1/bot/fills', [
+            'event' => 'closed',
+            'ticket' => $trade->mt5_ticket,
+            'deal_ticket' => 777002,
+            'volume' => 1.00,
+            'price' => 2010.00,
+            'pips_profit' => 100,
+            'profit' => 1000,
+            'reason' => 'tp3',
+            'closure_note' => 'take profit hit at broker',
+        ], $this->auth())->assertStatus(200);
+
+        $this->assertSame('tp2', TradePartial::where('trade_id', $trade->id)->firstOrFail()->close_reason);
+    }
+
+    public function test_a_broker_take_profit_stays_tp3_when_the_trade_has_one(): void
+    {
+        $trade = $this->openTrade();
+
+        $this->postJson('/api/v1/bot/fills', [
+            'event' => 'closed',
+            'ticket' => $trade->mt5_ticket,
+            'deal_ticket' => 777003,
+            'volume' => 1.00,
+            'price' => 2020.00,
+            'pips_profit' => 200,
+            'profit' => 2000,
+            'reason' => 'tp3',
+        ], $this->auth())->assertStatus(200);
+
+        $this->assertSame('tp3', TradePartial::where('trade_id', $trade->id)->firstOrFail()->close_reason);
     }
 
     // =====================================================================
