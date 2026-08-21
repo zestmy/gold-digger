@@ -34,6 +34,11 @@ class HeartbeatController extends Controller
             'algo_trading_enabled' => ['nullable', 'boolean'],
             'broker_connected' => ['nullable', 'boolean'],
             'resolved_symbol' => ['nullable', 'string', 'max:32'],
+            // Symbol truth. The dashboard cannot derive any of these and must not guess
+            // them - see the migration that adds the columns for what each one decides.
+            'pip_size' => ['nullable', 'numeric', 'gt:0'],
+            'digits' => ['nullable', 'integer', 'min:0', 'max:10'],
+            'pip_value_per_lot' => ['nullable', 'numeric', 'gt:0'],
             'balance' => ['nullable', 'numeric'],
             'equity' => ['nullable', 'numeric'],
             'margin_free' => ['nullable', 'numeric'],
@@ -51,6 +56,9 @@ class HeartbeatController extends Controller
                 'algo_trading_enabled' => $data['algo_trading_enabled'] ?? false,
                 'broker_connected' => $data['broker_connected'] ?? false,
                 'resolved_symbol' => $data['resolved_symbol'] ?? null,
+                'pip_size' => $data['pip_size'] ?? null,
+                'digits' => $data['digits'] ?? null,
+                'pip_value_per_lot' => $data['pip_value_per_lot'] ?? null,
                 'balance' => $data['balance'] ?? null,
                 'equity' => $data['equity'] ?? null,
                 'margin_free' => $data['margin_free'] ?? null,

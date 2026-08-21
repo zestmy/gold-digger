@@ -261,9 +261,20 @@ accept that it means handing a third party your live credentials.
 - [x] Symbol resolution at runtime; the resolved name is reported on every heartbeat and shown
       on the dashboard
 - [x] Pip↔point conversion in the executor, with an explicit `PipSize` input and a warning when inferred
-- [ ] Position sizing from `bot_settings.risk_percentage` — the EA executes the volume it is told,
-      and nothing computes that volume yet
-- [ ] Signal generation: nothing enqueues `open` commands except by hand
+- [x] Position sizing from `bot_settings.risk_percentage` — `PositionSizer`, from the stop
+      distance and the `pip_value_per_lot` the terminal reports
+- [x] Signal generation: `candles` + `StrategyEvaluator` + `SignalGenerator`. See
+      `SIGNAL_GENERATION.md`
+
+### Phase 2.3b — Trade management *(not started)*
+
+The entry side is complete; nothing manages a position once it is open.
+
+- [ ] Partial closes at TP1/TP2 per `tp1_close_pct` / `tp2_close_pct`. Until this exists the
+      order carries the *final* target and the whole position runs to it or to the stop
+- [ ] `exit_on_reversal` — close when the EMAs cross back
+- [ ] `max_holding_bars` — forced exit after N bars
+- [ ] Move the stop to break-even after TP1
 
 ### Phase 2.4 — Reconciliation
 
@@ -276,7 +287,10 @@ accept that it means handing a third party your live credentials.
 
 - [x] Kill switch honouring `bot_settings.is_active`, checked in the EA before every entry
 - [x] Demo-only guard: the EA refuses to start on a live account unless `DemoOnly` is turned off
-- [ ] `max_daily_loss_percentage` and `max_concurrent_trades` enforced in the executor, not just stored
+- [x] `max_daily_loss_percentage` and `max_concurrent_trades` enforced at signal generation,
+      with the refusal recorded as a `skip_reason`
+- [ ] The same two enforced in the *executor* as well — a command queued by hand still
+      bypasses both, and the EA is the last line before the broker
 - [ ] Alert on heartbeat loss (Telegram/email) — a silently dead bot with open positions is the real risk
 
 ### Deferred

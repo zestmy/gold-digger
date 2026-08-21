@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Bot\CandleController;
 use App\Http\Controllers\Api\Bot\CommandController;
 use App\Http\Controllers\Api\Bot\FillController;
 use App\Http\Controllers\Api\Bot\HeartbeatController;
@@ -32,6 +33,10 @@ Route::prefix('v1/bot')->middleware('bot.auth')->group(function () {
 
     // Liveness plus the kill-switch state the executor must honour.
     Route::post('heartbeat', [HeartbeatController::class, 'store'])->name('api.bot.heartbeat');
+
+    // Push closed bars. A genuinely new bar is what triggers signal generation, so this
+    // is the entry point of the strategy layer as well as a data endpoint.
+    Route::post('candles', [CandleController::class, 'store'])->name('api.bot.candles.store');
 
     // Push executor logs into bot_logs so /logs shows them.
     Route::post('logs', [LogController::class, 'store'])->name('api.bot.logs.store');

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Bot;
 
 use App\Http\Controllers\Controller;
 use App\Models\BotToken;
+use App\Models\Signal;
 use App\Models\Strategy;
 use App\Models\Trade;
 use App\Models\TradeCommand;
@@ -123,6 +124,19 @@ class FillController extends Controller
 
         // Link the command to the trade it produced, so /logs can trace intent to fill.
         $command?->update(['trade_id' => $trade->id]);
+
+        // Close the loop on the signal that asked for this position.
+        //
+        // SignalGenerator deliberately leaves was_executed false when it enqueues: a
+        // queued command is an intention, and it can still expire or be rejected. The
+        // broker confirming a fill is the first moment the signal has actually been
+        // traded, so that is where the flag is set and the trade linked.
+        if (isset($payload['signal_id'])) {
+            Signal::where('id', $payload['signal_id'])->update([
+                'was_executed' => true,
+                'resulting_trade_id' => $trade->id,
+            ]);
+        }
 
         return response()->json(['trade_id' => $trade->id, 'status' => $trade->status], 201);
     }

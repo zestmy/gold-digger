@@ -53,6 +53,17 @@ input long     MagicNumber   = 20240101;     // Identifies this EA's positions
 input int      Deviation     = 20;           // Max slippage in points (gold needs 20-30)
 input int      MaxRetries    = 3;            // Attempts on requote / price-changed
 
+input group             "Strategy data"
+//--- Closed bars are pushed to the dashboard, which computes the indicators and
+//--- decides whether to enter. The series has to come from this terminal: an ATR
+//--- taken from some other vendor's gold feed would size stops against prices this
+//--- broker never quoted.
+input bool     PushCandles   = true;         // Send closed bars so the dashboard can generate signals
+input ENUM_TIMEFRAMES EntryTimeframe = PERIOD_M5; // Must match the strategy's entry timeframe
+input ENUM_TIMEFRAMES TrendTimeframe = PERIOD_H1; // Must match the strategy's trend timeframe
+input int      HistoryBars   = 300;          // Bars sent on first push (indicator warm-up)
+input int      WindowBars    = 5;            // Bars re-sent per new bar, so a dropped push self-heals
+
 input group             "Safety"
 input bool     DryRun        = false;        // Log commands without executing them
 input bool     DemoOnly      = true;         // Refuse to run on a live account
@@ -64,6 +75,12 @@ CGDExecutor  g_exec;
 bool         g_ready            = false;   // OnInit completed successfully
 bool         g_trading_enabled  = false;   // mirrors bot_settings.is_active
 datetime     g_last_warned      = 0;       // rate-limits the repeated-warning spam
+
+//--- Newest closed bar already pushed, per series. Zero until the first push.
+datetime     g_last_entry_bar   = 0;
+datetime     g_last_trend_bar   = 0;
+bool         g_entry_seeded     = false;
+bool         g_trend_seeded     = false;
 
 //--- Fill reports are queued here by OnTradeTransaction and flushed by OnTimer.
 //--- WebRequest is synchronous: calling it inside a trade-transaction handler
@@ -234,6 +251,172 @@ void GDReportResult(const long command_id, const bool ok, const uint retcode,
   }
 
 //+------------------------------------------------------------------+
+//| Account-currency value of a one-pip move on one lot.              |
+//|                                                                   |
+//| This is the whole of position sizing, and the dashboard cannot    |
+//| work it out: it depends on contract size, tick value and the      |
+//| deposit currency, all of which live here. Reported as null when   |
+//| the symbol does not supply them, because a wrong value does not   |
+//| fail loudly - it silently trades the wrong size.                  |
+//+------------------------------------------------------------------+
+double GDPipValuePerLot(void)
+  {
+   const string sym = g_exec.Symbol();
+
+   const double tick_value = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_VALUE);
+   const double tick_size  = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE);
+
+   if(tick_value <= 0.0 || tick_size <= 0.0 || g_exec.PipSize() <= 0.0)
+      return 0.0;
+
+   return tick_value * (g_exec.PipSize() / tick_size);
+  }
+
+//+------------------------------------------------------------------+
+//| Timeframe as the dashboard names it: PERIOD_M5 -> "M5".           |
+//+------------------------------------------------------------------+
+string GDTimeframeName(const ENUM_TIMEFRAMES tf)
+  {
+   string name = EnumToString(tf);
+   StringReplace(name, "PERIOD_", "");
+   return name;
+  }
+
+//+------------------------------------------------------------------+
+//| Convert a server timestamp to UTC.                                |
+//|                                                                   |
+//| iTime() returns broker-server time, which for most retail brokers |
+//| is UTC+2 or UTC+3 and shifts with the broker's own daylight       |
+//| saving. Sent unconverted, every bar would be filed under an hour  |
+//| it did not happen in, and the dashboard's session filter would    |
+//| gate London against the wrong window.                             |
+//+------------------------------------------------------------------+
+long GDServerToUtc(const datetime server_time)
+  {
+   datetime server_now = TimeTradeServer();
+   if(server_now == 0)
+      server_now = TimeCurrent();
+
+   const datetime gmt_now = TimeGMT();
+
+   //--- Without both clocks there is no offset to apply. Sending the raw server
+   //--- time would be a silent hour-scale error, so send nothing instead.
+   if(server_now == 0 || gmt_now == 0)
+      return 0;
+
+   return (long)server_time - ((long)server_now - (long)gmt_now);
+  }
+
+//+------------------------------------------------------------------+
+//| Push closed bars of one series to the dashboard.                  |
+//|                                                                   |
+//| Index 1 is the newest *closed* bar; index 0 is still forming and  |
+//| is deliberately never sent. A forming bar's high, low and close   |
+//| all still move, so an EMA cross computed on one can appear and    |
+//| vanish inside the same bar - an entry the completed bar never     |
+//| justified.                                                        |
+//+------------------------------------------------------------------+
+bool GDPushCandles(const ENUM_TIMEFRAMES tf, const int count)
+  {
+   if(count < 1)
+      return false;
+
+   MqlRates rates[];
+   ArraySetAsSeries(rates, false);
+
+   const int copied = CopyRates(g_exec.Symbol(), tf, 1, count, rates);
+
+   if(copied <= 0)
+     {
+      PrintFormat("[GD] CopyRates(%s, %s) returned %d - history may still be loading.",
+                  g_exec.Symbol(), GDTimeframeName(tf), copied);
+      return false;
+     }
+
+   const int digits = g_exec.Digits();
+   string bars = "";
+
+   for(int i = 0; i < copied; i++)
+     {
+      const long utc = GDServerToUtc(rates[i].time);
+      if(utc <= 0)
+         continue;
+
+      if(bars != "")
+         bars += ",";
+
+      //--- Every numeric goes through IntegerToString/DoubleToString rather than a
+      //--- width specifier: this builds JSON, and a locale-formatted double or a
+      //--- mis-sized integer specifier would produce a body the dashboard rejects
+      //--- wholesale rather than a value that is merely slightly wrong.
+      bars += StringFormat(
+         "{\"time\":%s,\"open\":%s,\"high\":%s,\"low\":%s,\"close\":%s,"
+         "\"tick_volume\":%s,\"spread_points\":%s}",
+         IntegerToString(utc),
+         DoubleToString(rates[i].open,  digits),
+         DoubleToString(rates[i].high,  digits),
+         DoubleToString(rates[i].low,   digits),
+         DoubleToString(rates[i].close, digits),
+         IntegerToString((long)rates[i].tick_volume),
+         IntegerToString((long)rates[i].spread));
+     }
+
+   if(bars == "")
+      return false;
+
+   const string body = StringFormat(
+      "{\"symbol\":\"%s\",\"timeframe\":\"%s\",\"source\":\"mql5_ea\",\"bars\":[%s]}",
+      GDJsonEscape(g_exec.Symbol()), GDTimeframeName(tf), bars);
+
+   string response;
+   const int status = GDHttp("POST", "/api/v1/bot/candles", body, "application/json", response);
+
+   return (status >= 200 && status < 300);
+  }
+
+//+------------------------------------------------------------------+
+//| Push one series if its newest closed bar has changed.             |
+//|                                                                   |
+//| The first push carries HistoryBars so the dashboard's indicators  |
+//| can warm up; later ones carry only WindowBars. The overlap is     |
+//| what makes a dropped push self-healing - the dashboard upserts,   |
+//| so re-sending a stored bar costs nothing and fills any gap.       |
+//+------------------------------------------------------------------+
+void GDMaintainSeries(const ENUM_TIMEFRAMES tf, datetime &last_bar, bool &seeded)
+  {
+   const datetime closed = iTime(g_exec.Symbol(), tf, 1);
+
+   if(closed == 0 || closed == last_bar)
+      return;
+
+   const int count = seeded ? WindowBars : HistoryBars;
+
+   //--- Only advance the marker on success, so a failed push is retried on the next
+   //--- timer rather than being silently skipped until the following bar.
+   if(GDPushCandles(tf, count))
+     {
+      last_bar = closed;
+      seeded   = true;
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| Keep both series current.                                         |
+//+------------------------------------------------------------------+
+void GDMaintainCandles(void)
+  {
+   if(!PushCandles)
+      return;
+
+   GDMaintainSeries(EntryTimeframe, g_last_entry_bar, g_entry_seeded);
+
+   //--- The trend series is an input to the next entry bar, not a trigger of its
+   //--- own; the dashboard generates nothing when it arrives.
+   if(TrendTimeframe != EntryTimeframe)
+      GDMaintainSeries(TrendTimeframe, g_last_trend_bar, g_trend_seeded);
+  }
+
+//+------------------------------------------------------------------+
 //| Heartbeat: report liveness, read back the kill switch.            |
 //+------------------------------------------------------------------+
 void GDHeartbeat(void)
@@ -244,13 +427,26 @@ void GDHeartbeat(void)
                   && (MQLInfoInteger(MQL_TRADE_ALLOWED) != 0);
    const bool connected = (TerminalInfoInteger(TERMINAL_CONNECTED) != 0);
 
+   //--- Symbol truth. The dashboard needs pip size to turn the strategy's pip-based
+   //--- targets into price levels, and pip value to size a position at all. Both are
+   //--- sent as null rather than zero when unknown: the dashboard then records the
+   //--- signal unexecuted instead of trading a size derived from a guess.
+   const double pip_value = GDPipValuePerLot();
+
+   const string pip_size_json  = (g_exec.PipSize() > 0.0)
+                                 ? DoubleToString(g_exec.PipSize(), 5) : "null";
+   const string pip_value_json = (pip_value > 0.0)
+                                 ? DoubleToString(pip_value, 5) : "null";
+
    const string body = StringFormat(
       "{\"source\":\"mql5_ea\",\"version\":\"%s\",\"terminal_build\":%d,"
       "\"algo_trading_enabled\":%s,\"broker_connected\":%s,\"resolved_symbol\":\"%s\","
+      "\"pip_size\":%s,\"digits\":%d,\"pip_value_per_lot\":%s,"
       "\"balance\":%s,\"equity\":%s,\"margin_free\":%s,\"open_positions\":%d}",
       GD_EA_VERSION, (int)TerminalInfoInteger(TERMINAL_BUILD),
       (algo ? "true" : "false"), (connected ? "true" : "false"),
       GDJsonEscape(g_exec.Symbol()),
+      pip_size_json, g_exec.Digits(), pip_value_json,
       DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2),
       DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2),
       DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_FREE), 2),
@@ -478,6 +674,41 @@ int OnInit(void)
       Print("[GD] WARNING: Algo Trading is OFF in the terminal. Orders will return 10027 "
             "until you click the Algo Trading button.");
 
+   //--- The dashboard rejects a push of more than 1000 bars outright, and a first push
+   //--- shorter than the indicator warm-up produces no signals at all while looking
+   //--- like it is working. Both are cheaper to catch here than to diagnose later.
+   if(PushCandles)
+     {
+      if(HistoryBars < 100 || HistoryBars > 1000)
+        {
+         Print("[GD] HistoryBars must be between 100 and 1000. "
+               "Below 100 the dashboard's ADX and EMA never warm up; above 1000 the push is refused.");
+         return INIT_PARAMETERS_INCORRECT;
+        }
+
+      if(WindowBars < 2 || WindowBars > HistoryBars)
+        {
+         Print("[GD] WindowBars must be at least 2 and no larger than HistoryBars.");
+         return INIT_PARAMETERS_INCORRECT;
+        }
+
+      PrintFormat("[GD] Candle push on: %s entry, %s trend (%d bars first, %d per bar after). "
+                  "These must match the strategy's timeframes on the dashboard.",
+                  GDTimeframeName(EntryTimeframe), GDTimeframeName(TrendTimeframe),
+                  HistoryBars, WindowBars);
+
+      const double pip_value = GDPipValuePerLot();
+
+      //--- Without this the dashboard cannot size a position and will record every
+      //--- signal as lot_size_unavailable, which looks like the strategy never firing.
+      if(pip_value <= 0.0)
+         Print("[GD] WARNING: this symbol reports no tick value, so pip value per lot is unknown. "
+               "The dashboard will refuse to size positions rather than guess.");
+      else
+         PrintFormat("[GD] Pip value per lot: %s (pip size %s)",
+                     DoubleToString(pip_value, 5), DoubleToString(g_exec.PipSize(), 5));
+     }
+
    EventSetTimer(PollSeconds > 0 ? PollSeconds : 5);
    g_ready = true;
 
@@ -519,6 +750,17 @@ void OnTimer(void)
    //--- Report before claiming: never take on new work while the record of
    //--- already-executed work is still sitting in the buffer.
    GDFlushReports();
+
+   //--- Push bars before polling. A newly closed bar makes the dashboard evaluate the
+   //--- strategy and, if it enters, queue the command inside that same request - so
+   //--- the poll below claims it on this tick instead of waiting for the next one.
+   //---
+   //--- Deliberately above the Algo Trading check: bars are data, not trading. A
+   //--- terminal with the button off should still keep the series current and still
+   //--- record what the strategy would have done. The dashboard sees the same flag on
+   //--- the heartbeat and skips those signals with "algo_trading_disabled" rather than
+   //--- queueing entries that could only be refused.
+   GDMaintainCandles();
 
    if(TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) == 0 || MQLInfoInteger(MQL_TRADE_ALLOWED) == 0)
      {

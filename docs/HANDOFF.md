@@ -81,14 +81,17 @@ constants. That drift is how this integration breaks silently at 3am.
 
 ## What is NOT built
 
-- **Signal generation.** The EA executes; nothing enqueues `open` commands except by hand.
-  This is the next substantial piece of work.
-- **Position sizing** from `bot_settings.risk_percentage` — the EA executes the volume it
-  is told, and nothing computes that volume.
+> **Update.** Signal generation and position sizing have since been built — see
+> [`SIGNAL_GENERATION.md`](SIGNAL_GENERATION.md). What remains is below.
+
+- **Trade management.** Nothing watches an open position. `tp1_close_pct` /
+  `tp2_close_pct`, `exit_on_reversal` and `max_holding_bars` are all stored and unused, so
+  a position runs to its final target or its stop. This is now the next substantial piece
+  of work.
 - **Reconciliation sweep** — positions opened while the EA was detached are not back-filled
   into `trades`.
-- **`max_concurrent_trades` / `max_daily_loss_percentage`** are returned by the heartbeat
-  but not enforced anywhere.
+- **`max_concurrent_trades` / `max_daily_loss_percentage`** are enforced when a signal is
+  generated, but not in the EA — a command queued by hand still bypasses both.
 
 Full backlog: `MT5_EXECUTION.md` §5.
 
@@ -146,7 +149,12 @@ Two commits sit on top of `main` at `d0f4fe5`:
    start on a live account until it is turned off. Set `PipSize` to `0.10` for gold.
 5. **Confirm** Bot Status shows ONLINE, then queue a Close All (harmless with no positions)
    and check it reaches `done` in `trade_commands`.
-6. Only then start on signal generation.
+6. **Confirm bars are arriving**: `select timeframe, count(*), max(open_time) from candles
+   group by timeframe`. The EA's `EntryTimeframe`/`TrendTimeframe` must match the
+   strategy's, or bars pile up and nothing is ever generated.
+7. Activate the strategy (`strategies.is_active`) and watch `signals`. Early rows will
+   mostly carry a `skip_reason` — that is the point; `SIGNAL_GENERATION.md` lists what
+   each one means.
 
 ---
 

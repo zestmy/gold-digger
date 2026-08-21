@@ -153,8 +153,9 @@ All under `/api/v1/bot`, all requiring `Authorization: Bearer <token>`.
 | `GET` | `/commands` | Claim the next batch. Atomically marks them `claimed` |
 | `POST` | `/commands/{id}/result` | Report retcode, ticket, fill price, or the failure |
 | `POST` | `/fills` | Record an open, partial close, or full close |
-| `POST` | `/heartbeat` | Liveness + account snapshot; returns the kill-switch state |
+| `POST` | `/heartbeat` | Liveness, account snapshot and symbol specification; returns the kill-switch state |
 | `POST` | `/logs` | Write into `bot_logs`, shown on `/logs` |
+| `POST` | `/candles` | Push closed bars. A genuinely new bar triggers signal generation |
 
 ### The kill switch
 
@@ -165,6 +166,53 @@ have stopped the bot.
 
 Stopping flips the flag *before* queueing the `stop` command. A kill switch that depends
 on a queued message being delivered is not a kill switch.
+
+### Symbol specification
+
+The heartbeat also carries `pip_size`, `digits` and `pip_value_per_lot`, for the same
+reason it carries `resolved_symbol`: only the terminal knows them, and the dashboard must
+not guess.
+
+- **`pip_size`** turns the strategy's pip-based targets into the price levels stored on a
+  signal.
+- **`pip_value_per_lot`** is the whole of position sizing — `SYMBOL_TRADE_TICK_VALUE *
+  (pip_size / SYMBOL_TRADE_TICK_SIZE)`, which depends on contract size and the deposit
+  currency.
+
+Either sent as `null` makes the dashboard record signals unexecuted (`no_symbol_spec` /
+`lot_size_unavailable`) rather than size a position from a hardcoded gold multiplier. A
+wrong value here does not fail loudly — it trades a size nobody chose.
+
+### Candles
+
+The EA pushes closed bars for the entry and trend timeframes so the dashboard can compute
+indicators and decide entries. See [`SIGNAL_GENERATION.md`](SIGNAL_GENERATION.md) for what
+happens to them.
+
+| Input | Default | Meaning |
+|---|---|---|
+| `PushCandles` | `true` | Send closed bars at all |
+| `EntryTimeframe` | `PERIOD_M5` | **Must match** `strategies.timeframe_entry` |
+| `TrendTimeframe` | `PERIOD_H1` | **Must match** `strategies.timeframe_trend` |
+| `HistoryBars` | `300` | Sent on the first push, for indicator warm-up |
+| `WindowBars` | `5` | Re-sent on each new bar, so a dropped push self-heals |
+
+Three things about this are deliberate:
+
+- **Index 1, never index 0.** Only closed bars are sent. A forming bar's high, low and
+  close all still move, so an EMA cross computed on one can appear and vanish inside the
+  same bar — an entry the completed bar never justified.
+- **Times are converted to UTC** with `TimeGMT()` before sending. `iTime()` returns
+  broker-server time, usually UTC+2 or UTC+3; unconverted, every bar would be filed under
+  an hour it did not happen in and the session filter would gate London against the wrong
+  window.
+- **The push happens above the Algo Trading check**, so a terminal with the button off
+  keeps the series current and keeps recording what the strategy would have done. The
+  dashboard sees the same flag on the heartbeat and skips those signals with
+  `algo_trading_disabled` instead of queueing entries that could only be refused.
+
+If the timeframes here disagree with the strategy's, the dashboard stores the bars and
+generates nothing — it only evaluates strategies whose *entry* timeframe just closed a bar.
 
 ---
 
@@ -225,12 +273,15 @@ The Experts tab in the terminal carries the same messages with more detail.
 
 ## Limitations
 
-- **The EA executes; it does not decide.** Signal generation is not implemented — nothing
-  enqueues `open` commands yet except by hand. That is the next piece of work.
+- **The EA executes; it does not decide.** Entries are decided dashboard-side from the
+  bars the EA pushes — see [`SIGNAL_GENERATION.md`](SIGNAL_GENERATION.md).
+- **No partial-ladder management.** The order carries the *final* target, so a position
+  runs to TP3 (or TP2) or the stop. Closing part of it at TP1 and TP2 needs a loop that
+  watches price, and none exists yet.
 - **No reconciliation sweep.** Positions opened while the EA was detached are not
   back-filled into `trades`. See `MT5_EXECUTION.md` §5, Phase 2.4.
-- **`max_concurrent_trades` and `max_daily_loss_percentage` are returned by the heartbeat
-  but not yet enforced** in the EA. Phase 2.5.
+- **`max_concurrent_trades` and `max_daily_loss_percentage` are enforced when a signal is
+  generated, not in the EA.** A command queued by hand still bypasses both.
 - **The EA cannot be compiled or tested in CI.** It needs MetaEditor and a Windows
   terminal. `WireProtocolContractTest` pins the constants both sides share; everything
   else has to be verified on a demo account.
