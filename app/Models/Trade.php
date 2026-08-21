@@ -30,6 +30,7 @@ class Trade extends Model
         'broker_account_id',
         'mt5_ticket',
         'magic_number',
+        'origin',
         'symbol',
         'direction',
         'initial_lot_size',

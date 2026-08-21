@@ -64,6 +64,14 @@ input ENUM_TIMEFRAMES TrendTimeframe = PERIOD_H1; // Must match the strategy's t
 input int      HistoryBars   = 300;          // Bars sent on first push (indicator warm-up)
 input int      WindowBars    = 5;            // Bars re-sent per new bar, so a dropped push self-heals
 
+input group             "Reconciliation"
+//--- The dashboard only ever learns about positions it was told about. A snapshot of
+//--- what the terminal actually holds is what corrects `trades` after anything was
+//--- missed - a position opened by hand, or closed while nothing was running.
+input bool     Reconcile        = true;   // Report open positions so the dashboard can correct itself
+input int      ReconcileMinutes = 15;     // Minutes between snapshots
+input int      ReplayHistoryDays = 3;     // On attach, re-report closes from this many days back
+
 input group             "Safety"
 input bool     DryRun        = false;        // Log commands without executing them
 input bool     DemoOnly      = true;         // Refuse to run on a live account
@@ -91,6 +99,9 @@ bool         g_trend_seeded     = false;
 #define GD_MAX_CLOSE_REASONS 32
 ulong        g_close_ticket[];
 string       g_close_reason[];
+
+//--- When the last position snapshot was sent.
+datetime     g_last_reconcile   = 0;
 
 //--- Fill reports are queued here by OnTradeTransaction and flushed by OnTimer.
 //--- WebRequest is synchronous: calling it inside a trade-transaction handler
@@ -497,6 +508,139 @@ void GDMaintainCandles(void)
   }
 
 //+------------------------------------------------------------------+
+//| Report every position this EA owns, so the dashboard can correct  |
+//| its own table.                                                    |
+//|                                                                   |
+//| A snapshot rather than events, because events are precisely what  |
+//| goes missing: a position opened while the API was unreachable, or |
+//| closed while the terminal was shut, produced no report anyone      |
+//| received. Whatever was missed, the next snapshot states outright.  |
+//|                                                                   |
+//| The magic number travels with it and is the whole of its scope.   |
+//| Without one the dashboard adopts what the list names but concludes|
+//| nothing from absence - otherwise a second EA on the same account  |
+//| would have its positions closed by this one's report.             |
+//+------------------------------------------------------------------+
+void GDReportPositions(void)
+  {
+   string items = "";
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      const ulong ticket = PositionGetTicket(i);
+      if(ticket == 0)
+         continue;
+
+      if(PositionGetInteger(POSITION_MAGIC) != MagicNumber)
+         continue;
+
+      const bool is_buy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+      const int  digits = (int)SymbolInfoInteger(PositionGetString(POSITION_SYMBOL), SYMBOL_DIGITS);
+
+      if(items != "")
+         items += ",";
+
+      items += StringFormat(
+         "{\"ticket\":%s,\"symbol\":\"%s\",\"direction\":\"%s\",\"volume\":%s,"
+         "\"entry_price\":%s,\"sl\":%s,\"tp\":%s,\"profit\":%s,\"opened_at\":%s}",
+         IntegerToString((long)ticket),
+         GDJsonEscape(PositionGetString(POSITION_SYMBOL)),
+         (is_buy ? "buy" : "sell"),
+         DoubleToString(PositionGetDouble(POSITION_VOLUME), 2),
+         DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN), digits),
+         DoubleToString(PositionGetDouble(POSITION_SL), digits),
+         DoubleToString(PositionGetDouble(POSITION_TP), digits),
+         DoubleToString(PositionGetDouble(POSITION_PROFIT), 2),
+         IntegerToString(GDServerToUtc((datetime)PositionGetInteger(POSITION_TIME))));
+     }
+
+   const string body = StringFormat("{\"magic\":%s,\"positions\":[%s]}",
+                                    IntegerToString(MagicNumber), items);
+
+   string response;
+   GDHttp("POST", "/api/v1/bot/positions", body, "application/json", response);
+  }
+
+//+------------------------------------------------------------------+
+//| Re-report closing deals from the recent past.                     |
+//|                                                                   |
+//| A stop or target that fired while the terminal was shut raised no |
+//| OnTradeTransaction anybody saw, so the dashboard still shows the  |
+//| position open with no P&L. Replaying history on attach fills that |
+//| in through the ordinary /fills path, which keys on the deal ticket|
+//| and therefore ignores anything it already has.                    |
+//|                                                                   |
+//| Only closing deals are replayed. An opening deal would create a   |
+//| trade row with no strategy and no levels, which is what the       |
+//| position snapshot does properly.                                  |
+//+------------------------------------------------------------------+
+void GDReplayClosedDeals(const int days)
+  {
+   if(days <= 0)
+      return;
+
+   const datetime to   = TimeCurrent();
+   const datetime from = to - (days * 86400);
+
+   if(!HistorySelect(from, to))
+     {
+      Print("[GD] History could not be selected; skipping the replay of past closes.");
+      return;
+     }
+
+   const int total = HistoryDealsTotal();
+   int replayed = 0;
+
+   for(int i = 0; i < total; i++)
+     {
+      const ulong deal = HistoryDealGetTicket(i);
+      if(deal == 0)
+         continue;
+
+      if(HistoryDealGetInteger(deal, DEAL_MAGIC) != MagicNumber)
+         continue;
+
+      const ENUM_DEAL_ENTRY entry = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(deal, DEAL_ENTRY);
+      if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_OUT_BY)
+         continue;
+
+      const long   position_id = HistoryDealGetInteger(deal, DEAL_POSITION_ID);
+      const double price       = HistoryDealGetDouble(deal, DEAL_PRICE);
+      const double volume      = HistoryDealGetDouble(deal, DEAL_VOLUME);
+      const double profit      = HistoryDealGetDouble(deal, DEAL_PROFIT);
+      const double commission  = HistoryDealGetDouble(deal, DEAL_COMMISSION);
+      const double swap        = HistoryDealGetDouble(deal, DEAL_SWAP);
+
+      const ENUM_DEAL_REASON why = (ENUM_DEAL_REASON)HistoryDealGetInteger(deal, DEAL_REASON);
+
+      string reason_enum = "manual";
+      if(why == DEAL_REASON_SL || why == DEAL_REASON_SO) reason_enum = "sl";
+      else if(why == DEAL_REASON_TP)                     reason_enum = "tp3";
+
+      //--- Pips need the entry price, and the entry deal is in this same selection.
+      //--- Left at zero when it cannot be found: a wrong pip figure is worse than an
+      //--- absent one, and the dashboard treats this as a historical correction.
+      double pips = 0.0;
+
+      GDQueueReport(StringFormat(
+         "{\"event\":\"closed\",\"ticket\":%s,\"deal_ticket\":%s,\"volume\":%s,"
+         "\"price\":%s,\"pips_profit\":%s,\"profit\":%s,\"commission\":%s,\"swap\":%s,"
+         "\"reason\":\"%s\",\"closure_note\":\"replayed from history on attach\"}",
+         IntegerToString(position_id), IntegerToString((long)deal),
+         DoubleToString(volume, 2), DoubleToString(price, g_exec.Digits()),
+         DoubleToString(pips, 2), DoubleToString(profit, 2),
+         DoubleToString(commission, 2), DoubleToString(swap, 2),
+         reason_enum));
+
+      replayed++;
+     }
+
+   if(replayed > 0)
+      GDLog("info", StringFormat("Replaying %d closing deal(s) from the last %d day(s); "
+                                 "any the dashboard already has are ignored.", replayed, days));
+  }
+
+//+------------------------------------------------------------------+
 //| Heartbeat: report liveness, read back the kill switch.            |
 //+------------------------------------------------------------------+
 void GDHeartbeat(void)
@@ -828,8 +972,27 @@ int OnInit(void)
                      DoubleToString(pip_value, 5), DoubleToString(g_exec.PipSize(), 5));
      }
 
+   if(Reconcile && ReconcileMinutes < 1)
+     {
+      Print("[GD] ReconcileMinutes must be at least 1.");
+      return INIT_PARAMETERS_INCORRECT;
+     }
+
    EventSetTimer(PollSeconds > 0 ? PollSeconds : 5);
    g_ready = true;
+
+   if(Reconcile)
+     {
+      //--- Attach is the moment the dashboard is most likely to be wrong: whatever
+      //--- happened while this was detached happened unobserved. Replay the closes
+      //--- first, so a position that has already gone is settled before the snapshot
+      //--- reports it missing and the dashboard has to close it without figures.
+      GDReplayClosedDeals(ReplayHistoryDays);
+      GDFlushReports();
+
+      g_last_reconcile = TimeCurrent();
+      GDReportPositions();
+     }
 
    GDLog("info", StringFormat("EA %s attached on %s (terminal build %d)",
                               GD_EA_VERSION, g_exec.Symbol(),
@@ -880,6 +1043,14 @@ void OnTimer(void)
    //--- the heartbeat and skips those signals with "algo_trading_disabled" rather than
    //--- queueing entries that could only be refused.
    GDMaintainCandles();
+
+   //--- A correction, not a feed: /fills still reports every event as it happens, and
+   //--- this only catches what no event covered.
+   if(Reconcile && (TimeCurrent() - g_last_reconcile) >= (ReconcileMinutes * 60))
+     {
+      g_last_reconcile = TimeCurrent();
+      GDReportPositions();
+     }
 
    if(TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) == 0 || MQLInfoInteger(MQL_TRADE_ALLOWED) == 0)
      {

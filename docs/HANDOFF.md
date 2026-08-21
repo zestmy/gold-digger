@@ -81,17 +81,17 @@ constants. That drift is how this integration breaks silently at 3am.
 
 ## What is NOT built
 
-> **Update.** Signal generation, position sizing and trade management have since been
-> built — see [`SIGNAL_GENERATION.md`](SIGNAL_GENERATION.md) and
-> [`TRADE_MANAGEMENT.md`](TRADE_MANAGEMENT.md). What remains is below.
+> **Update.** Signal generation, position sizing, trade management and reconciliation
+> have since been built — see [`SIGNAL_GENERATION.md`](SIGNAL_GENERATION.md),
+> [`TRADE_MANAGEMENT.md`](TRADE_MANAGEMENT.md) and
+> [`RECONCILIATION.md`](RECONCILIATION.md). What remains is below.
 
 - **Trailing stops and intrabar exits.** The stop moves once, to break-even; nothing
   trails it. Ladder rungs are detected on bar close and filled at market, so a spike that
   retraces fills worse than the rung. See `TRADE_MANAGEMENT.md`.
-- **Reconciliation sweep** — positions opened while the EA was detached are not back-filled
-  into `trades`.
-- **`max_concurrent_trades` / `max_daily_loss_percentage`** are enforced when a signal is
-  generated, but not in the EA — a command queued by hand still bypasses both.
+- **Promoting an adopted position.** Reconciliation records positions it finds on the
+  terminal, but they are never managed by a strategy and there is no way to say otherwise.
+- **The entry deal of an adopted position** is not backfilled, so its costs are unknown.
 
 Full backlog: `MT5_EXECUTION.md` §5.
 

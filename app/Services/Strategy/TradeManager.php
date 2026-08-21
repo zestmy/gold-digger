@@ -67,6 +67,11 @@ final class TradeManager
     public function manage(Strategy $strategy, ?int $brokerAccountId = null): array
     {
         $trades = Trade::where('strategy_id', $strategy->id)
+            // Only positions this system opened. Reconciliation attributes adopted
+            // positions to a strategy because strategy_id is NOT NULL, but they belong to
+            // no strategy - and closing a position somebody opened by hand because
+            // max_holding_bars elapsed is the worst thing this class could do.
+            ->where('origin', 'bot')
             ->whereIn('status', ['open', 'partially_closed'])
             ->get();
 

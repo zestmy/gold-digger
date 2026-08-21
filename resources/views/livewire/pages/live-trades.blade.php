@@ -83,10 +83,25 @@
                     </thead>
                     <tbody class="divide-y divide-gray-700">
                         @foreach($trades as $trade)
-                            <tr class="hover:bg-gray-700/50 transition-colors">
+                            @php
+                                // Which rungs the broker has actually confirmed. Read from
+                                // trade_partials rather than from prices, because a level
+                                // being touched is not the same as a fill.
+                                $filled = $trade->partials->pluck('close_reason')->all();
+                                $closing = in_array($trade->id, $pendingCloses, true);
+                            @endphp
+                            <tr class="hover:bg-gray-700/50 transition-colors {{ $closing ? 'opacity-60' : '' }}">
                                 <td class="whitespace-nowrap px-4 py-3 text-sm font-medium text-white">
                                     {{ $trade->symbol }}
                                     <span class="block text-xs text-gray-500">#{{ $trade->mt5_ticket }}</span>
+                                    @if($trade->origin === 'adopted')
+                                        {{-- Found on the terminal rather than opened from a signal. No strategy
+                                             manages it: no ladder, no reversal exit, no time exit. --}}
+                                        <span class="mt-1 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-purple-500/20 text-purple-300"
+                                              title="Adopted by reconciliation. Not managed by any strategy - no take-profit ladder and no automatic exit.">
+                                            ADOPTED &middot; UNMANAGED
+                                        </span>
+                                    @endif
                                 </td>
                                 <td class="whitespace-nowrap px-4 py-3 text-sm">
                                     <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {{ $trade->direction === 'buy' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400' }}">
@@ -96,21 +111,50 @@
                                 <td class="whitespace-nowrap px-4 py-3 text-sm text-gray-300">
                                     {{ $trade->remaining_lot_size }}
                                     @if($trade->remaining_lot_size != $trade->initial_lot_size)
-                                        <span class="text-xs text-gray-500">({{ $trade->initial_lot_size }})</span>
+                                        <span class="text-xs text-gray-500">of {{ $trade->initial_lot_size }}</span>
                                     @endif
                                 </td>
                                 <td class="whitespace-nowrap px-4 py-3 text-sm text-white">
                                     {{ number_format($trade->entry_price, 2) }}
                                 </td>
-                                <td class="whitespace-nowrap px-4 py-3 text-sm text-red-400">
-                                    {{ number_format($trade->sl_price, 2) }}
+                                <td class="whitespace-nowrap px-4 py-3 text-sm">
+                                    @if($trade->sl_price === null)
+                                        {{-- An adopted position may genuinely have no stop. Showing 0.00 here
+                                             would read as a stop at zero. --}}
+                                        <span class="text-yellow-400" title="This position has no stop loss set at the broker.">none</span>
+                                    @else
+                                        <span class="text-red-400">{{ number_format($trade->sl_price, 2) }}</span>
+                                        @if(in_array('tp1', $filled, true))
+                                            <span class="block text-[10px] text-gray-500">moved to break-even</span>
+                                        @endif
+                                    @endif
                                 </td>
-                                <td class="whitespace-nowrap px-4 py-3 text-sm text-green-400">
-                                    <span class="text-xs">
-                                        {{ number_format($trade->tp1_price, 2) }} /
-                                        {{ number_format($trade->tp2_price, 2) }} /
-                                        {{ number_format($trade->tp3_price, 2) }}
-                                    </span>
+                                <td class="whitespace-nowrap px-4 py-3 text-sm">
+                                    @if($trade->tp1_price === null && $trade->tp2_price === null && $trade->tp3_price === null)
+                                        <span class="text-gray-500">&mdash;</span>
+                                    @else
+                                        <div class="flex items-center gap-1 text-xs">
+                                            @foreach(['tp1', 'tp2', 'tp3'] as $rung)
+                                                @php $level = $trade->{$rung.'_price'}; @endphp
+                                                @if($level === null)
+                                                    <span class="rounded px-1 py-0.5 bg-gray-700/40 text-gray-600">&ndash;</span>
+                                                @elseif(in_array($rung, $filled, true))
+                                                    {{-- Confirmed by a fill, not merely reached. --}}
+                                                    <span class="rounded px-1 py-0.5 bg-green-500/30 text-green-300 font-medium"
+                                                          title="{{ strtoupper($rung) }} filled">
+                                                        {{ number_format($level, 2) }} &check;
+                                                    </span>
+                                                @else
+                                                    <span class="rounded px-1 py-0.5 bg-gray-700/60 text-green-400/70">{{ number_format($level, 2) }}</span>
+                                                @endif
+                                            @endforeach
+                                        </div>
+                                        @if($trade->origin === 'bot')
+                                            <span class="block text-[10px] text-gray-500 mt-0.5">
+                                                the last target sits on the order; earlier rungs close at market
+                                            </span>
+                                        @endif
+                                    @endif
                                 </td>
                                 <td class="whitespace-nowrap px-4 py-3 text-sm text-gray-300">
                                     {{ $trade->opened_at?->format('M d, H:i') }}
@@ -120,13 +164,19 @@
                                     ${{ number_format($trade->gross_pnl_money ?? 0, 2) }}
                                 </td>
                                 <td class="whitespace-nowrap px-4 py-3 text-sm text-right">
-                                    <button
-                                        wire:click="closeTrade({{ $trade->id }})"
-                                        wire:confirm="Close this position?"
-                                        class="text-red-400 hover:text-red-300 transition-colors"
-                                    >
-                                        Close
-                                    </button>
+                                    @if($closing)
+                                        {{-- The command is queued but the terminal has not confirmed. The row
+                                             stays until a fill arrives, because until then it is still open. --}}
+                                        <span class="text-xs text-yellow-400" title="A close command is queued and waiting for the terminal.">closing&hellip;</span>
+                                    @else
+                                        <button
+                                            wire:click="closeTrade({{ $trade->id }})"
+                                            wire:confirm="Queue a close for this position? It clears once the terminal confirms."
+                                            class="text-red-400 hover:text-red-300 transition-colors"
+                                        >
+                                            Close
+                                        </button>
+                                    @endif
                                 </td>
                             </tr>
                         @endforeach

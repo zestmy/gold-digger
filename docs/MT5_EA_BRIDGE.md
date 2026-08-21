@@ -156,6 +156,7 @@ All under `/api/v1/bot`, all requiring `Authorization: Bearer <token>`.
 | `POST` | `/heartbeat` | Liveness, account snapshot and symbol specification; returns the kill-switch state |
 | `POST` | `/logs` | Write into `bot_logs`, shown on `/logs` |
 | `POST` | `/candles` | Push closed bars. A genuinely new bar triggers signal generation |
+| `POST` | `/positions` | Full snapshot of open positions, so `trades` can be corrected |
 
 ### The kill switch
 
@@ -218,6 +219,18 @@ Three things about this are deliberate:
 
 If the timeframes here disagree with the strategy's, the dashboard stores the bars and
 generates nothing — it only evaluates strategies whose *entry* timeframe just closed a bar.
+
+### Reconciliation
+
+| Input | Default | Meaning |
+|---|---|---|
+| `Reconcile` | `true` | Send snapshots of open positions |
+| `ReconcileMinutes` | `15` | Minutes between snapshots |
+| `ReplayHistoryDays` | `3` | How far back to re-report closes when the EA attaches |
+
+On attach the EA replays recent closing deals through `/fills` and then sends a snapshot.
+Only positions carrying `MagicNumber` are reported, and that scope is what lets a missing
+position be treated as closed. See [`RECONCILIATION.md`](RECONCILIATION.md).
 
 ---
 
@@ -284,8 +297,9 @@ The Experts tab in the terminal carries the same messages with more detail.
   target; TP1 and TP2 are noticed when the bar that touched them closes, then closed at
   market. A spike through a rung that retraces inside the same bar fills worse than the
   rung. See [`TRADE_MANAGEMENT.md`](TRADE_MANAGEMENT.md).
-- **No reconciliation sweep.** Positions opened while the EA was detached are not
-  back-filled into `trades`. See `MT5_EXECUTION.md` §5, Phase 2.4.
+- **Reconciliation only sees this EA's magic number.** Positions opened by hand, or by
+  another EA, carry a different magic and are deliberately not reported. See
+  [`RECONCILIATION.md`](RECONCILIATION.md).
 - **`max_concurrent_trades` and `max_daily_loss_percentage` are enforced when a signal is
   generated, not in the EA.** A command queued by hand still bypasses both.
 - **The EA cannot be compiled or tested in CI.** It needs MetaEditor and a Windows

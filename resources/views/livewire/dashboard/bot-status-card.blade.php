@@ -25,6 +25,18 @@
             </div>
         @endif
 
+        {{-- A healthy terminal that still cannot produce a signal. Distinct from
+             blockedReason, which is about the terminal itself: here the EA is running
+             fine and the strategy layer is missing an input it cannot invent. --}}
+        @if($dataWarning)
+            <div class="rounded-md bg-amber-900/30 p-3">
+                <p class="text-sm text-amber-200">{{ $dataWarning }}</p>
+                <a href="{{ route('signals') }}" class="mt-1 inline-block text-xs text-yellow-400 hover:text-yellow-300">
+                    See what the strategy decided &rarr;
+                </a>
+            </div>
+        @endif
+
         <!-- Last Heartbeat -->
         <div>
             <span class="text-sm text-gray-500">Last heartbeat:</span>
@@ -45,6 +57,13 @@
                 <span class="ml-2 text-sm text-gray-300">{{ $resolvedSymbol }}</span>
             </div>
         @endif
+
+        {{-- Bars are the input to the whole strategy layer, so their age is as much a
+             liveness signal as the heartbeat itself. --}}
+        <div>
+            <span class="text-sm text-gray-500">Newest bar:</span>
+            <span class="ml-2 text-sm text-gray-300">{{ $feedAge ?? 'None received' }}</span>
+        </div>
 
         <div>
             <span class="text-sm text-gray-500">Open positions:</span>

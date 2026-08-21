@@ -282,12 +282,18 @@ accept that it means handing a third party your live credentials.
       a spike through TP1 that retraces fills worse than TP1. The exact fix is one position
       per rung with its own broker-side TP, at the cost of tripling position count
 
-### Phase 2.4 — Reconciliation
+### Phase 2.4 - Reconciliation
 
-- [ ] Periodic sync of open MT5 positions into `trades` (magic number filter)
-- [ ] Detect broker-side closes (SL/TP hit while the bot was down) and backfill `trade_partials`
-- [ ] Sync balance/equity into `broker_accounts.last_balance` / `last_equity` / `last_synced_at` —
-      the columns exist and are never written
+- [x] Periodic sync of open MT5 positions into `trades` (magic number filter) -
+      `PositionReconciler`, driven by `POST /api/v1/bot/positions`. See `RECONCILIATION.md`
+- [x] Detect broker-side closes (SL/TP hit while the bot was down) and backfill
+      `trade_partials` - the EA replays recent closing deals through `/fills` on attach,
+      which is idempotent on the deal ticket
+- [x] Sync balance/equity into `broker_accounts.last_balance` / `last_equity` /
+      `last_synced_at` - written from every heartbeat
+- [ ] Backfill the *entry* deal for an adopted position. The snapshot records what is open
+      now; the deal that opened it, and its costs, are not recovered
+- [ ] Let a user promote an adopted position to a managed one from the UI
 
 ### Phase 2.5 — Safety before any live capital
 

@@ -16,7 +16,8 @@ Entries are decided here, not in the terminal: the EA pushes closed bars, the da
 computes the indicators and queues the order. See
 [`docs/SIGNAL_GENERATION.md`](docs/SIGNAL_GENERATION.md), and
 [`docs/TRADE_MANAGEMENT.md`](docs/TRADE_MANAGEMENT.md) for the take-profit ladder, the
-reversal and time exits, and the break-even stop.
+reversal and time exits, and the break-even stop. Positions the dashboard did not open
+are picked up by [`docs/RECONCILIATION.md`](docs/RECONCILIATION.md).
 
 > **Picking this work back up?** Start at [`docs/HANDOFF.md`](docs/HANDOFF.md) — what is built,
 > what is deliberately not, what has never been verified, and the next actions in order.
@@ -139,6 +140,7 @@ php artisan bot:token you@example.com --name="Windows VPS" --account=1
 | `POST` | `/api/v1/bot/heartbeat` | Liveness, account snapshot, symbol spec + kill-switch state |
 | `POST` | `/api/v1/bot/logs` | Write to `bot_logs` |
 | `POST` | `/api/v1/bot/candles` | Push closed bars; a new bar triggers signal generation |
+| `POST` | `/api/v1/bot/positions` | Snapshot of open positions, so `trades` can be corrected |
 
 Protocol details: [`docs/MT5_EA_BRIDGE.md`](docs/MT5_EA_BRIDGE.md).
 

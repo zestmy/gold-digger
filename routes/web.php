@@ -6,6 +6,7 @@ use App\Livewire\Pages\BrokerAccounts;
 use App\Livewire\Pages\Dashboard;
 use App\Livewire\Pages\LiveTrades;
 use App\Livewire\Pages\Settings;
+use App\Livewire\Pages\Signals;
 use App\Livewire\Pages\Strategies;
 use App\Livewire\Pages\TradeHistory;
 use Illuminate\Support\Facades\Route;
@@ -42,6 +43,9 @@ Route::middleware(['auth'])->group(function () {
     // Trades
     Route::get('/trades/live', LiveTrades::class)->name('trades.live');
     Route::get('/trades/history', TradeHistory::class)->name('trades.history');
+
+    // Every decision the strategy layer made, including the refusals.
+    Route::get('/signals', Signals::class)->name('signals');
 
     // Configuration
     Route::get('/strategies', Strategies::class)->name('strategies');
