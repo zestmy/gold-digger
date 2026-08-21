@@ -138,6 +138,11 @@ class DashboardControlsTest extends TestCase
 
         Livewire::test(BotStatusCard::class)
             ->assertSet('isOnline', false)
-            ->assertSee('No heartbeat');
+            // A row exists, so something did check in once. Saying "no heartbeat" here sent
+            // the reader looking for an EA that was never started, when what happened is
+            // that a running one went quiet - and the card says "Last heartbeat: 9 minutes
+            // ago" two lines below, flatly contradicting it.
+            ->assertSee('stopped reporting')
+            ->assertDontSee('No heartbeat');
     }
 }

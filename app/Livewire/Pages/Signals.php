@@ -79,6 +79,7 @@ class Signals extends Component
         $byReason = (clone $base)
             ->selectRaw('skip_reason, count(*) as total')
             ->groupBy('skip_reason')
+            ->orderByDesc('total')
             ->pluck('total', 'skip_reason')
             ->all();
 
@@ -89,7 +90,6 @@ class Signals extends Component
         return view('livewire.pages.signals', [
             'signals' => $signals,
             'byReason' => $byReason,
-            'takenCount' => $byReason[''] ?? ($byReason[null] ?? 0),
             'total' => array_sum($byReason),
             'heartbeat' => $heartbeat,
             'feed' => $this->feed($heartbeat),

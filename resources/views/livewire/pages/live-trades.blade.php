@@ -18,7 +18,7 @@
         @if($trades->isNotEmpty())
             <button
                 wire:click="closeAllTrades"
-                wire:confirm="Are you sure you want to close ALL open positions?"
+                wire:confirm="Queue a close for every open position? They clear as the terminal confirms each one."
                 class="inline-flex items-center rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500 transition-colors"
             >
                 <svg class="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
@@ -193,8 +193,13 @@
                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/>
             </svg>
             <div class="text-sm text-gray-400">
-                <p class="font-medium text-gray-300">Real-time Updates</p>
-                <p class="mt-1">P&L values are calculated when trades are closed. Live price updates will be available when connected to the Python trading bot.</p>
+                <p class="font-medium text-gray-300">How closing works</p>
+                <p class="mt-1">
+                    Close queues a command for the Expert Advisor, which picks it up on its next poll. A position
+                    stays listed until the terminal confirms the fill &mdash; until then it is still open.
+                    Floating P&amp;L is whatever the terminal last reported, so it refreshes on the executor's
+                    schedule rather than tick by tick.
+                </p>
             </div>
         </div>
     </div>

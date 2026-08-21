@@ -89,7 +89,14 @@ class BotHeartbeat extends Model
     public function blockedReason(): ?string
     {
         if (! $this->isOnline()) {
-            return 'No heartbeat - the terminal or EA is not running.';
+            // A row exists, so something did check in once - the caller handles "never
+            // seen" separately. Saying "no heartbeat" here sends the reader looking for an
+            // EA that was never started, when what actually happened is that a running one
+            // went quiet. When it stopped is the useful part of the answer.
+            $ago = $this->last_seen_at?->diffForHumans() ?? 'at an unknown time';
+
+            return "The executor stopped reporting {$ago}. The terminal or EA is no longer running, "
+                .'or cannot reach this dashboard.';
         }
 
         if (! $this->broker_connected) {
