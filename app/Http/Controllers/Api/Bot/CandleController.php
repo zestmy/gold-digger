@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Bot;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\EvaluateNewBars;
 use App\Models\BotToken;
 use App\Models\Candle;
 use App\Models\Signal;
@@ -156,18 +157,35 @@ class CandleController extends Controller
 
         $signals = [];
         $managed = [];
+        $queued = false;
 
         if ($newBars !== []) {
-            // Positions first. A reversal or timeout exit on this bar should be queued
-            // before the same bar's entry is considered, so the two arrive at the EA in the
-            // order the strategy meant them - out of the old trade, then into the new one.
-            $managed = $this->manage($manager, $token->user_id, $timeframe, $accountId);
-            $signals = $this->evaluate($generator, $token->user_id, $timeframe, $accountId);
+            if (config('trading.queue_evaluation')) {
+                // Store, answer, and let a worker think. The terminal's WebRequest blocks its
+                // event thread for as long as this request takes, so at several symbols or a
+                // faster timeframe the arithmetic stops being free.
+                //
+                // Off by default, because it trades that latency for a worker that has to be
+                // running - see config/trading.php, and the queue_stalled alert that exists
+                // because of it.
+                EvaluateNewBars::dispatch($token->user_id, $timeframe, $accountId);
+                $queued = true;
+            } else {
+                // Positions first. A reversal or timeout exit on this bar should be queued
+                // before the same bar's entry is considered, so the two arrive at the EA in
+                // the order the strategy meant them - out of the old trade, then into the new
+                // one. EvaluateNewBars does the same in the same order.
+                $managed = $this->manage($manager, $token->user_id, $timeframe, $accountId);
+                $signals = $this->evaluate($generator, $token->user_id, $timeframe, $accountId);
+            }
         }
 
         return response()->json([
             'stored' => count($rows),
             'new_bars' => count($newBars),
+            // Empty when evaluation was queued: the answer is not known yet, and reporting an
+            // empty list as though it were the result would read as "no signals".
+            'queued' => $queued,
             'signals' => array_map(static fn ($s) => [
                 'id' => $s->id,
                 'direction' => $s->direction,

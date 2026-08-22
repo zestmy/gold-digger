@@ -11,6 +11,7 @@ use App\Models\Trade;
 use App\Models\TradePartial;
 use App\Models\User;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Health Monitor
@@ -100,6 +101,7 @@ final class HealthMonitor
             $this->algoTradingBlocked($heartbeat, $settings),
             $this->feedStalled($user, $heartbeat, $settings),
             $this->dailyLossLimit($user, $settings, $heartbeat),
+            $this->queueStalled(),
         ] as $condition) {
             if ($condition !== null) {
                 $conditions[] = $condition;
@@ -301,6 +303,73 @@ final class HealthMonitor
                 'opening_balance' => round($opening, 2),
                 'limit_percentage' => $limitPct,
             ],
+        ];
+    }
+
+    /**
+     * Jobs are waiting and nothing is taking them.
+     *
+     * The condition that makes queued evaluation safe to offer at all. With
+     * `trading.queue_evaluation` on, a candle push stores its bars and hands the thinking to a
+     * worker - so a worker that is not running means bars arrive, jobs accumulate, and the bot
+     * stops trading without a single thing looking wrong. The executor is heartbeating, the
+     * feed is flowing, and the signals page simply stays empty.
+     *
+     * Measured on the age of the oldest unclaimed job rather than the depth of the queue: a
+     * hundred jobs drained promptly is a busy system, and one job sitting for an hour is a
+     * dead one.
+     *
+     * Not scoped per user - a stalled worker is an installation-wide fault, and every user on
+     * the box has the same problem. It is attached to whichever user is being swept, which for
+     * a single-operator deployment is the right answer and for a multi-user one would want
+     * revisiting along with everything else in the audit's F1.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function queueStalled(): ?array
+    {
+        if (! config('trading.queue_evaluation')) {
+            return null;
+        }
+
+        // The database queue driver is the one this deployment configures. Anything else
+        // keeps its backlog somewhere this cannot see, so it is not claimed to be healthy -
+        // it is simply not checked.
+        if (config('queue.default') !== 'database') {
+            return null;
+        }
+
+        $oldest = DB::table('jobs')
+            ->where('queue', config('trading.queue', 'strategy'))
+            ->whereNull('reserved_at')
+            ->min('available_at');
+
+        if ($oldest === null) {
+            return null;
+        }
+
+        $waitingFor = now()->timestamp - (int) $oldest;
+        $tolerance = (int) config('trading.queue_stale_after_seconds', 900);
+
+        if ($waitingFor < $tolerance) {
+            return null;
+        }
+
+        $depth = DB::table('jobs')->where('queue', config('trading.queue', 'strategy'))->count();
+
+        return [
+            'key' => 'queue_stalled',
+            'level' => 'critical',
+            'title' => 'Strategy evaluation is queued and nothing is running it',
+            'body' => sprintf(
+                '%d job(s) waiting, the oldest for %d minutes. Bars are arriving and being stored, '
+                .'but no strategy is being evaluated - so no entries and no position management. '
+                .'Start a worker: php artisan queue:work --queue=%s',
+                $depth,
+                (int) round($waitingFor / 60),
+                config('trading.queue', 'strategy'),
+            ),
+            'context' => ['depth' => $depth, 'oldest_wait_seconds' => $waitingFor],
         ];
     }
 
