@@ -455,9 +455,25 @@ bool GDPushCandles(const ENUM_TIMEFRAMES tf, const int count)
    if(bars == "")
       return false;
 
+   //--- The instrument's own numbers travel with the bars they describe, so every symbol
+   //--- with price history also has a specification and the two cannot drift apart. This is
+   //--- what lets the dashboard hold more than one instrument: its heartbeat has room for
+   //--- exactly one symbol's figures, and this does not.
+   const double pip_value = GDPipValuePerLot();
+
+   const string spec = StringFormat(
+      "{\"pip_size\":%s,\"digits\":%d,\"pip_value_per_lot\":%s,"
+      "\"volume_min\":%s,\"volume_step\":%s}",
+      (g_exec.PipSize() > 0.0 ? DoubleToString(g_exec.PipSize(), 5) : "null"),
+      g_exec.Digits(),
+      (pip_value > 0.0 ? DoubleToString(pip_value, 5) : "null"),
+      DoubleToString(g_exec.VolumeMin(), 4),
+      DoubleToString(g_exec.VolumeStep(), 4));
+
    const string body = StringFormat(
-      "{\"symbol\":\"%s\",\"timeframe\":\"%s\",\"source\":\"mql5_ea\",\"bars\":[%s]}",
-      GDJsonEscape(g_exec.Symbol()), GDTimeframeName(tf), bars);
+      "{\"symbol\":\"%s\",\"base_symbol\":\"%s\",\"timeframe\":\"%s\","
+      "\"source\":\"mql5_ea\",\"spec\":%s,\"bars\":[%s]}",
+      GDJsonEscape(g_exec.Symbol()), GDJsonEscape(BaseSymbol), GDTimeframeName(tf), spec, bars);
 
    string response;
    const int status = GDHttp("POST", "/api/v1/bot/candles", body, "application/json", response);

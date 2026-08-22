@@ -188,6 +188,16 @@ Either sent as `null` makes the dashboard record signals unexecuted (`no_symbol_
 `lot_size_unavailable`) rather than size a position from a hardcoded gold multiplier. A
 wrong value here does not fail loudly — it trades a size nobody chose.
 
+### More than one instrument
+
+Run **one EA instance per symbol**, each with its own token and its own `BaseSymbol`. Each
+pushes its own bars and reports that instrument's specification alongside them, which the
+dashboard stores in `symbol_specs`.
+
+Deliberately one instance per symbol rather than one EA looping over several: the instances are
+isolated from each other, and it needs no refactor of code that has never been through a
+compiler.
+
 ### Candles
 
 The EA pushes closed bars for the entry and trend timeframes so the dashboard can compute

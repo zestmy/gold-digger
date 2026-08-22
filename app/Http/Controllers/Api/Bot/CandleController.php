@@ -7,6 +7,7 @@ use App\Models\BotToken;
 use App\Models\Candle;
 use App\Models\Signal;
 use App\Models\Strategy;
+use App\Models\SymbolSpec;
 use App\Services\Strategy\SignalGenerator;
 use App\Services\Strategy\TradeManager;
 use Illuminate\Http\JsonResponse;
@@ -78,6 +79,17 @@ class CandleController extends Controller
             'bars.*.close' => ['required', 'numeric'],
             'bars.*.tick_volume' => ['nullable', 'integer', 'min:0'],
             'bars.*.spread_points' => ['nullable', 'numeric'],
+
+            // The instrument's own numbers, sent with the bars they describe. Optional, so an
+            // older executor keeps working - it simply leaves the spec unwritten and the
+            // strategy layer falls back to the heartbeat.
+            'base_symbol' => ['nullable', 'string', 'max:32'],
+            'spec' => ['nullable', 'array'],
+            'spec.pip_size' => ['nullable', 'numeric', 'gt:0'],
+            'spec.digits' => ['nullable', 'integer', 'min:0', 'max:10'],
+            'spec.pip_value_per_lot' => ['nullable', 'numeric', 'gt:0'],
+            'spec.volume_min' => ['nullable', 'numeric', 'gt:0'],
+            'spec.volume_step' => ['nullable', 'numeric', 'gt:0'],
         ]);
 
         // A series must belong to an account. The unique index that stops a re-pushed bar
@@ -94,6 +106,8 @@ class CandleController extends Controller
         $symbol = $data['symbol'];
         $timeframe = strtoupper($data['timeframe']);
         $source = $data['source'] ?? 'mql5_ea';
+
+        $this->recordSpec($accountId, $symbol, $data);
 
         $rows = [];
         $times = [];
@@ -161,6 +175,44 @@ class CandleController extends Controller
             ], $signals),
             'managed' => $managed,
         ], 201);
+    }
+
+    /**
+     * Store what the terminal says about this instrument.
+     *
+     * Written from the candle push rather than the heartbeat because a specification describes
+     * the bars it arrives with: every symbol that has price history therefore has a spec, and
+     * the two cannot drift apart or arrive in the wrong order.
+     *
+     * `base_symbol` is what a strategy asks for and `symbol` is what this broker publishes.
+     * An executor that sends neither is assumed to be reporting them as the same thing, which
+     * is true for any broker that does not add a suffix.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function recordSpec(int $accountId, string $symbol, array $data): void
+    {
+        $spec = $data['spec'] ?? null;
+
+        if (! is_array($spec) || $spec === []) {
+            return;
+        }
+
+        SymbolSpec::updateOrCreate(
+            [
+                'broker_account_id' => $accountId,
+                'base_symbol' => $data['base_symbol'] ?? $symbol,
+            ],
+            [
+                'symbol' => $symbol,
+                'pip_size' => $spec['pip_size'] ?? null,
+                'digits' => $spec['digits'] ?? null,
+                'pip_value_per_lot' => $spec['pip_value_per_lot'] ?? null,
+                'volume_min' => $spec['volume_min'] ?? null,
+                'volume_step' => $spec['volume_step'] ?? null,
+                'last_seen_at' => now(),
+            ],
+        );
     }
 
     /**

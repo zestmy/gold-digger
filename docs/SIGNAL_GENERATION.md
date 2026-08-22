@@ -171,6 +171,31 @@ is a poor place to debug "why did that bar not produce a signal".
 
 ---
 
+## More than one instrument
+
+A strategy names its symbol in the abstract — `XAUUSD` — and `symbol_specs` records what each
+broker actually publishes it as, along with that instrument's pip size, pip value and volume
+limits. `SymbolResolver` is the single place that translation happens.
+
+That table is why a second instrument is now configuration rather than a schema change. Pip
+size and pip value used to live on `bot_heartbeats`, which has room for exactly one symbol's
+figures and was read directly by three separate parts of the strategy layer.
+
+Specs arrive **with the bars they describe**, on the candle push, so every symbol with price
+history has one and the two cannot drift apart or arrive in the wrong order.
+
+The heartbeat still answers for its own resolved symbol, so an upgrade does not strand a
+running deployment — but only for that symbol. Lending one instrument's pip value to another
+would size a position from a different market's numbers, which is a silently wrong trade rather
+than a visible failure.
+
+**Multi-symbol means one executor per symbol.** Each Expert Advisor instance resolves its own
+`BaseSymbol`, pushes its own bars and reports its own spec, against its own token. That is a
+deliberate choice over teaching one EA to loop: the instances are isolated, and it needs no
+refactor of code that has never been compiled.
+
+---
+
 ## Not built
 
 - **News filter.** `news_filter_enabled` is stored; there is no news source.
