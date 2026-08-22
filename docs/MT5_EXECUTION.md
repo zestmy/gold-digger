@@ -309,8 +309,8 @@ accept that it means handing a third party your live credentials.
 
 - [x] Backtester over stored candles, calling the same `StrategyEvaluator` the live path
       calls so results transfer. See `BACKTESTING.md`
-- [ ] Parameter sweeps and walk-forward validation. Optimising over one window fits that
-      window; nothing yet guards against it
+- [x] Parameter sweeps and walk-forward validation - `backtest:optimise`, walk-forward by
+      default and a sweep only on request. No verdict below 20 out-of-sample trades
 - [ ] Persisted backtest runs, so two can be compared without re-running both
 
 ### Deferred

@@ -107,6 +107,73 @@ pessimistic where the data is silent, which protects against the specific failur
 a strategy into a curve that only existed in the sample. It does nothing about the sample being
 unrepresentative.
 
-**Optimising over one period fits that period.** Parameter sweeps and walk-forward validation
-are not built yet; see the audit's phase 3. Until then, treat a good result on a single window
-as a reason to keep looking rather than a conclusion.
+**Optimising over one period fits that period.** See below — that is what walk-forward is for.
+
+---
+
+# Optimisation
+
+```bash
+php artisan backtest:optimise --param="ema_fast=10,15,20" --param="adx_threshold=20:30:5"
+```
+
+Walk-forward is the **default**. A plain sweep is what people reach for and what misleads them,
+so getting one requires asking for it with `--sweep`.
+
+## Why a sweep alone proves nothing
+
+Any grid search over one series will find a combination that did well on it. With enough
+parameters it will find one that did brilliantly. That result says the grid contains a curve
+shaped like this stretch of history — which is true of any large grid and any stretch of
+history. It is not evidence about the future, and **the more thoroughly you search, the less
+evidence it is**.
+
+The sweep still exists, because seeing the shape of the surface is useful. It just says so
+about itself, every time it runs.
+
+## What walk-forward does
+
+Optimise on a stretch of history; test the winner on the stretch that came *next*, which the
+optimisation never saw; roll forward and repeat. Each fold's out-of-sample result is a genuine
+prediction, and stitched together they are the closest thing to an estimate of live behaviour
+that history can offer.
+
+Folds train on everything before them rather than a fixed rolling window — matching how you
+would actually re-tune, with all the history available at the time.
+
+### The numbers to read
+
+**Degradation.** In-sample results are always good; that is what optimisation does. The
+comparison is the finding. Out-of-sample close to in-sample means the edge may be real; much
+worse or negative means the sweep fitted noise — *which is the normal result, and the reason to
+run one*.
+
+**Parameter stability.** Winners that jump between folds mean there is no stable optimum: the
+surface is flat and the search is following noise. Weaker evidence than the out-of-sample
+number, but strong evidence against.
+
+**Whether it says anything at all.** Below 20 out-of-sample trades no verdict is offered in
+either direction. An early version of this reported *"most of the optimised edge survived"* from
+a **single** out-of-sample trade — exactly the over-claim the feature exists to prevent. That
+floor is not a statistical threshold so much as a floor on embarrassment.
+
+## How the ranking resists flattery
+
+| Guard | Why |
+|---|---|
+| Minimum trade count | A combination that took four trades found four coincidences, not an edge. Below the floor it is not ranked at all. |
+| Return measured against drawdown | Doubling an account through a 60% drawdown is not better than half the return through 5%, and net profit cannot see the difference. |
+| Rank agreement reported | When metrics disagree about the winner, that disagreement *is* the finding — the ranking is being driven by noise. |
+| Incoherent combinations dropped | A fast EMA at or above the slow one inverts every signal; a ladder out of order takes its rungs backwards. |
+
+## It never writes anything
+
+Not a signal, not a trade, not the strategy being optimised. Candidate parameters are applied to
+a replica that does not exist in the database, so a search cannot rewrite what trades while
+measuring what does not. A test asserts it.
+
+## Keep the search small
+
+`--max` refuses more than 400 combinations, which is a hint about method as much as runtime.
+Two or three parameters at a time, validated out-of-sample, says something. Ten does not — it
+just searches harder for a curve that fits.
