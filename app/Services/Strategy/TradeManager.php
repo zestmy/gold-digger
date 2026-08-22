@@ -57,6 +57,7 @@ final class TradeManager
 {
     public function __construct(
         private readonly StrategyEvaluator $evaluator = new StrategyEvaluator,
+        private readonly SymbolResolver $symbols = new SymbolResolver,
     ) {}
 
     /**
@@ -80,8 +81,13 @@ final class TradeManager
         }
 
         $heartbeat = $this->heartbeat($strategy->user_id, $brokerAccountId);
-        $symbol = $heartbeat?->resolved_symbol ?: $strategy->symbol;
         $accountId = $brokerAccountId ?? $heartbeat?->broker_account_id;
+
+        // Same resolution as the entry side, from the same place - a ladder sized against one
+        // instrument's pip value while the entry was sized against another's would be a
+        // quietly wrong position rather than a visible failure.
+        $spec = $this->symbols->for($accountId, $strategy->symbol, $heartbeat);
+        $symbol = $spec['symbol'];
 
         $candles = Candle::recentSeries(
             $accountId,
@@ -105,7 +111,7 @@ final class TradeManager
         $actions = [];
 
         foreach ($trades as $trade) {
-            foreach ($this->actionsFor($strategy, $trade, $candles, $reversal, $heartbeat) as $action) {
+            foreach ($this->actionsFor($strategy, $trade, $candles, $reversal, $spec) as $action) {
                 $actions[] = ['trade_id' => $trade->id, 'action' => $action];
             }
         }
@@ -148,7 +154,7 @@ final class TradeManager
         Trade $trade,
         array $candles,
         ?string $reversal,
-        ?BotHeartbeat $heartbeat,
+        array $spec,
     ): array {
         $since = $this->barsSinceEntry($candles, $trade);
 
@@ -175,7 +181,7 @@ final class TradeManager
         $actions = [];
 
         foreach ($this->rungsReached($trade, $since) as $rung) {
-            $volume = $this->rungVolume($strategy, $trade, $rung, $heartbeat);
+            $volume = $this->rungVolume($strategy, $trade, $rung, $spec);
 
             if ($volume === null) {
                 continue;
@@ -190,7 +196,7 @@ final class TradeManager
         // Only once the first rung has actually been *filled*, not merely queued: moving the
         // stop to entry while the partial is still in flight would leave the full position
         // sitting on a break-even stop, which is a different trade from the one intended.
-        $breakEven = $this->breakEvenPrice($strategy, $trade, $heartbeat);
+        $breakEven = $this->breakEvenPrice($strategy, $trade, $spec);
 
         if ($this->hasFilledRung($trade, 'tp1') && ! $this->stopAtOrBeyond($trade, $breakEven)) {
             $this->queueBreakEven($trade, $breakEven);
@@ -199,7 +205,7 @@ final class TradeManager
 
         // --- Trailing --------------------------------------------------------------
 
-        $trailed = $this->trailingStop($strategy, $trade, $since, $heartbeat);
+        $trailed = $this->trailingStop($strategy, $trade, $since, $spec);
 
         if ($trailed !== null && ! $this->stopAtOrBeyond($trade, $trailed)) {
             $this->queueTrail($trade, $trailed);
@@ -269,7 +275,7 @@ final class TradeManager
      * A position too small to divide runs to its final target whole. That is the honest
      * outcome for a 0.01-lot trade, and better than a failing command at every rung.
      */
-    private function rungVolume(Strategy $strategy, Trade $trade, string $rung, ?BotHeartbeat $heartbeat): ?float
+    private function rungVolume(Strategy $strategy, Trade $trade, string $rung, array $spec): ?float
     {
         $pct = $rung === 'tp1'
             ? (float) $strategy->tp1_close_pct
@@ -288,7 +294,7 @@ final class TradeManager
             return null;
         }
 
-        $min = $heartbeat?->volume_min !== null ? (float) $heartbeat->volume_min : null;
+        $min = $spec['volume_min'];
 
         if ($min !== null && ($volume < $min || ($remaining - $volume) < $min)) {
             return null;
@@ -307,10 +313,10 @@ final class TradeManager
      *
      * Defaults to zero, so a strategy that never sets it behaves exactly as before.
      */
-    private function breakEvenPrice(Strategy $strategy, Trade $trade, ?BotHeartbeat $heartbeat): float
+    private function breakEvenPrice(Strategy $strategy, Trade $trade, array $spec): float
     {
         $offset = (float) ($strategy->breakeven_offset_pips ?? 0);
-        $pipSize = $heartbeat?->pip_size !== null ? (float) $heartbeat->pip_size : null;
+        $pipSize = $spec['pip_size'];
 
         if ($offset <= 0 || $pipSize === null || $pipSize <= 0) {
             return (float) $trade->entry_price;
@@ -335,11 +341,11 @@ final class TradeManager
      *
      * @param  array<int, Candle>  $since  Bars closed since the position opened
      */
-    private function trailingStop(Strategy $strategy, Trade $trade, array $since, ?BotHeartbeat $heartbeat): ?float
+    private function trailingStop(Strategy $strategy, Trade $trade, array $since, array $spec): ?float
     {
         $trigger = $strategy->trail_trigger_pips !== null ? (float) $strategy->trail_trigger_pips : null;
         $distance = $strategy->trail_distance_pips !== null ? (float) $strategy->trail_distance_pips : null;
-        $pipSize = $heartbeat?->pip_size !== null ? (float) $heartbeat->pip_size : null;
+        $pipSize = $spec['pip_size'];
 
         // Trailing is off by default. It changes P&L, and a setting that changes P&L should
         // not arrive switched on.

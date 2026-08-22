@@ -52,6 +52,7 @@ final class SignalGenerator
         private readonly StrategyEvaluator $evaluator = new StrategyEvaluator,
         private readonly PositionSizer $sizer = new PositionSizer,
         private readonly TradingSession $sessions = new TradingSession,
+        private readonly SymbolResolver $symbols = new SymbolResolver,
     ) {}
 
     /**
@@ -68,11 +69,14 @@ final class SignalGenerator
 
         $heartbeat = $this->heartbeat($strategy->user_id, $brokerAccountId);
 
-        // Candles are stored under the name the broker actually publishes. Falling back to
-        // the strategy's generic 'XAUUSD' only matters before the first heartbeat lands,
-        // and then no candles exist under either name anyway.
-        $symbol = $heartbeat?->resolved_symbol ?: $strategy->symbol;
         $accountId = $brokerAccountId ?? $heartbeat?->broker_account_id;
+
+        // The strategy names an instrument in the abstract - XAUUSD - and the resolver says
+        // what this broker publishes it as, along with its pip size and pip value. Reading
+        // those off the heartbeat, as this used to, is what limited the system to one symbol:
+        // the heartbeat has room for exactly one instrument's numbers.
+        $spec = $this->symbols->for($accountId, $strategy->symbol, $heartbeat);
+        $symbol = $spec['symbol'];
 
         $setup = $this->evaluator->evaluate(
             $strategy,
@@ -96,7 +100,7 @@ final class SignalGenerator
         }
 
         $settings = BotSettings::where('user_id', $strategy->user_id)->first();
-        $levels = $this->levels($strategy, $setup, $heartbeat?->pip_size !== null ? (float) $heartbeat->pip_size : null);
+        $levels = $this->levels($strategy, $setup, $spec['pip_size']);
 
         $skipReason = $this->firstObjection($strategy, $setup, $settings, $heartbeat, $levels);
 
@@ -107,7 +111,7 @@ final class SignalGenerator
                 balance: (float) $heartbeat->balance,
                 riskPercentage: (float) $settings->risk_percentage,
                 stopPips: $levels['sl_pips'],
-                pipValuePerLot: $heartbeat->pip_value_per_lot !== null ? (float) $heartbeat->pip_value_per_lot : null,
+                pipValuePerLot: $spec['pip_value_per_lot'],
             );
 
             if ($lots === null) {
