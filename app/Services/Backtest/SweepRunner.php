@@ -91,7 +91,17 @@ final class SweepRunner
                 return $a->qualifies ? -1 : 1;
             }
 
-            return $b->value($metric) <=> $a->value($metric);
+            $primary = $b->value($metric) <=> $a->value($metric);
+
+            if ($primary !== 0) {
+                return $primary;
+            }
+
+            // The drawdown-adjusted score saturates: with no drawdown at all, the floor is
+            // proportional to the return, so every profitable result scores exactly the same.
+            // Without a tiebreak the order among them is whatever the array happened to be in,
+            // which then reads as the metrics disagreeing when they are simply tied.
+            return $b->value('net_pnl') <=> $a->value('net_pnl');
         });
 
         return $results;

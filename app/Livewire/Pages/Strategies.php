@@ -14,6 +14,7 @@ use Livewire\Component;
 class Strategies extends Component
 {
     public bool $showModal = false;
+
     public ?int $editingId = null;
 
     #[Validate('required|string|max:255')]
@@ -61,6 +62,17 @@ class Strategies extends Component
     #[Validate('required|numeric|min:0.1|max:10')]
     public string $sl_atr_multiplier = '1.50';
 
+    // Trailing is off unless both are set. Nullable strings rather than numbers so an empty
+    // field means "off" rather than "zero" - zero distance would be a stop on top of price.
+    #[Validate('nullable|numeric|min:0|max:1000')]
+    public ?string $trail_trigger_pips = null;
+
+    #[Validate('nullable|numeric|min:0|max:1000')]
+    public ?string $trail_distance_pips = null;
+
+    #[Validate('required|numeric|min:0|max:100')]
+    public string $breakeven_offset_pips = '0.00';
+
     #[Validate('boolean')]
     public bool $exit_on_reversal = true;
 
@@ -102,6 +114,9 @@ class Strategies extends Component
             $this->tp3_pips = $strategy->tp3_pips;
             $this->tp3_close_pct = $strategy->tp3_close_pct;
             $this->sl_atr_multiplier = $strategy->sl_atr_multiplier;
+            $this->trail_trigger_pips = $strategy->trail_trigger_pips;
+            $this->trail_distance_pips = $strategy->trail_distance_pips;
+            $this->breakeven_offset_pips = $strategy->breakeven_offset_pips ?? '0.00';
             $this->exit_on_reversal = $strategy->exit_on_reversal;
             $this->max_holding_bars = $strategy->max_holding_bars;
             $this->is_active = $strategy->is_active;
@@ -134,6 +149,9 @@ class Strategies extends Component
         $this->tp3_pips = '30.00';
         $this->tp3_close_pct = '20.00';
         $this->sl_atr_multiplier = '1.50';
+        $this->trail_trigger_pips = null;
+        $this->trail_distance_pips = null;
+        $this->breakeven_offset_pips = '0.00';
         $this->exit_on_reversal = true;
         $this->max_holding_bars = 100;
         $this->is_active = true;
@@ -161,6 +179,11 @@ class Strategies extends Component
             'tp3_pips' => $this->tp3_pips,
             'tp3_close_pct' => $this->tp3_close_pct,
             'sl_atr_multiplier' => $this->sl_atr_multiplier,
+            // Blank means off, not zero. A zero trail distance would put the stop on top of
+            // price and close the position on the next tick.
+            'trail_trigger_pips' => $this->trail_trigger_pips === '' ? null : $this->trail_trigger_pips,
+            'trail_distance_pips' => $this->trail_distance_pips === '' ? null : $this->trail_distance_pips,
+            'breakeven_offset_pips' => $this->breakeven_offset_pips,
             'exit_on_reversal' => $this->exit_on_reversal,
             'max_holding_bars' => $this->max_holding_bars,
             'is_active' => $this->is_active,
@@ -183,7 +206,7 @@ class Strategies extends Component
     public function toggleActive(int $id): void
     {
         $strategy = Strategy::where('user_id', Auth::id())->findOrFail($id);
-        $strategy->update(['is_active' => !$strategy->is_active]);
+        $strategy->update(['is_active' => ! $strategy->is_active]);
     }
 
     public function delete(int $id): void

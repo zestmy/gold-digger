@@ -66,13 +66,23 @@ class DashboardControlsTest extends TestCase
         $this->assertSame('stop', TradeCommand::first()->type);
     }
 
+    /**
+     * Time is frozen because the dedupe key buckets by whole five-second windows. Two real
+     * clicks either side of a boundary land in different buckets and legitimately produce two
+     * commands - so without this the test failed roughly whenever the clock happened to tick
+     * between the two calls, which now means an intermittently red CI blocking a deploy.
+     */
     public function test_double_clicking_close_all_queues_only_one_command(): void
     {
+        $this->travelTo(now()->startOfSecond());
+
         $card = Livewire::test(QuickActionsCard::class);
         $card->call('closeAllPositions');
         $card->call('closeAllPositions');
 
         $this->assertSame(1, TradeCommand::where('type', 'close_all')->count());
+
+        $this->travelBack();
     }
 
     public function test_close_all_expires_so_a_stale_flatten_is_never_executed(): void

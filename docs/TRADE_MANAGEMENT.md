@@ -72,7 +72,8 @@ defaults should change with it.
 | Price traded through TP2 *(only when a TP3 exists)* | `close`, reason `tp2` | `tp2_close_pct` of initial |
 | EMAs crossed against the position, `exit_on_reversal` on | `close`, reason `reversal_exit` | all remaining |
 | Bars since entry ≥ `max_holding_bars` | `close`, reason `time_exit` | all remaining |
-| TP1 **filled**, stop not yet at entry | `modify`, reason `break_even` | — |
+| TP1 **filled**, stop not yet at break-even | `modify`, reason `break_even` | — |
+| Profit past `trail_trigger_pips`, and the trail is tighter than the current stop | `modify`, reason `trail` | — |
 
 The final rung is never queued: it is the level on the order, and the broker closes the
 remainder without being asked. Which level that is depends on the trade — TP3 when it has
@@ -98,6 +99,49 @@ strategy described.
 The stop goes to the entry price exactly. That is not quite free — commission and swap are
 still owed — but "break-even" meaning "entry" is what the term is understood to mean, and
 padding it by an invented number of pips would be a rule nobody configured.
+
+---
+
+## Trailing, and a break-even that breaks even
+
+Both are **off by default**. They change P&L, and a setting that changes P&L should not arrive
+switched on.
+
+### The trail
+
+Set `trail_trigger_pips` and `trail_distance_pips` — either left blank disables it. Once the
+position is at least the trigger in profit, the stop follows to `distance` behind the best
+price seen.
+
+**Behind the best price, not the last close.** A stop that followed the close would loosen on
+every pullback, which is not a trailing stop but a drifting one.
+
+**It only ever moves toward profit.** A proposed level that would loosen the stop is discarded:
+the risk on a position was decided when it opened, and no rule here is allowed to widen it.
+
+The idempotency key carries the level, so a trail issues one command per distinct stop rather
+than one per bar — keyed on the trade alone, only the first move would ever happen.
+
+### Break-even offset
+
+Moving the stop to exactly the entry leaves the trade losing what it paid to get there: the
+spread crossed on entry, commission both sides, any slippage. On a gold scalp that is a real
+share of a 30-pip first target. `breakeven_offset_pips` moves the stop that much further into
+profit, so the phrase means what it says. Zero — the default — preserves the old behaviour.
+
+### Measure it before believing it
+
+Both settings are sweepable, and the backtester models them identically to the live manager:
+
+```bash
+php artisan backtest                                    # the baseline
+php artisan backtest:optimise --param="trail_trigger_pips=40"                              --param="trail_distance_pips=15,30,60"
+```
+
+On a run-then-collapse series a tight trail cuts winners short and a loose one never fires;
+the point is that this is now a measurement rather than an argument. A trailed exit is reported
+as `trailing_stop` in the exit breakdown, distinct from `sl` and `break_even_stop`, so you can
+see whether trailing is protecting gains or ending trades early.
 
 ---
 
