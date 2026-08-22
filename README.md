@@ -19,6 +19,9 @@ computes the indicators and queues the order. See
 reversal and time exits, and the break-even stop. Positions the dashboard did not open
 are picked up by [`docs/RECONCILIATION.md`](docs/RECONCILIATION.md).
 
+> **Running it unattended?** [`docs/MONITORING.md`](docs/MONITORING.md) covers the health checks
+> and Telegram alerting. A dashboard only helps somebody who is looking at it.
+
 > **Never run the Expert Advisor before?** [`docs/COMMISSIONING.md`](docs/COMMISSIONING.md) is the
 > sequence for getting it from never-compiled to a verified round trip on a demo account. It has
 > never been through a compiler, and that is the gating step for everything else.
