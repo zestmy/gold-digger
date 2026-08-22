@@ -19,6 +19,10 @@ computes the indicators and queues the order. See
 reversal and time exits, and the break-even stop. Positions the dashboard did not open
 are picked up by [`docs/RECONCILIATION.md`](docs/RECONCILIATION.md).
 
+> **Changing a strategy setting?** [`docs/BACKTESTING.md`](docs/BACKTESTING.md) — `php artisan
+> backtest` replays it over the stored bars using the same evaluator that trades, so a change can
+> be measured instead of argued about.
+
 > **Running it unattended?** [`docs/MONITORING.md`](docs/MONITORING.md) covers the health checks
 > and Telegram alerting. A dashboard only helps somebody who is looking at it.
 
