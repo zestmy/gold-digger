@@ -40,10 +40,10 @@ class BotApiTest extends TestCase
 
         $this->account = BrokerAccount::create([
             'user_id' => $this->user->id,
-            'label' => 'Octa Demo',
-            'broker_name' => 'Octa',
+            'label' => 'Elev8 Demo',
+            'broker_name' => 'Elev8',
             'account_number' => '12345678',
-            'server' => 'OctaFX-Demo',
+            'server' => 'Elev8-Demo',
             'is_demo' => true,
             'is_active' => true,
         ]);
@@ -130,10 +130,10 @@ class BotApiTest extends TestCase
     {
         $other = BrokerAccount::create([
             'user_id' => $this->user->id,
-            'label' => 'Octa Live',
-            'broker_name' => 'Octa',
+            'label' => 'Elev8 Live',
+            'broker_name' => 'Elev8',
             'account_number' => '87654321',
-            'server' => 'OctaFX-Real',
+            'server' => 'Elev8-Real',
             'is_demo' => false,
             'is_active' => true,
         ]);

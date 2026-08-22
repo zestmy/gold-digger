@@ -256,7 +256,7 @@ class Mt5Executor:
         """Find the broker's actual name for `base` and add it to Market Watch.
 
         `DEFAULT_SYMBOL=XAUUSD` in .env is a base name, not necessarily a tradable
-        one. Octa, Exness and XM all ship gold under suffixed names on some account
+        one. Elev8, Exness and XM all ship gold under suffixed names on some account
         types, and symbol_info() returns None for a name the server does not publish.
         """
         base = base.upper()

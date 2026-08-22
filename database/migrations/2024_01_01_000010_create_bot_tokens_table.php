@@ -31,7 +31,7 @@ return new class extends Migration
                 ->constrained()
                 ->cascadeOnDelete();
 
-            // Human label so you can tell devices apart: "Windows VPS - Octa Demo"
+            // Human label so you can tell devices apart: "Windows VPS - Elev8 Demo"
             $table->string('name');
 
             // SHA-256 of the plaintext token. Indexed because every authenticated

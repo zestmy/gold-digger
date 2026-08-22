@@ -25,17 +25,17 @@ return new class extends Migration
                 ->cascadeOnDelete();
 
             // Human-readable label for this account
-            // Example: "Octa Demo", "Octa Live", "IC Markets Demo"
+            // Example: "Elev8 Demo", "Elev8 Live", "IC Markets Demo"
             $table->string('label');
 
             // Broker name for display and potential future multi-broker support
-            $table->string('broker_name')->default('Octa');
+            $table->string('broker_name')->default('Elev8');
 
             // MT5 account number - encrypted at rest for security
             // Even if DB is compromised, account numbers are protected
             $table->string('account_number');
 
-            // MT5 server name (e.g., "Octa-Demo", "Octa-Real")
+            // MT5 server name (e.g., "Elev8-Demo", "Elev8-Real")
             $table->string('server');
 
             // Demo vs live account flag
@@ -49,7 +49,7 @@ return new class extends Migration
             $table->string('account_currency', 10)->default('USD');
 
             // Account leverage setting (affects position sizing calculations)
-            // Octa typically offers up to 1:500 leverage
+            // Elev8 typically offers up to 1:500 leverage
             $table->integer('leverage')->default(500);
 
             // Cached balance/equity from last sync with MT5

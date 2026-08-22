@@ -36,7 +36,7 @@ Credentials come from the environment, so they stay out of shell history:
 ```powershell
 $env:MT5_LOGIN     = "12345678"
 $env:MT5_PASSWORD  = "your-MASTER-password"   # NOT the investor password
-$env:MT5_SERVER    = "OctaFX-Demo"            # copy verbatim from the terminal
+$env:MT5_SERVER    = "Elev8-Demo"            # copy verbatim from the terminal
 $env:MT5_SYMBOL    = "XAUUSD"
 ```
 

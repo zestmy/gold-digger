@@ -35,10 +35,10 @@ class AccessAndTruthTest extends TestCase
     {
         return BrokerAccount::create([
             'user_id' => $user->id,
-            'label' => 'Octa Demo',
-            'broker_name' => 'Octa',
+            'label' => 'Elev8 Demo',
+            'broker_name' => 'Elev8',
             'account_number' => '12345678',
-            'server' => 'OctaFX-Demo',
+            'server' => 'Elev8-Demo',
             'is_demo' => true,
             'is_active' => true,
         ]);

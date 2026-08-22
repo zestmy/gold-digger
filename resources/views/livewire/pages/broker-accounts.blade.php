@@ -158,7 +158,7 @@
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-300">Server</label>
-                                <input type="text" wire:model="server" class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm" placeholder="OctaFX-Demo">
+                                <input type="text" wire:model="server" class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm" placeholder="Elev8-Demo">
                                 @error('server') <p class="mt-1 text-sm text-red-400">{{ $message }}</p> @enderror
                             </div>
                         </div>
