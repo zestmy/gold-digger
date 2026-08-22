@@ -305,6 +305,14 @@ accept that it means handing a third party your live credentials.
       bypasses both, and the EA is the last line before the broker
 - [ ] Alert on heartbeat loss (Telegram/email) — a silently dead bot with open positions is the real risk
 
+### Phase 3 - Measurement
+
+- [x] Backtester over stored candles, calling the same `StrategyEvaluator` the live path
+      calls so results transfer. See `BACKTESTING.md`
+- [ ] Parameter sweeps and walk-forward validation. Optimising over one window fits that
+      window; nothing yet guards against it
+- [ ] Persisted backtest runs, so two can be compared without re-running both
+
 ### Deferred
 
 - Screenshot capture (`trade_screenshots`), news filter, backtester, multi-account. All are already
