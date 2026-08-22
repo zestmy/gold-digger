@@ -6,6 +6,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Registration
+    |--------------------------------------------------------------------------
+    |
+    | Whether the public sign-up route exists. Off by default: this application holds
+    | broker account details and trade history for whoever runs it, and has no use for
+    | accounts it did not expect. Turn it on only if this becomes multi-user - and read
+    | the note on User::canAccessPanel() first, because the admin panel is not scoped
+    | per user.
+    |
+    */
+
+    'registration_enabled' => env('REGISTRATION_ENABLED', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | Authentication Defaults
     |--------------------------------------------------------------------------
     |

@@ -138,7 +138,10 @@
                     </a>
                 </li>
 
-                <!-- Admin Panel -->
+                {{-- Admin Panel. Shown to admins only; the panel is gated server-side too, so
+                     this just avoids offering a link that answers 403. A Blade comment rather
+                     than an HTML one, or the label leaks into the markup for everybody. --}}
+                @if(auth()->user()?->is_admin)
                 <li>
                     <a href="/admin"
                        class="text-gray-400 hover:text-white hover:bg-gray-800 group flex gap-x-3 rounded-md p-2 text-sm leading-6 font-semibold">
@@ -148,6 +151,7 @@
                         Admin Panel
                     </a>
                 </li>
+                @endif
             </ul>
         </li>
 

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -159,12 +160,26 @@ class Trade extends Model
     }
 
     /**
+     * Total costs of the trade: spread at entry, commission, and swap.
+     *
+     * An accessor rather than only a method, because callers reasonably expect to sum it like
+     * any other column - `$trades->sum('total_costs_money')`. Analytics did exactly that, and
+     * since no such column or accessor existed, Eloquent resolved it to null and the page
+     * reported every trade as costless. A silent zero, in the flattering direction: on a gold
+     * scalping strategy these costs are a large share of the edge.
+     */
+    protected function totalCostsMoney(): Attribute
+    {
+        return Attribute::get(fn (): float => (float) $this->entry_spread_money
+            + (float) $this->commission_money
+            + (float) $this->swap_money);
+    }
+
+    /**
      * Calculate total costs (spread + commission + swap).
      */
     public function getTotalCosts(): float
     {
-        return (float) $this->entry_spread_money
-            + (float) $this->commission_money
-            + (float) $this->swap_money;
+        return $this->total_costs_money;
     }
 }
