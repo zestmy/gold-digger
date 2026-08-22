@@ -41,10 +41,10 @@ Split the symptom into two classes, because the fixes are unrelated.
 |---|---|---|---|
 | A1 | Running on Linux/macOS/Docker | `pip install MetaTrader5` fails, or `import` fails | Bot must run on Windows with the terminal, or switch to a non-terminal option (§4E/§4F) |
 | A2 | MT5 terminal not running or not logged in | `mt5.initialize()` returns `True` but `mt5.account_info()` is `None` | Launch and log into the terminal first |
-| A3 | Several MT5 installs; wrong one attached | `mt5.terminal_info().path` points at an unexpected folder | Pass `path=r"C:\Program Files\Octa MT5\terminal64.exe"` to `initialize()` |
+| A3 | Several MT5 installs; wrong one attached | `mt5.terminal_info().path` points at an unexpected folder | Pass `path=r"C:\Program Files\Elev8 MT5\terminal64.exe"` to `initialize()` |
 | A4 | **Investor (read-only) password used** | Login succeeds, every order rejected | Use the master password |
 | A5 | Terminal elevated, script not (or vice versa) | `initialize()` fails with `-10005 IPC timeout` | Run both at the same privilege level |
-| A6 | Wrong server string | `-6 Terminal: Authorization failed` | Copy the server name verbatim from the terminal (e.g. `OctaFX-Real`, not `Octa-Real`) |
+| A6 | Wrong server string | `-6 Terminal: Authorization failed` | Copy the server name verbatim from the terminal (e.g. `Elev8-Real`, not `Elev8-Real`) |
 
 ### Class B — connected, but `order_send` returns a non-`10009` retcode
 
@@ -77,7 +77,7 @@ And the non-retcode traps:
   crash rather than a retcode.
 - **Broker symbol suffixes.** `.env.example` hardcodes `DEFAULT_SYMBOL=XAUUSD`. Real MT5 servers
   frequently expose gold as `XAUUSDm`, `XAUUSD.a`, `XAUUSD_i`, `XAUUSD.raw`, `XAUUSDc`, or `GOLD`.
-  The `broker_accounts` table already supports Octa, Exness, XM, IC Markets and Pepperstone — several
+  The `broker_accounts` table already supports Elev8, Exness, XM, IC Markets and Pepperstone — several
   of those use suffixes. Symbol names must be **resolved at runtime**, never hardcoded.
 - **The pip trap (most likely cause of `10016`).** The `strategies` table stores targets in *pips*
   (`tp1_pips`, `tp2_pips`, `tp3_pips`, `sl_atr_multiplier`). On XAUUSD a broker `point` is `0.01`
@@ -204,7 +204,7 @@ also scales badly if this ever becomes multi-user — which `ARCHITECTURE.md` li
 cTrader Open API, OANDA v20 REST, or Interactive Brokers all offer documented APIs with no terminal in
 the loop, and run natively on Linux.
 
-*Pick this if:* MT5 keeps fighting you and you are not tied to Octa.
+*Pick this if:* MT5 keeps fighting you and you are not tied to Elev8.
 *Caveat:* it is a rewrite plus a broker migration, and gold spreads/commissions differ meaningfully
 between venues — re-validate the strategy's edge before committing.
 
@@ -238,7 +238,7 @@ accept that it means handing a third party your live credentials.
 
 - [x] Commit a preflight diagnostic that identifies the blocking cause
 - [x] Commit a hardened order executor covering the known rejection causes
-- [ ] Run `mt5_preflight.py` against the Octa account and record the actual retcode
+- [ ] Run `mt5_preflight.py` against the Elev8 account and record the actual retcode
 
 ### Phase 2.1 — Make the bot a first-class part of the repo ✓
 

@@ -57,10 +57,10 @@ class BacktestTest extends TestCase
 
         $this->account = BrokerAccount::create([
             'user_id' => $this->user->id,
-            'label' => 'Octa Demo',
-            'broker_name' => 'Octa',
+            'label' => 'Elev8 Demo',
+            'broker_name' => 'Elev8',
             'account_number' => '1',
-            'server' => 'OctaFX-Demo',
+            'server' => 'Elev8-Demo',
             'is_demo' => true,
             'is_active' => true,
         ]);

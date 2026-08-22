@@ -39,7 +39,7 @@ Gold Digger is a personal automated trading bot for XAUUSD (gold) scalping. The 
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                      Octa MT5 Broker                             │
+│                      Elev8 MT5 Broker                             │
 │  - Live/demo trading accounts                                   │
 │  - Market data feed                                             │
 │  - Order execution                                              │

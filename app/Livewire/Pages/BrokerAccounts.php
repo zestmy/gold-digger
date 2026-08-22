@@ -14,13 +14,14 @@ use Livewire\Component;
 class BrokerAccounts extends Component
 {
     public bool $showModal = false;
+
     public ?int $editingId = null;
 
     #[Validate('required|string|max:255')]
     public string $label = '';
 
     #[Validate('required|string|max:255')]
-    public string $broker_name = 'Octa';
+    public string $broker_name = 'Elev8';
 
     #[Validate('required|string|max:255')]
     public string $account_number = '';
@@ -43,7 +44,10 @@ class BrokerAccounts extends Component
     public array $currencies = ['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CHF'];
 
     public array $brokers = [
-        'Octa' => 'OctaFX',
+        // Labelled with the old name too: anyone who set the account up before the rebrand
+        // knows it as OctaFX, and a list that silently dropped that name would look like the
+        // broker had been removed.
+        'Elev8' => 'Elev8 (formerly OctaFX)',
         'ICMarkets' => 'IC Markets',
         'Pepperstone' => 'Pepperstone',
         'XM' => 'XM Global',
@@ -82,7 +86,7 @@ class BrokerAccounts extends Component
     {
         $this->editingId = null;
         $this->label = '';
-        $this->broker_name = 'Octa';
+        $this->broker_name = 'Elev8';
         $this->account_number = '';
         $this->server = '';
         $this->is_demo = true;

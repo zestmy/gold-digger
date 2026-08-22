@@ -106,7 +106,7 @@ class. That is not a compiler. **Expect to fix at least a warning or two on firs
 and treat compiling as a required step before this touches an account.**
 
 **Nothing has been run against a real broker.** Every Laravel-side behaviour is covered by
-tests; the Python executor was exercised against a stub terminal modelling an Octa-like
+tests; the Python executor was exercised against a stub terminal modelling an Elev8-like
 server. No real fill has ever happened.
 
 **Nine tests fail in this container, on this branch and on untouched `main` alike**

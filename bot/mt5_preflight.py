@@ -12,7 +12,7 @@ Usage (on the Windows machine running the MT5 terminal):
     python mt5_preflight.py --symbol XAUUSD
 
     # explicit login instead of attaching to whatever is already open
-    python mt5_preflight.py --login 12345678 --password ... --server OctaFX-Demo
+    python mt5_preflight.py --login 12345678 --password ... --server Elev8-Demo
 
     # actually place and immediately close a minimum-lot position (DEMO ONLY)
     python mt5_preflight.py --symbol XAUUSD --live-test

@@ -180,8 +180,8 @@ DB_USERNAME=gold_digger
 DB_PASSWORD=your_password_here
 
 # Optional: For Python bot integration
-OCTA_API_URL=
-OCTA_ACCOUNT_ID=
+ELEV8_API_URL=
+ELEV8_ACCOUNT_ID=
 PYTHON_BOT_API_KEY=
 ```
 

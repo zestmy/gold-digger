@@ -146,7 +146,7 @@ CGDExecutor::CGDExecutor(void) : m_symbol(""), m_digits(2), m_point(0.01),
 //+------------------------------------------------------------------+
 //| Resolve the broker's name for base_symbol and cache its limits.   |
 //|                                                                   |
-//| A hardcoded "XAUUSD" is not tradable on every server: Octa,       |
+//| A hardcoded "XAUUSD" is not tradable on every server: Elev8,       |
 //| Exness and XM publish gold with suffixes on some account types.   |
 //| Scanning the server's own symbol list is the only reliable way to |
 //| find it - and it must be pushed into Market Watch before any      |
