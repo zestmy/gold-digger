@@ -100,7 +100,9 @@ class LiveTrades extends Component
         // close can say so rather than looking like the button did nothing.
         $pendingCloses = TradeCommand::where('user_id', Auth::id())
             ->whereIn('type', ['close', 'close_all'])
-            ->whereIn('status', ['pending', 'claimed'])
+            // inFlight, not merely pending: a close that lapsed unfilled must give the Close
+            // button back, or the position is stuck showing "closing" with no way to retry.
+            ->inFlight()
             ->pluck('trade_id')
             ->filter()
             ->all();

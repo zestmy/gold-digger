@@ -10,15 +10,21 @@ class RegistrationTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_registration_screen_can_be_rendered(): void
+    /**
+     * Registration is off unless REGISTRATION_ENABLED says otherwise, and the route is not
+     * defined at all in that state rather than defined and blocked - so Route::has('register')
+     * is a single source of truth the views read to decide whether to offer a sign-up button.
+     */
+    public function test_the_registration_screen_is_absent_by_default(): void
     {
-        $response = $this->get('/register');
-
-        $response
-            ->assertOk()
-            ->assertSeeVolt('pages.auth.register');
+        $this->get('/register')->assertNotFound();
     }
 
+    /**
+     * Exercised through the component rather than the route, because the route's existence is
+     * decided once at boot from config. This proves the form still works for anyone who turns
+     * registration on; whether the door is open is the test above.
+     */
     public function test_new_users_can_register(): void
     {
         $component = Volt::test('pages.auth.register')

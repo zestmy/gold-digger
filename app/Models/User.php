@@ -56,6 +56,7 @@ class User extends Authenticatable implements FilamentUser
     {
         return [
             'email_verified_at' => 'datetime',
+            'is_admin' => 'boolean',
             'password' => 'hashed',
         ];
     }
@@ -72,9 +73,12 @@ class User extends Authenticatable implements FilamentUser
      */
     public function canAccessPanel(Panel $panel): bool
     {
-        // Personal bot: any authenticated user can access admin
-        // Future SaaS: return $this->hasRole('admin');
-        return true;
+        // Was `return true`, which meant every registered account could read and edit every
+        // other account's trading data - no Filament resource scopes its query by user, so
+        // reaching the panel is reaching all of it.
+        //
+        // Granted with: php artisan user:admin you@example.com
+        return (bool) $this->is_admin;
     }
 
     // =========================================================================

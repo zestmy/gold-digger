@@ -33,9 +33,13 @@
                         <a href="{{ route('dashboard') }}" class="text-gray-300 hover:text-white transition-colors">Dashboard</a>
                     @else
                         <a href="{{ route('login') }}" class="text-gray-300 hover:text-white transition-colors">Login</a>
-                        <a href="{{ route('register') }}" class="px-4 py-2 rounded-lg bg-yellow-500 text-gray-900 font-semibold hover:bg-yellow-400 transition-colors">
-                            Get Started
-                        </a>
+                        {{-- Registration is off by default; see config/auth.php. Login is already
+                             beside this, so the button simply goes away. --}}
+                        @if(Route::has('register'))
+                            <a href="{{ route('register') }}" class="px-4 py-2 rounded-lg bg-yellow-500 text-gray-900 font-semibold hover:bg-yellow-400 transition-colors">
+                                Get Started
+                            </a>
+                        @endif
                     @endauth
                 </div>
             </div>
@@ -74,12 +78,20 @@
                         Go to Dashboard
                     </a>
                 @else
-                    <a href="{{ route('register') }}" class="px-8 py-4 rounded-lg bg-yellow-500 text-gray-900 font-semibold text-lg hover:bg-yellow-400 transition-colors shadow-lg shadow-yellow-500/25">
-                        Start Trading Now
-                    </a>
-                    <a href="{{ route('login') }}" class="px-8 py-4 rounded-lg bg-gray-800 text-white font-semibold text-lg hover:bg-gray-700 transition-colors border border-gray-700">
-                        Sign In
-                    </a>
+                    @if(Route::has('register'))
+                        <a href="{{ route('register') }}" class="px-8 py-4 rounded-lg bg-yellow-500 text-gray-900 font-semibold text-lg hover:bg-yellow-400 transition-colors shadow-lg shadow-yellow-500/25">
+                            Start Trading Now
+                        </a>
+                        <a href="{{ route('login') }}" class="px-8 py-4 rounded-lg bg-gray-800 text-white font-semibold text-lg hover:bg-gray-700 transition-colors border border-gray-700">
+                            Sign In
+                        </a>
+                    @else
+                        {{-- No sign-up to offer, so signing in becomes the primary action rather
+                             than the page pointing at a door that is not there. --}}
+                        <a href="{{ route('login') }}" class="px-8 py-4 rounded-lg bg-yellow-500 text-gray-900 font-semibold text-lg hover:bg-yellow-400 transition-colors shadow-lg shadow-yellow-500/25">
+                            Sign In
+                        </a>
+                    @endif
                 @endauth
             </div>
 
@@ -188,11 +200,15 @@
         <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
             <h2 class="text-3xl sm:text-4xl font-bold text-white mb-6">Ready to Start Trading?</h2>
             <p class="text-xl text-gray-400 mb-10">
-                Join Gold Digger today and take control of your gold trading with automated precision.
+                @if(Route::has('register'))
+                    Join Gold Digger today and take control of your gold trading with automated precision.
+                @else
+                    Sign in to take control of your gold trading with automated precision.
+                @endif
             </p>
             @guest
-                <a href="{{ route('register') }}" class="inline-flex items-center px-8 py-4 rounded-lg bg-yellow-500 text-gray-900 font-semibold text-lg hover:bg-yellow-400 transition-colors shadow-lg shadow-yellow-500/25">
-                    Create Free Account
+                <a href="{{ Route::has('register') ? route('register') : route('login') }}" class="inline-flex items-center px-8 py-4 rounded-lg bg-yellow-500 text-gray-900 font-semibold text-lg hover:bg-yellow-400 transition-colors shadow-lg shadow-yellow-500/25">
+                    {{ Route::has('register') ? 'Create Free Account' : 'Sign In' }}
                     <svg class="ml-2 w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
                     </svg>

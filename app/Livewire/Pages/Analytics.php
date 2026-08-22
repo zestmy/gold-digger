@@ -3,9 +3,7 @@
 namespace App\Livewire\Pages;
 
 use App\Models\Trade;
-use App\Models\DailySummary;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
@@ -15,6 +13,14 @@ use Livewire\Component;
 #[Title('Analytics - Gold Digger')]
 class Analytics extends Component
 {
+    /**
+     * Statuses whose profit or loss is final.
+     *
+     * A stop-out is as settled as a target hit - it is simply the losing half of the same
+     * distribution, and leaving it out is what made every metric on this page optimistic.
+     */
+    public const SETTLED_STATUSES = ['fully_closed', 'stopped_out'];
+
     #[Url]
     public string $period = '30';
 
@@ -30,16 +36,25 @@ class Analytics extends Component
         $userId = Auth::id();
 
         // Build date constraint
-        $dateConstraint = match($this->period) {
+        $dateConstraint = match ($this->period) {
             '7' => now()->subDays(7),
             '30' => now()->subDays(30),
             '90' => now()->subDays(90),
             default => null,
         };
 
-        // Get trades for analysis
+        // Trades whose outcome is settled.
+        //
+        // `stopped_out` used to be missing from this list, and FillController writes it for
+        // every close whose reason is `sl` - so every trade that hit its stop was excluded
+        // from the win rate, the profit factor, the average and largest loss, the direction
+        // and strategy breakdowns, and the equity curve. The page did not fail; it reported a
+        // strategy that only ever wins.
+        //
+        // `partially_closed` stays out because the position is still open and its result is
+        // not known yet, and `cancelled` because it never reached the market.
         $tradesQuery = Trade::where('user_id', $userId)
-            ->whereIn('status', ['fully_closed']);
+            ->whereIn('status', self::SETTLED_STATUSES);
 
         if ($dateConstraint) {
             $tradesQuery->where('closed_at', '>=', $dateConstraint);
@@ -92,6 +107,7 @@ class Analytics extends Component
         // Performance by strategy
         $strategyStats = $trades->groupBy('strategy_id')->map(function ($stratTrades, $stratId) {
             $strategy = $stratTrades->first()->strategy;
+
             return [
                 'name' => $strategy?->name ?? 'Unknown',
                 'count' => $stratTrades->count(),
@@ -102,7 +118,7 @@ class Analytics extends Component
 
         // Daily P&L for chart
         $dailyPnlQuery = Trade::where('user_id', $userId)
-            ->whereIn('status', ['fully_closed'])
+            ->whereIn('status', self::SETTLED_STATUSES)
             ->whereNotNull('closed_at')
             ->selectRaw('DATE(closed_at) as date, SUM(net_pnl_money) as pnl, COUNT(*) as trades')
             ->groupBy('date')

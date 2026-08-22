@@ -75,6 +75,48 @@ class TradeCommand extends Model
     }
 
     /**
+     * Commands still waiting on the executor.
+     *
+     * Distinct from `claimable`, which answers "may an executor take this now". This answers
+     * "is anyone still expecting this to happen", which is what the dashboard needs in order
+     * to show a position as closing.
+     *
+     * The expiry check is the whole point. Nothing marked a lapsed command as expired, so a
+     * close that timed out sat at `pending` for ever and Live Trades kept showing the
+     * position as closing - with the Close button replaced by that label, leaving no way to
+     * retry. Reading the expiry here means the UI is right whether or not the sweep has run.
+     */
+    public function scopeInFlight(Builder $query): Builder
+    {
+        return $query->whereIn('status', ['pending', 'claimed'])
+            ->where(fn (Builder $q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()));
+    }
+
+    /**
+     * Mark lapsed commands as expired.
+     *
+     * `scopeClaimable` already refuses to hand one out, so this changes no execution
+     * behaviour - it stops the queue accumulating rows that look pending for ever, and makes
+     * "what happened to that command" answerable from the row itself.
+     *
+     * Claimed commands are swept too: an executor that took one and then died leaves it
+     * claimed, and nothing else would ever move it.
+     */
+    public static function sweepExpired(): int
+    {
+        return self::query()
+            ->whereIn('status', ['pending', 'claimed'])
+            ->whereNotNull('expires_at')
+            ->where('expires_at', '<=', now())
+            ->update([
+                'status' => 'expired',
+                'completed_at' => now(),
+                'error' => 'Expired before an executor completed it.',
+                'updated_at' => now(),
+            ]);
+    }
+
+    /**
      * Restrict to the account this executor is bound to.
      *
      * Commands with a null broker_account_id are account-agnostic (start/stop) and go

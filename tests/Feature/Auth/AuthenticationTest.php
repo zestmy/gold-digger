@@ -54,17 +54,25 @@ class AuthenticationTest extends TestCase
         $this->assertGuest();
     }
 
+    /**
+     * This asserted a Volt `layout.navigation` component on /dashboard, which stopped being
+     * true when the dashboard became a custom Livewire page behind the sidebar layout. The
+     * scaffolding component still exists - the logout test below drives it - it is simply no
+     * longer what renders here, so the assertion had been failing on main ever since.
+     *
+     * Rewritten to check the navigation a signed-in user actually gets.
+     */
     public function test_navigation_menu_can_be_rendered(): void
     {
         $user = User::factory()->create();
 
         $this->actingAs($user);
 
-        $response = $this->get('/dashboard');
-
-        $response
+        $this->get('/dashboard')
             ->assertOk()
-            ->assertSeeVolt('layout.navigation');
+            ->assertSee('Live Trades')
+            ->assertSee('Signals')
+            ->assertSee('Strategies');
     }
 
     public function test_users_can_logout(): void
