@@ -28,3 +28,6 @@ bot/.venv/
 bot/.env
 bot/__pycache__/
 *.pyc
+
+# Database dumps taken before migrations. Production data - never in the repository.
+/storage/backups

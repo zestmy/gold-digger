@@ -1,5 +1,24 @@
 # Gold Digger - Deployment Guide
 
+> **How deploys work now.** A push to `main` runs the test suite first, and the deploy job
+> only starts if it passes - see `.github/workflows/deploy.yml`. Before migrations run, the
+> deploy takes a compressed dump into `storage/backups` (`php artisan db:backup`, keeping the
+> last 7). If any step fails, the workflow lifts maintenance mode rather than leaving the
+> site down.
+>
+> **PHP version.** The scripts and examples below provision **8.2**. The deploy no longer
+> hardcodes a version - it reloads whichever `php{major}.{minor}-fpm` the server's own PHP
+> reports - but if you rebuild from `scripts/server-setup.sh`, check the nginx `fastcgi_pass`
+> socket matches the PHP you actually installed.
+>
+> **After the deploy that adds the admin gate.** `/admin` is restricted to accounts with
+> `is_admin`, and the migration grants it automatically only when the database holds exactly
+> one user. Otherwise nobody has access until you run:
+>
+> ```bash
+> php artisan user:admin you@example.com
+> ```
+
 ## Prerequisites
 
 - DigitalOcean account
