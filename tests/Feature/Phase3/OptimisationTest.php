@@ -256,6 +256,23 @@ class OptimisationTest extends TestCase
     }
 
     /**
+     * Found by running a real sweep: with no drawdown the score saturates, so every
+     * profitable combination ties. Without a tiebreak the order is arbitrary and the
+     * agreement check reports a disagreement that does not exist.
+     */
+    public function test_tied_scores_are_broken_by_return_rather_than_arbitrarily(): void
+    {
+        $small = new SweepResult(['trail_distance_pips' => 15.0], ['trades' => 50, 'net_pnl' => 577.0, 'max_drawdown' => 0.0, 'profit_factor' => 0.0, 'expectancy' => 11.5], 30);
+        $large = new SweepResult(['trail_distance_pips' => 30.0], ['trades' => 50, 'net_pnl' => 1029.0, 'max_drawdown' => 0.0, 'profit_factor' => 0.0, 'expectancy' => 20.6], 30);
+
+        // Both saturate at the same score.
+        $this->assertEqualsWithDelta($small->score, $large->score, 0.001);
+
+        $this->assertSame(30.0, SweepRunner::rank([$small, $large])[0]->parameters['trail_distance_pips']);
+        $this->assertTrue(SweepRunner::agreement([$small, $large])['agree']);
+    }
+
+    /**
      * When metrics disagree about the winner, that disagreement is the finding.
      */
     public function test_metric_disagreement_is_detected(): void

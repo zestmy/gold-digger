@@ -37,6 +37,16 @@ final class SimulatedTrade
 
     public bool $breakEven = false;
 
+    public bool $trailing = false;
+
+    /**
+     * The most favourable price reached since entry.
+     *
+     * A trailing stop follows this rather than the latest close. Following the close would
+     * loosen the stop on every pullback, which is not a trailing stop but a drifting one.
+     */
+    public ?float $bestPrice = null;
+
     public function __construct(
         public readonly string $direction,
         public readonly float $entryPrice,
@@ -50,6 +60,24 @@ final class SimulatedTrade
         public readonly array $features = [],
     ) {
         $this->remainingLots = $lots;
+    }
+
+    /**
+     * Record how far the bar ran in the position's favour.
+     */
+    public function observe(float $high, float $low): void
+    {
+        $extreme = $this->isBuy() ? $high : $low;
+
+        if ($this->bestPrice === null) {
+            $this->bestPrice = $extreme;
+
+            return;
+        }
+
+        $this->bestPrice = $this->isBuy()
+            ? max($this->bestPrice, $extreme)
+            : min($this->bestPrice, $extreme);
     }
 
     public function isBuy(): bool
@@ -136,6 +164,7 @@ final class SimulatedTrade
             'net_pnl' => round($this->netPnl, 2),
             'bars_held' => $this->barsHeld,
             'rungs' => $this->filledRungs(),
+            'trailed' => $this->trailing,
         ];
     }
 }

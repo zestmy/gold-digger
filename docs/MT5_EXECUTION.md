@@ -277,7 +277,11 @@ accept that it means handing a third party your live credentials.
       rejecting it as unknown
 - [x] The wire's `reason` column is read by the EA, so a commanded close is recorded as the
       rung it was rather than as `manual`
-- [ ] Trailing stop. The stop moves once, to break-even, and never follows price
+- [x] Trailing stop - `trail_trigger_pips` / `trail_distance_pips`, off by default, following
+      the best price seen and never loosening. Modelled identically in the backtester
+- [x] Break-even offset, so the break-even stop clears the cost of the round trip
+- [ ] News filter. `news_filter_enabled` is stored and unread; needs a news source, which
+      means a third-party dependency and a judgement about which one
 - [ ] Intrabar rung detection. A rung is noticed when its bar closes and filled at market, so
       a spike through TP1 that retraces fills worse than TP1. The exact fix is one position
       per rung with its own broker-side TP, at the cost of tripling position count

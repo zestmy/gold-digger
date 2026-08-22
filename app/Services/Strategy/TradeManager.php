@@ -190,9 +190,20 @@ final class TradeManager
         // Only once the first rung has actually been *filled*, not merely queued: moving the
         // stop to entry while the partial is still in flight would leave the full position
         // sitting on a break-even stop, which is a different trade from the one intended.
-        if ($this->hasFilledRung($trade, 'tp1') && ! $this->stopAtBreakEven($trade)) {
-            $this->queueBreakEven($trade);
+        $breakEven = $this->breakEvenPrice($strategy, $trade, $heartbeat);
+
+        if ($this->hasFilledRung($trade, 'tp1') && ! $this->stopAtOrBeyond($trade, $breakEven)) {
+            $this->queueBreakEven($trade, $breakEven);
             $actions[] = 'break_even';
+        }
+
+        // --- Trailing --------------------------------------------------------------
+
+        $trailed = $this->trailingStop($strategy, $trade, $since, $heartbeat);
+
+        if ($trailed !== null && ! $this->stopAtOrBeyond($trade, $trailed)) {
+            $this->queueTrail($trade, $trailed);
+            $actions[] = 'trail';
         }
 
         return $actions;
@@ -287,6 +298,96 @@ final class TradeManager
     }
 
     /**
+     * Where a break-even stop actually goes.
+     *
+     * The entry price plus `breakeven_offset_pips` in the profitable direction. Moving a stop
+     * to exactly the entry leaves the trade losing whatever it paid to get there - the spread
+     * crossed on entry, commission both sides, any slippage - which on a gold scalp is a real
+     * share of a 30-pip first target. The offset is what makes the phrase true.
+     *
+     * Defaults to zero, so a strategy that never sets it behaves exactly as before.
+     */
+    private function breakEvenPrice(Strategy $strategy, Trade $trade, ?BotHeartbeat $heartbeat): float
+    {
+        $offset = (float) ($strategy->breakeven_offset_pips ?? 0);
+        $pipSize = $heartbeat?->pip_size !== null ? (float) $heartbeat->pip_size : null;
+
+        if ($offset <= 0 || $pipSize === null || $pipSize <= 0) {
+            return (float) $trade->entry_price;
+        }
+
+        $sign = $trade->direction === 'buy' ? 1.0 : -1.0;
+
+        return (float) $trade->entry_price + ($sign * $offset * $pipSize);
+    }
+
+    /**
+     * Where the trailing stop should sit now, or null when it should not move.
+     *
+     * Measured from the best price the position has seen since it opened - the highest high on
+     * a buy - rather than from the latest close. A stop that followed the close would loosen
+     * every time price pulled back, which is not a trailing stop; it is a stop that drifts.
+     *
+     * Two conditions have to hold before it engages: the position must be at least
+     * `trail_trigger_pips` in profit at its best, and the resulting level must be an
+     * improvement. Both are what stop this turning into a stream of `modify` commands that
+     * shuffle the stop around by a fraction of a pip.
+     *
+     * @param  array<int, Candle>  $since  Bars closed since the position opened
+     */
+    private function trailingStop(Strategy $strategy, Trade $trade, array $since, ?BotHeartbeat $heartbeat): ?float
+    {
+        $trigger = $strategy->trail_trigger_pips !== null ? (float) $strategy->trail_trigger_pips : null;
+        $distance = $strategy->trail_distance_pips !== null ? (float) $strategy->trail_distance_pips : null;
+        $pipSize = $heartbeat?->pip_size !== null ? (float) $heartbeat->pip_size : null;
+
+        // Trailing is off by default. It changes P&L, and a setting that changes P&L should
+        // not arrive switched on.
+        if ($trigger === null || $distance === null || $distance <= 0 || $pipSize === null || $pipSize <= 0) {
+            return null;
+        }
+
+        $isBuy = $trade->direction === 'buy';
+
+        $best = $isBuy
+            ? max(array_map(static fn (Candle $c) => (float) $c->high, $since))
+            : min(array_map(static fn (Candle $c) => (float) $c->low, $since));
+
+        $profitPips = (($isBuy ? $best - (float) $trade->entry_price : (float) $trade->entry_price - $best)) / $pipSize;
+
+        if ($profitPips < $trigger) {
+            return null;
+        }
+
+        return $isBuy
+            ? $best - ($distance * $pipSize)
+            : $best + ($distance * $pipSize);
+    }
+
+    /**
+     * Is the stop already at or past a proposed level?
+     *
+     * "Past" means further into profit. A stop only ever moves one way: loosening it would
+     * widen the risk on a position whose risk was decided when it opened, and no rule in this
+     * system is allowed to do that.
+     */
+    private function stopAtOrBeyond(Trade $trade, float $level): bool
+    {
+        if ($trade->sl_price === null) {
+            return false;
+        }
+
+        $current = (float) $trade->sl_price;
+
+        // Under a tenth of a pip on gold is not a move worth a command round trip.
+        $epsilon = 0.005;
+
+        return $trade->direction === 'buy'
+            ? $current >= $level - $epsilon
+            : $current <= $level + $epsilon;
+    }
+
+    /**
      * Bars that have closed since the position opened.
      *
      * `opened_at` is written when the fill is reported, so the bar the entry happened on has
@@ -324,14 +425,6 @@ final class TradeManager
         return TradePartial::where('trade_id', $trade->id)
             ->where('close_reason', $rung)
             ->exists();
-    }
-
-    private function stopAtBreakEven(Trade $trade): bool
-    {
-        // Compared with a tolerance because the stop that comes back from the broker has
-        // been rounded to the symbol's digits and clamped against its stops level, so it is
-        // rarely the exact entry price this asked for.
-        return abs((float) $trade->sl_price - (float) $trade->entry_price) < 0.00001;
     }
 
     // =========================================================================
@@ -374,7 +467,7 @@ final class TradeManager
      * are still owed - but "break-even" meaning "entry" is what the term is understood to
      * mean, and padding it by an invented number of pips would be a rule nobody configured.
      */
-    private function queueBreakEven(Trade $trade): void
+    private function queueBreakEven(Trade $trade, float $level): void
     {
         TradeCommand::enqueue(
             user: $trade->user,
@@ -382,12 +475,43 @@ final class TradeManager
             payload: [
                 'symbol' => $trade->symbol,
                 'ticket' => $trade->mt5_ticket,
-                'sl_price' => (float) $trade->entry_price,
+                'sl_price' => round($level, 5),
                 'trade_id' => $trade->id,
                 'reason' => 'break_even',
             ],
             account: $trade->brokerAccount,
             idempotencyKey: "modify:{$trade->id}:break_even",
+            expiresInSeconds: null,
+        );
+    }
+
+    /**
+     * Queue a trailing stop move.
+     *
+     * Unlike break-even, this happens repeatedly over a position's life, so the idempotency
+     * key carries the level itself. Keyed on the trade alone, only the first move would ever
+     * be queued; keyed on nothing, a stop that wandered by a fraction of a pip would produce a
+     * command per bar.
+     *
+     * The level is bucketed to whole pips-worth of price for the same reason - two proposals
+     * that round to the same stop are the same instruction.
+     */
+    private function queueTrail(Trade $trade, float $level): void
+    {
+        $bucket = number_format($level, 2, '.', '');
+
+        TradeCommand::enqueue(
+            user: $trade->user,
+            type: 'modify',
+            payload: [
+                'symbol' => $trade->symbol,
+                'ticket' => $trade->mt5_ticket,
+                'sl_price' => round($level, 5),
+                'trade_id' => $trade->id,
+                'reason' => 'trail',
+            ],
+            account: $trade->brokerAccount,
+            idempotencyKey: "modify:{$trade->id}:trail:{$bucket}",
             expiresInSeconds: null,
         );
     }

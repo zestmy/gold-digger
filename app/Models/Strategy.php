@@ -44,6 +44,9 @@ class Strategy extends Model
         'tp3_pips',
         'tp3_close_pct',
         'sl_atr_multiplier',
+        'trail_trigger_pips',
+        'trail_distance_pips',
+        'breakeven_offset_pips',
         'exit_on_reversal',
         'max_holding_bars',
         'is_active',
@@ -70,6 +73,9 @@ class Strategy extends Model
             'tp3_pips' => 'decimal:2',
             'tp3_close_pct' => 'decimal:2',
             'sl_atr_multiplier' => 'decimal:2',
+            'trail_trigger_pips' => 'decimal:2',
+            'trail_distance_pips' => 'decimal:2',
+            'breakeven_offset_pips' => 'decimal:2',
         ];
     }
 

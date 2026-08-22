@@ -249,7 +249,17 @@ final class Backtester
         // target would turn every losing bar into a winner - so the stop is taken.
         if ($stopHit) {
             $fill = $trade->stopPrice - ($trade->isBuy() ? $market->pipsToPrice($market->slippagePips) : -$market->pipsToPrice($market->slippagePips));
-            $this->settle($trade, $trade->breakEven ? 'break_even_stop' : 'sl', $trade->remainingLots, $fill, $bar, $market);
+
+            // A trailing stop that fires is a different outcome from the original stop being
+            // hit, and the exit breakdown is where anyone would look to tell whether trailing
+            // is helping or cutting winners short.
+            $reason = match (true) {
+                $trade->trailing => 'trailing_stop',
+                $trade->breakEven => 'break_even_stop',
+                default => 'sl',
+            };
+
+            $this->settle($trade, $reason, $trade->remainingLots, $fill, $bar, $market);
 
             return;
         }
@@ -312,12 +322,80 @@ final class Backtester
             // naive ladder backtest.
             $this->settle($trade, $name, $lots, $this->exitPrice($trade, $close, $market, slip: true), $bar, $market);
 
-            // Break-even once the first rung has actually filled, matching TradeManager.
+            // Break-even once the first rung has actually filled, matching TradeManager -
+            // including the offset that makes the phrase mean what it says.
             if ($name === 'tp1' && $trade->isOpen()) {
-                $trade->stopPrice = $trade->entryPrice;
+                $trade->stopPrice = $this->breakEvenPrice($strategy, $trade, $market);
                 $trade->breakEven = true;
             }
         }
+
+        // The trail is applied last and only to a still-open position. Checked after the
+        // ladder so a bar that took a rung can also tighten the stop, and after the exits so
+        // a position about to close is not modified on its way out.
+        if ($trade->isOpen()) {
+            $trade->observe($high, $low);
+
+            $trailed = $this->trailingStop($strategy, $trade, $market);
+
+            if ($trailed !== null && $this->isTighter($trade, $trailed)) {
+                $trade->stopPrice = $trailed;
+                $trade->trailing = true;
+            }
+        }
+    }
+
+    /**
+     * Break-even, plus whatever the strategy wants to cover its costs.
+     */
+    private function breakEvenPrice($strategy, SimulatedTrade $trade, MarketAssumptions $market): float
+    {
+        $offset = (float) ($strategy->breakeven_offset_pips ?? 0);
+
+        if ($offset <= 0) {
+            return $trade->entryPrice;
+        }
+
+        return $trade->entryPrice + (($trade->isBuy() ? 1.0 : -1.0) * $market->pipsToPrice($offset));
+    }
+
+    /**
+     * Where the trailing stop sits, or null when it is off or not yet triggered.
+     *
+     * Deliberately the same rule as TradeManager: measured from the best price seen, engaged
+     * only past the trigger. The backtest is only useful if it models the system that trades.
+     */
+    private function trailingStop($strategy, SimulatedTrade $trade, MarketAssumptions $market): ?float
+    {
+        $trigger = $strategy->trail_trigger_pips !== null ? (float) $strategy->trail_trigger_pips : null;
+        $distance = $strategy->trail_distance_pips !== null ? (float) $strategy->trail_distance_pips : null;
+
+        if ($trigger === null || $distance === null || $distance <= 0 || $trade->bestPrice === null) {
+            return null;
+        }
+
+        $profit = $trade->isBuy()
+            ? $trade->bestPrice - $trade->entryPrice
+            : $trade->entryPrice - $trade->bestPrice;
+
+        if ($market->priceToPips($profit) < $trigger) {
+            return null;
+        }
+
+        return $trade->isBuy()
+            ? $trade->bestPrice - $market->pipsToPrice($distance)
+            : $trade->bestPrice + $market->pipsToPrice($distance);
+    }
+
+    /**
+     * A stop only ever moves toward profit. Loosening it would widen a risk that was decided
+     * when the position opened.
+     */
+    private function isTighter(SimulatedTrade $trade, float $level): bool
+    {
+        return $trade->isBuy()
+            ? $level > $trade->stopPrice
+            : $level < $trade->stopPrice;
     }
 
     /**

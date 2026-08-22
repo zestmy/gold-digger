@@ -103,6 +103,26 @@ class StrategyResource extends Resource
                             ->suffix('%'),
                     ])->columns(3),
 
+                Forms\Components\Section::make('Stop Management')
+                    ->description('Trailing is off unless both fields are set. Break-even offset covers the cost of the round trip, so the phrase means what it says.')
+                    ->schema([
+                        Forms\Components\TextInput::make('trail_trigger_pips')
+                            ->label('Trail after')
+                            ->helperText('Profit at which the stop starts following price. Blank disables trailing.')
+                            ->numeric()
+                            ->suffix('pips'),
+                        Forms\Components\TextInput::make('trail_distance_pips')
+                            ->label('Trail distance')
+                            ->helperText('How far behind the best price the stop sits. Blank disables trailing.')
+                            ->numeric()
+                            ->suffix('pips'),
+                        Forms\Components\TextInput::make('breakeven_offset_pips')
+                            ->label('Break-even offset')
+                            ->helperText('How far past entry the break-even stop goes, to cover spread and commission.')
+                            ->numeric()
+                            ->suffix('pips'),
+                    ])->columns(3),
+
                 Forms\Components\Section::make('Stop Loss & Exit Settings')
                     ->schema([
                         Forms\Components\TextInput::make('sl_atr_multiplier')
