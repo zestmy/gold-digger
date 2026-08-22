@@ -26,3 +26,11 @@ Artisan::command('inspire', function () {
 // Lapsed commands are already refused by scopeClaimable; this is what stops them sitting
 // at `pending` for ever and makes their fate legible in the row.
 Schedule::command('commands:sweep')->everyFiveMinutes()->withoutOverlapping();
+
+// Health checks and alerting. Every minute, because the thing being watched for is an
+// executor that has gone quiet - and the interesting question is how long ago, which a
+// coarser schedule answers badly.
+//
+// withoutOverlapping is what lets HealthMonitor enforce "one open incident per key" in
+// application code instead of a unique index MySQL cannot express.
+Schedule::command('bot:monitor')->everyMinute()->withoutOverlapping();
