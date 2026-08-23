@@ -317,6 +317,15 @@ accept that it means handing a third party your live credentials.
       default and a sweep only on request. No verdict below 20 out-of-sample trades
 - [ ] Persisted backtest runs, so two can be compared without re-running both
 
+### Phase 5 - Scale
+
+- [x] `symbol_specs`, so an instrument's figures live with the instrument rather than on the
+      heartbeat. See `SIGNAL_GENERATION.md`
+- [x] Multi-symbol, as one executor instance per symbol
+- [x] Queued evaluation behind `QUEUE_STRATEGY_EVALUATION`, off by default, with a
+      `queue_stalled` alert because a missing worker is otherwise silent
+- [ ] Vendor history backfill, so a backtest can reach further back than the terminal can
+
 ### Deferred
 
 - Screenshot capture (`trade_screenshots`), news filter, backtester, multi-account. All are already

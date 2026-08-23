@@ -171,6 +171,35 @@ is a poor place to debug "why did that bar not produce a signal".
 
 ---
 
+## Inline, or queued
+
+By default a candle push evaluates strategies **inside the request**. At one symbol on M5 —
+a few hundred bars of arithmetic once every five minutes — that costs nothing worth saving, and
+it needs no background process to be running.
+
+`QUEUE_STRATEGY_EVALUATION=true` moves it to a job instead: the push stores its bars, answers,
+and a worker does the thinking.
+
+```bash
+php artisan queue:work --queue=strategy
+```
+
+Worth turning on when a single push starts doing real work — several symbols, several
+strategies, or a faster entry timeframe — because `WebRequest` blocks the terminal's event
+thread for as long as the request takes.
+
+**It requires a worker.** Without one, bars are stored, jobs pile up, and the bot stops trading
+while the executor heartbeats happily and this page simply stays empty. That failure is silent,
+which is why the health monitor raises `queue_stalled` — and why the switch is off by default
+rather than being turned on for you.
+
+The job runs the same call sequence as the inline path, positions before entries, so the switch
+changes *when* the work happens and never *what* it does. A test asserts both produce the same
+signal from the same bars. Jobs are unique per account and timeframe, so a burst of pushes
+collapses to one evaluation.
+
+---
+
 ## More than one instrument
 
 A strategy names its symbol in the abstract — `XAUUSD` — and `symbol_specs` records what each

@@ -19,9 +19,21 @@ first — this is what addresses it.
 | `broker_disconnected` | critical | The terminal reports the broker connected |
 | `feed_stalled:{timeframe}` | warning | A bar arrives within three bar-lengths |
 | `daily_loss_limit` | critical | Realised losses fall back inside the limit — in practice, tomorrow |
+| `queue_stalled` | critical | A worker starts draining the queue *(only when queued evaluation is on)* |
 
 Every condition has an explicit clear rule. That is not decoration: an alert that never resolves
 teaches you to ignore the channel it arrives on, and then the channel is worse than nothing.
+
+### Why a stalled queue is critical
+
+Only relevant with `trading.queue_evaluation` on — and it is the condition that makes that
+switch safe to offer. With evaluation queued, a candle push stores its bars and hands the
+thinking to a worker. A worker that is not running produces no error anywhere: the executor
+heartbeats, the feed flows, bars accumulate, and the bot simply stops trading while everything
+on the dashboard looks healthy.
+
+Measured on the age of the oldest unclaimed job rather than the depth of the queue — a hundred
+jobs drained promptly is a busy system; one job sitting for an hour is a dead one.
 
 ### Why the feed gets its own alert
 
