@@ -10,6 +10,7 @@ use App\Models\Strategy;
 use App\Services\Ai\StrategyProposer;
 use App\Services\Backtest\MarketAssumptions;
 use App\Services\Backtest\WalkForward;
+use App\Services\Backtest\WalkForwardReport;
 use Illuminate\Console\Command;
 
 /**
@@ -151,6 +152,32 @@ class ImproveStrategy extends Command
 
         $oos = $report->outOfSample();
 
+        // The verdict before the table, not after it.
+        //
+        // WalkForwardReport already refuses to read anything into a thin sample - and the
+        // first version of this command printed the numbers without it, which produced a
+        // tidy baseline-versus-proposed comparison off nine trades that looked exactly
+        // like a finding. A table is far more persuasive than a caveat underneath it, so
+        // the caveat goes first and the numbers arrive already qualified.
+        $thin = ($oos['trades'] ?? 0) < WalkForwardReport::MIN_MEANINGFUL_TRADES;
+
+        if ($thin) {
+            $this->newLine();
+            $this->warn('  '.$report->degradation()['verdict']);
+
+            $this->line(($oos['trades'] ?? 0) === 0
+                ? '  <fg=gray>The table below is all zeros. Either the series is too short for the entry</>'
+                : '  <fg=gray>The table below is printed for completeness. On this many trades the</>');
+            $this->line(($oos['trades'] ?? 0) === 0
+                ? '  <fg=gray>rule to fire at all, or every setup it found was filtered out.</>'
+                : '  <fg=gray>difference between the baseline and any proposal is which way a few</>');
+
+            if (($oos['trades'] ?? 0) > 0) {
+                $this->line('  <fg=gray>trades happened to go. Collect more history before choosing between them.</>');
+            }
+            $this->newLine();
+        }
+
         $this->line('<options=bold>Out-of-sample, stitched across folds</>');
         $this->table(['Metric', 'Baseline', 'Proposed'], [
             ['Trades', $baselineOos['trades'], $oos['trades']],
@@ -179,6 +206,19 @@ class ImproveStrategy extends Command
         // The honest closing note. A walk-forward across a handful of folds on one
         // instrument is evidence, not proof, and the reasoning above is not evidence at all.
         $this->line('<options=bold>Before you apply anything</>');
+
+        if ($thin) {
+            $this->line('  <options=bold>Nothing here supports a change.</> The sample is too small to prefer any of');
+            $this->line('  these over what you already run, including the ones that look better.');
+            $this->newLine();
+        }
+
+        // The "Proposed" column is the best combination *per fold*, stitched. Selecting a
+        // winner from six candidates and then reporting the winner's score flatters it,
+        // which is exactly the bias walk-forward exists to limit and does not remove.
+        $this->line('  The proposed column is the best candidate in each fold, stitched together.');
+        $this->line('  Picking a winner from '.count($proposals).' and then quoting its score flatters it.');
+        $this->newLine();
         $this->line('  Nothing has been changed. Confirm a candidate independently:');
         $this->line('    php artisan backtest:optimise '.$strategy->id.' --param="name=value,value"');
         $this->line('  A proposal that does not beat the baseline out of sample is a proposal that failed,');
