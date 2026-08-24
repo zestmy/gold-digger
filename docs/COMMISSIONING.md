@@ -199,10 +199,13 @@ nothing. Before turning it off, at minimum:
 - The kill switch tested while a position is open — Stop should halt new entries and leave the
   position alone. Now that the wire fix has landed, test the *queued* `stop` too, not only the
   server-side flag: the flag is what saved this once, and it should not have to again.
-- Alerting **delivering**, not merely working.
+- Alerting **delivering**, not merely working. ✅ Verified 2026-08-25 by detaching the EA and
+  waiting for the message to arrive on a phone — incident and resolution both delivered,
+  `notified_at` and `resolution_notified` set on the row.
 
-None of these had been met as of the 2026-08-25 commissioning. No position has ever been
-opened by this system.
+The other three had not been met as of the 2026-08-25 commissioning. No position has ever
+been opened by this system, so nothing about entry, the ladder, break-even, trailing or the
+exits has been observed anywhere but in tests and backtests.
 
 > **Found.** Alerting is the one to be careful about, because it fails quietly in the
 > flattering direction. During commissioning the health checks opened and resolved four
