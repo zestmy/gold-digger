@@ -194,7 +194,7 @@ class MarketContextCardsTest extends TestCase
 
         Livewire::test(AiAnalysisCard::class)
             ->assertSet('configured', false)
-            ->assertSee('ANTHROPIC_API_KEY');
+            ->assertSee('OPENROUTER_API_KEY');
     }
 
     /**

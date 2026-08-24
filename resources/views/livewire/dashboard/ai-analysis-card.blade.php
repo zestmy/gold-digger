@@ -10,7 +10,7 @@
 
     @if(! $configured)
         <p class="mt-4 text-sm text-gray-500">
-            Not configured. Set <code class="text-gray-400">ANTHROPIC_API_KEY</code> to enable written analysis.
+            Not configured. Set <code class="text-gray-400">OPENROUTER_API_KEY</code> to enable written analysis.
         </p>
         <p class="mt-1 text-xs text-gray-600">
             Every other card on this page works without it &mdash; this one only puts the same

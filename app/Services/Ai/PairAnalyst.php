@@ -2,9 +2,7 @@
 
 namespace App\Services\Ai;
 
-use Anthropic\Client;
 use Illuminate\Support\Facades\Log;
-use Throwable;
 
 /**
  * Pair Analyst
@@ -32,11 +30,11 @@ use Throwable;
  */
 final class PairAnalyst
 {
-    public function __construct(private readonly ?Client $client = null) {}
+    public function __construct(private readonly OpenRouter $router = new OpenRouter) {}
 
     public function configured(): bool
     {
-        return is_string(config('ai.key')) && config('ai.key') !== '';
+        return $this->router->configured();
     }
 
     /**
@@ -47,7 +45,7 @@ final class PairAnalyst
     public function analyse(array $context, array $situation): array
     {
         if (! $this->configured()) {
-            return $this->failure('No ANTHROPIC_API_KEY is configured.');
+            return $this->failure('No OPENROUTER_API_KEY is configured.');
         }
 
         if (! ($context['warm'] ?? false)) {
@@ -57,39 +55,27 @@ final class PairAnalyst
             return $this->failure('Not enough price history to describe yet.');
         }
 
-        try {
-            $client = $this->client ?? new Client(apiKey: (string) config('ai.key'));
+        $result = $this->router->structured(
+            model: (string) config('ai.model'),
+            system: $this->systemPrompt(),
+            brief: $this->brief($context, $situation),
+            schemaName: 'pair_analysis',
+            schema: PairAnalysis::schema(),
+        );
 
-            $message = $client->messages->create(
-                model: (string) config('ai.model'),
-                maxTokens: 16000,
-                system: [[
-                    'type' => 'text',
-                    'text' => $this->systemPrompt(),
-                ]],
-                outputConfig: [
-                    'format' => PairAnalysis::class,
-                    'effort' => (string) config('ai.effort'),
-                ],
-                messages: [[
-                    'role' => 'user',
-                    'content' => $this->brief($context, $situation),
-                ]],
-            );
-
-            $analysis = $message->parsedOutput();
-
-            if (! $analysis instanceof PairAnalysis) {
-                return $this->failure('The model returned a response in an unexpected shape.');
-            }
-
-            return ['ok' => true, 'analysis' => $analysis, 'error' => null];
-        } catch (Throwable $e) {
-            // A failed analysis is cosmetic - the trend, session and news cards carry the
-            // same facts without it. Never let it surface as an exception on a page
-            // somebody is using to watch a live account.
-            return $this->failure($e->getMessage());
+        if (! $result['ok']) {
+            return $this->failure($result['error'] ?? 'The analysis could not be generated.');
         }
+
+        $analysis = PairAnalysis::fromArray($result['data']);
+
+        if ($analysis === null) {
+            return $this->failure('The model returned an analysis with a missing section.');
+        }
+
+        // A failed analysis is cosmetic - the trend, session and news cards carry the
+        // same facts without it, and OpenRouter never throws past this point.
+        return ['ok' => true, 'analysis' => $analysis, 'error' => null];
     }
 
     private function systemPrompt(): string
