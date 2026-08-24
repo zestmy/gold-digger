@@ -66,7 +66,16 @@ class MonitoringTest extends TestCase
         ]);
 
         $this->settings = BotSettings::where('user_id', $this->user->id)->firstOrFail();
-        $this->settings->update(['is_active' => true, 'max_daily_loss_percentage' => 3.00]);
+        $this->settings->update([
+            'is_active' => true,
+            'max_daily_loss_percentage' => 3.00,
+            // Off, because these tests assert on how many messages a *specific* incident
+            // sends. The news filter is on by default and its calendar is empty in a fresh
+            // test database, so leaving it on adds a second, unrelated firing condition to
+            // every sweep here. `news_calendar_stale` has its own coverage in
+            // NewsBlackoutTest.
+            'news_filter_enabled' => false,
+        ]);
 
         $this->strategy = Strategy::where('user_id', $this->user->id)->firstOrFail();
         $this->strategy->update(['is_active' => true, 'timeframe_entry' => 'M5']);

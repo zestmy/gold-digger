@@ -33,6 +33,8 @@ class BotSettings extends Model
         'allowed_sessions',
         'min_atr_threshold',
         'news_filter_enabled',
+        'news_blackout_before_minutes',
+        'news_blackout_after_minutes',
         'capture_screenshots',
     ];
 
@@ -53,6 +55,11 @@ class BotSettings extends Model
             'risk_percentage' => 'decimal:2',
             'max_daily_loss_percentage' => 'decimal:2',
             'min_atr_threshold' => 'decimal:2',
+
+            // Minutes either side of a scheduled release. Integers, not decimals - the
+            // calendar publishes to the minute and a fractional blackout means nothing.
+            'news_blackout_before_minutes' => 'integer',
+            'news_blackout_after_minutes' => 'integer',
 
             // JSON array for allowed trading sessions
             // Access as: $settings->allowed_sessions returns ['london', 'newyork']

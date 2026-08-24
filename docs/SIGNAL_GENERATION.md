@@ -80,6 +80,7 @@ objection is recorded: it is the gate that would have to change for the signal t
 | `bot_inactive` | The kill switch is off |
 | `algo_trading_disabled` | The terminal's Algo Trading button is off — orders would return 10027 |
 | `session_closed` | The bar closed outside `allowed_sessions` |
+| `news_blackout` | The bar overlaps a scheduled release's blackout window — see [`NEWS_FILTER.md`](NEWS_FILTER.md). `features.news_event` names the release |
 | `adx_below_threshold` | Trend too weak |
 | `atr_below_threshold` | Below `min_atr_threshold` |
 | `no_symbol_spec` | The terminal has not reported `pip_size` |

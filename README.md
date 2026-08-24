@@ -23,6 +23,10 @@ are picked up by [`docs/RECONCILIATION.md`](docs/RECONCILIATION.md).
 > backtest` replays it over the stored bars using the same evaluator that trades, so a change can
 > be measured instead of argued about.
 
+> **Worried about news spikes?** [`docs/NEWS_FILTER.md`](docs/NEWS_FILTER.md) — the bot stands
+> aside around scheduled high-impact USD releases. `php artisan news:import` keeps the calendar
+> current, and the filter replays inside `php artisan backtest` like every other rule.
+
 > **Running it unattended?** [`docs/MONITORING.md`](docs/MONITORING.md) covers the health checks
 > and Telegram alerting. A dashboard only helps somebody who is looking at it.
 

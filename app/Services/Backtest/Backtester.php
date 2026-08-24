@@ -5,6 +5,7 @@ namespace App\Services\Backtest;
 use App\Models\BotSettings;
 use App\Models\Candle;
 use App\Models\Strategy;
+use App\Services\Strategy\NewsBlackout;
 use App\Services\Strategy\PositionSizer;
 use App\Services\Strategy\StrategyEvaluator;
 use App\Services\Strategy\TradingSession;
@@ -89,6 +90,19 @@ final class Backtester
         $minAtr = $settings?->min_atr_threshold !== null ? (float) $settings->min_atr_threshold : null;
         $riskPct = (float) ($settings?->risk_percentage ?? 1.0);
 
+        // Every calendar event the run could possibly consult, fetched once. Querying per bar
+        // would be one round trip per bar to re-read the same few rows, and a sweep runs this
+        // whole loop once per parameter combination.
+        //
+        // The range is padded by a day either side rather than by the configured blackout,
+        // because an event just outside the series can still reach into its first or last bar
+        // and a day is cheap. Passing no settings means no filter - a backtest without a
+        // settings row models a user who has not configured one.
+        $news = NewsBlackout::forRange(
+            $entryCandles[0]->open_time->copy()->subDay(),
+            $entryCandles[$total - 1]->open_time->copy()->addDay(),
+        );
+
         // The last bar has no successor to fill an entry on, so entries stop one short.
         for ($i = $warmup; $i < $total; $i++) {
             $bar = $entryCandles[$i];
@@ -122,7 +136,7 @@ final class Backtester
                 continue;
             }
 
-            $skip = $this->objection($setup, $strategy, $sessionsAllowed, $minAtr, count($open), $maxConcurrent, $report, $balance, $market);
+            $skip = $this->objection($setup, $strategy, $sessionsAllowed, $minAtr, count($open), $maxConcurrent, $report, $balance, $market, $news, $settings);
 
             if ($skip !== null) {
                 $report->skip($skip);
@@ -455,9 +469,19 @@ final class Backtester
         BacktestReport $report,
         float $balance,
         MarketAssumptions $market,
+        ?NewsBlackout $news = null,
+        ?BotSettings $settings = null,
     ): ?string {
         if (! $this->sessions->isOpen($sessionsAllowed, $setup->barTime)) {
             return 'session_closed';
+        }
+
+        // Same position in the order as SignalGenerator::firstObjection(). The two lists have
+        // to agree: a backtest that applies the filters in a different order attributes the
+        // same skipped setup to a different reason, and then the skip histogram it prints
+        // describes a system nobody is running.
+        if ($news !== null && $news->blocking($settings, $setup->barTime, $strategy->timeframe_entry) !== null) {
+            return 'news_blackout';
         }
 
         if ($setup->adx < (float) $strategy->adx_threshold) {

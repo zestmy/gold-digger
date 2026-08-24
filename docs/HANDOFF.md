@@ -86,6 +86,11 @@ constants. That drift is how this integration breaks silently at 3am.
 > [`TRADE_MANAGEMENT.md`](TRADE_MANAGEMENT.md) and
 > [`RECONCILIATION.md`](RECONCILIATION.md). What remains is below.
 
+- ~~**The news filter.**~~ Built — see [`NEWS_FILTER.md`](NEWS_FILTER.md). `news_filter_enabled`
+  had been a settings-page toggle that appeared in no decision path; it now blacks out bars
+  overlapping scheduled high-impact USD releases, replays inside `php artisan backtest`, and
+  raises `news_calendar_stale` if its calendar stops being imported. **Needs the scheduler
+  running, or `php artisan news:import` by hand — the filter fails open.**
 - **Trailing stops and intrabar exits.** The stop moves once, to break-even; nothing
   trails it. Ladder rungs are detected on bar close and filled at market, so a spike that
   retraces fills worse than the rung. See `TRADE_MANAGEMENT.md`.

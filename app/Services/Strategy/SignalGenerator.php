@@ -5,6 +5,7 @@ namespace App\Services\Strategy;
 use App\Models\BotHeartbeat;
 use App\Models\BotSettings;
 use App\Models\Candle;
+use App\Models\MarketEvent;
 use App\Models\Signal;
 use App\Models\Strategy;
 use App\Models\Trade;
@@ -53,6 +54,7 @@ final class SignalGenerator
         private readonly PositionSizer $sizer = new PositionSizer,
         private readonly TradingSession $sessions = new TradingSession,
         private readonly SymbolResolver $symbols = new SymbolResolver,
+        private readonly NewsBlackout $news = new NewsBlackout,
     ) {}
 
     /**
@@ -102,7 +104,14 @@ final class SignalGenerator
         $settings = BotSettings::where('user_id', $strategy->user_id)->first();
         $levels = $this->levels($strategy, $setup, $spec['pip_size']);
 
-        $skipReason = $this->firstObjection($strategy, $setup, $settings, $heartbeat, $levels);
+        // Resolved once, before the objections, because two things want it: the objection
+        // itself, and the signal's features - a row reading `news_blackout` with no note of
+        // which release is a row that will be argued with.
+        $newsEvent = $settings === null
+            ? null
+            : $this->news->blocking($settings, $setup->barTime, $strategy->timeframe_entry);
+
+        $skipReason = $this->firstObjection($strategy, $setup, $settings, $heartbeat, $levels, $newsEvent);
 
         $lots = null;
 
@@ -119,7 +128,7 @@ final class SignalGenerator
             }
         }
 
-        return DB::transaction(function () use ($strategy, $setup, $levels, $skipReason, $lots, $symbol, $accountId, $heartbeat) {
+        return DB::transaction(function () use ($strategy, $setup, $levels, $skipReason, $lots, $symbol, $accountId, $heartbeat, $newsEvent) {
             // createOrFirst, not create: the check above avoids the write on the ordinary
             // path, but two overlapping candle pushes can both pass it. The unique index
             // on (strategy_id, generated_at) turns the loser's insert into a lookup
@@ -147,6 +156,9 @@ final class SignalGenerator
                         'sessions_open' => $this->sessions->active($setup->barTime),
                         'balance' => $heartbeat?->balance !== null ? (float) $heartbeat->balance : null,
                         'pip_size' => $levels['pip_size'],
+                        // Only present when something was blacked out, so the ordinary row
+                        // does not carry a null column for every bar of every quiet week.
+                        ...($newsEvent === null ? [] : ['news_event' => $newsEvent->describe()]),
                     ],
                     'was_executed' => false,
                     'skip_reason' => $skipReason,
@@ -264,6 +276,7 @@ final class SignalGenerator
         ?BotSettings $settings,
         ?BotHeartbeat $heartbeat,
         array $levels,
+        ?MarketEvent $newsEvent = null,
     ): ?string {
         if ($settings === null) {
             return 'no_bot_settings';
@@ -284,6 +297,14 @@ final class SignalGenerator
 
         if (! $this->sessions->isOpen($settings->allowed_sessions, $setup->barTime)) {
             return 'session_closed';
+        }
+
+        // Sits next to the session gate because it is the same kind of veto: not "this setup
+        // is poor" but "this is not a moment to be opening anything". Ahead of the indicator
+        // thresholds so that a setup skipped for news reads as skipped for news, rather than
+        // as a weak ADX that happened to coincide with CPI.
+        if ($newsEvent !== null) {
+            return 'news_blackout';
         }
 
         if ($setup->adx < (float) $strategy->adx_threshold) {

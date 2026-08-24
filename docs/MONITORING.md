@@ -20,6 +20,7 @@ first — this is what addresses it.
 | `feed_stalled:{timeframe}` | warning | A bar arrives within three bar-lengths |
 | `daily_loss_limit` | critical | Realised losses fall back inside the limit — in practice, tomorrow |
 | `queue_stalled` | critical | A worker starts draining the queue *(only when queued evaluation is on)* |
+| `news_calendar_stale` | warning | The calendar reaches far enough ahead again *(only when the news filter is on)* |
 
 Every condition has an explicit clear rule. That is not decoration: an alert that never resolves
 teaches you to ignore the channel it arrives on, and then the channel is worse than nothing.

@@ -6,10 +6,12 @@ use App\Models\Alert;
 use App\Models\BotHeartbeat;
 use App\Models\BotSettings;
 use App\Models\Candle;
+use App\Models\MarketEvent;
 use App\Models\Strategy;
 use App\Models\Trade;
 use App\Models\TradePartial;
 use App\Models\User;
+use App\Services\Strategy\Timeframe;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -102,6 +104,7 @@ final class HealthMonitor
             $this->feedStalled($user, $heartbeat, $settings),
             $this->dailyLossLimit($user, $settings, $heartbeat),
             $this->queueStalled(),
+            $this->newsCalendarStale($settings),
         ] as $condition) {
             if ($condition !== null) {
                 $conditions[] = $condition;
@@ -373,6 +376,62 @@ final class HealthMonitor
         ];
     }
 
+    /**
+     * The news filter is switched on and the calendar has run out.
+     *
+     * `NewsBlackout` fails open: no events means nothing is blocked. That is the right
+     * behaviour - a failed calendar import must not silently halt trading - but it is
+     * indistinguishable from a genuinely quiet week, and the difference is whether the filter
+     * the user believes is protecting them exists. This is the alert that makes failing open
+     * defensible, in exactly the way `queue_stalled` is what makes queued evaluation safe to
+     * offer at all.
+     *
+     * Measured on the calendar's *horizon* - how far into the future it reaches - rather than
+     * on when it was last written. An importer re-writing last week's rows every hour looks
+     * perfectly healthy by any other measure and is protecting nothing.
+     */
+    private function newsCalendarStale(BotSettings $settings): ?array
+    {
+        if (! $settings->news_filter_enabled) {
+            return null;
+        }
+
+        // A filter configured to a zero-width window is switched on but deliberately doing
+        // nothing. Alerting that its calendar is thin would be noise about a stated choice.
+        $width = (int) $settings->news_blackout_before_minutes + (int) $settings->news_blackout_after_minutes;
+
+        if ($width <= 0) {
+            return null;
+        }
+
+        $horizon = MarketEvent::horizon();
+        $required = now()->addHours((int) config('trading.news.calendar_stale_after_hours', 12));
+
+        if ($horizon !== null && $horizon->greaterThanOrEqualTo($required)) {
+            return null;
+        }
+
+        return [
+            'key' => 'news_calendar_stale',
+            'level' => 'warning',
+            'title' => $horizon === null
+                ? 'News filter is on but the calendar is empty'
+                : 'News filter is on but the calendar ends '.$horizon->diffForHumans(),
+            'body' => sprintf(
+                'The news blackout is enabled (%d min before / %d min after) and there are no '
+                .'scheduled events far enough ahead for it to act on. It fails open, so trades '
+                .'are being taken through releases it would otherwise have skipped. Run: '
+                .'php artisan news:import',
+                (int) $settings->news_blackout_before_minutes,
+                (int) $settings->news_blackout_after_minutes,
+            ),
+            'context' => [
+                'horizon' => $horizon?->toDateTimeString(),
+                'events_stored' => MarketEvent::count(),
+            ],
+        ];
+    }
+
     // =========================================================================
     // PERSISTENCE
     // =========================================================================
@@ -437,18 +496,9 @@ final class HealthMonitor
 
     private function timeframeSeconds(string $timeframe): int
     {
-        $unit = substr($timeframe, 0, 1);
-        $count = (int) substr($timeframe, 1);
-
-        if ($count < 1) {
-            return 300;
-        }
-
-        return match ($unit) {
-            'M' => $count * 60,
-            'H' => $count * 3600,
-            'D' => $count * 86400,
-            default => 300,
-        };
+        // Moved to a shared helper once NewsBlackout needed the same answer for a different
+        // reason. Two copies disagreeing about how long M15 is would stay invisible until it
+        // mattered - see App\Services\Strategy\Timeframe.
+        return Timeframe::seconds($timeframe);
     }
 }

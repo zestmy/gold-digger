@@ -34,3 +34,8 @@ Schedule::command('commands:sweep')->everyFiveMinutes()->withoutOverlapping();
 // withoutOverlapping is what lets HealthMonitor enforce "one open incident per key" in
 // application code instead of a unique index MySQL cannot express.
 Schedule::command('bot:monitor')->everyMinute()->withoutOverlapping();
+
+// The economic calendar behind the news blackout. Hourly rather than weekly because release
+// times get revised and the feed does not announce it - see ImportMarketEvents. A failed run
+// leaves the calendar as it was, and `news_calendar_stale` is what notices if that persists.
+Schedule::command('news:import')->hourly()->withoutOverlapping();

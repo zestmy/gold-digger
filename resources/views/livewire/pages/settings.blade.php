@@ -148,8 +148,39 @@
                     >
                     <div>
                         <label for="news_filter_enabled" class="text-sm font-medium text-gray-300 cursor-pointer">Enable News Filter</label>
-                        <p class="text-xs text-gray-500">Pause trading during high-impact news events</p>
+                        <p class="text-xs text-gray-500">Stand aside around high-impact USD releases &mdash; skipped setups appear on Signals as <span class="font-mono">news_blackout</span></p>
                     </div>
+                </div>
+
+                <!-- Blackout width -->
+                <div>
+                    <label for="news_blackout_before_minutes" class="block text-sm font-medium text-gray-300">Blackout Before (minutes)</label>
+                    <input
+                        type="number"
+                        id="news_blackout_before_minutes"
+                        wire:model="news_blackout_before_minutes"
+                        step="1"
+                        min="0"
+                        max="240"
+                        class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white shadow-sm focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm"
+                    >
+                    @error('news_blackout_before_minutes') <p class="mt-1 text-sm text-red-400">{{ $message }}</p> @enderror
+                    <p class="mt-1 text-xs text-gray-500">How long before a release to stop opening positions</p>
+                </div>
+
+                <div>
+                    <label for="news_blackout_after_minutes" class="block text-sm font-medium text-gray-300">Blackout After (minutes)</label>
+                    <input
+                        type="number"
+                        id="news_blackout_after_minutes"
+                        wire:model="news_blackout_after_minutes"
+                        step="1"
+                        min="0"
+                        max="240"
+                        class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white shadow-sm focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm"
+                    >
+                    @error('news_blackout_after_minutes') <p class="mt-1 text-sm text-red-400">{{ $message }}</p> @enderror
+                    <p class="mt-1 text-xs text-gray-500">How long to wait afterwards. Both at zero disables the filter.</p>
                 </div>
             </div>
         </div>

@@ -39,6 +39,8 @@ class UserObserver
             'max_concurrent_trades' => 3,
             'allowed_sessions' => ['london', 'newyork', 'overlap'],
             'news_filter_enabled' => true,
+            'news_blackout_before_minutes' => 15, // See docs/NEWS_FILTER.md for why 15.
+            'news_blackout_after_minutes' => 15,
             'capture_screenshots' => true,
         ]);
 
