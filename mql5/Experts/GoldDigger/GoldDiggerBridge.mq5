@@ -890,8 +890,13 @@ void GDPollCommands(void)
    for(int i = 1; i < line_count; i++)
      {
       string line = lines[i];
-      StringTrimRight(line);
-      StringTrimLeft(line);
+      //--- Strip the line terminator and nothing else. StringTrimRight() also eats
+      //--- trailing TABs, and here a TAB delimits a column rather than padding one:
+      //--- a command with an empty payload (close_all, stop, start) serialises as its
+      //--- id and type followed by ten empty columns, which is ten trailing TABs. Trim
+      //--- those and a valid 12-column line arrives as 2, so every such command is
+      //--- refused as malformed - the kill switch and Close All among them.
+      StringReplace(line, "\r", "");
       if(line == "")
          continue;
 
