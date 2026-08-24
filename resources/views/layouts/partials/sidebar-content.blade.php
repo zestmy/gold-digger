@@ -157,13 +157,7 @@
 
         <!-- Bot Status Footer -->
         <li class="mt-auto">
-            <div class="rounded-lg bg-gray-800 p-4">
-                <div class="flex items-center gap-x-3">
-                    <div class="h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse"></div>
-                    <span class="text-sm font-medium text-gray-300">Bot Offline</span>
-                </div>
-                <p class="mt-1 text-xs text-gray-500">Connect in Settings</p>
-            </div>
+            <livewire:bot-status-indicator />
         </li>
     </ul>
 </nav>

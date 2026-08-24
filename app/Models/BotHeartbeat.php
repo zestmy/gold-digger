@@ -84,6 +84,33 @@ class BotHeartbeat extends Model
     }
 
     /**
+     * The one-word state every status indicator shows.
+     *
+     * Defined here rather than in each view because it was not: the dashboard card
+     * computed it from `isOnline()` while the sidebar hardcoded "Bot Offline" on every
+     * page, so a healthy terminal was reported as online and offline simultaneously
+     * depending on where you looked. A status the UI disagrees with itself about is
+     * worse than no status - the reader learns to distrust both.
+     *
+     * A user with no heartbeat row at all is OFFLINE too; `hasEverReported()` is what
+     * separates "went quiet" from "never started", and only the wording differs.
+     */
+    public const STATUS_ONLINE = 'online';
+
+    public const STATUS_BLOCKED = 'blocked';
+
+    public const STATUS_OFFLINE = 'offline';
+
+    public function status(): string
+    {
+        return match (true) {
+            ! $this->isOnline() => self::STATUS_OFFLINE,
+            $this->isOnlineButBlocked() => self::STATUS_BLOCKED,
+            default => self::STATUS_ONLINE,
+        };
+    }
+
+    /**
      * Human-readable reason the executor cannot trade, or null when it can.
      */
     public function blockedReason(): ?string

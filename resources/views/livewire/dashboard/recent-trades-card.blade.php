@@ -9,7 +9,13 @@
                     <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
                 </svg>
                 <p class="mt-4 text-sm text-gray-500">No trades yet.</p>
-                <p class="text-xs text-gray-600">Bot is offline.</p>
+                {{-- This used to read "Bot is offline.", which this card has no way of
+                     knowing and which was wrong whenever the executor was running and
+                     simply had not taken a setup. An empty trades list is not evidence
+                     of a fault; the Signals page is where the reason actually lives. --}}
+                <a href="{{ route('signals') }}" class="text-xs text-gray-600 hover:text-gray-500">
+                    See what the strategy decided &rarr;
+                </a>
             </div>
         @else
             <!-- Trades Table -->
