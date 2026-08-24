@@ -109,6 +109,7 @@ config, terminal state, OS constraints). Design so that swapping it is a config 
  │ risk sizing    │  ◀───  │ trades / trade_partials  │  ◀─── │ C. ZeroMQ bridge   │
  └────────────────┘        │ bot_logs / heartbeats    │ fills │ D. File-drop       │
                            └──────────────────────────┘       │ E. Hosted MT5 API  │
+                                                              │ H. MT5 under Wine  │
                                                               └────────────────────┘
 ```
 
@@ -134,6 +135,7 @@ Two concrete implications:
 | E | Hosted MT5 API (MetaApi, API2Trade) | Anywhere, incl. your Linux droplet | Low | Per-account subscription | **Yes** |
 | F | Different broker with a native API (cTrader, OANDA, IBKR) | Anywhere | High (rewrite + move broker) | Varies | No |
 | G | Signal-only / semi-automatic | Anywhere | Very low | None | No |
+| H | Self-hosted MT5 in Docker under Wine | Linux, incl. your droplet | Medium | Same droplet, resized | No |
 
 ### A. Harden the Python + MT5 path *(do this first)*
 
@@ -217,6 +219,49 @@ while the execution work proceeds.
 *Pick this if:* you want value out of the system now. It is a sequencing decision, not a compromise —
 `signals.was_executed` and `skip_reason` already exist to support exactly this mode.
 
+### H. Self-hosted MT5 on Linux, in Docker under Wine
+
+The `MetaTrader5` package is Windows-only, but it is only an IPC client — it talks to a terminal on
+the same machine. Run *both* under Wine in one container and the pair works on Linux: a Windows
+Python process calling a Windows MT5 terminal, neither aware it is not on Windows. This is the only
+row in the table that is Linux-native *and* keeps credentials in-house; E buys the first by giving up
+the second.
+
+The reference implementation is
+[slowfound/metatrader5-quant-server-python](https://github.com/slowfound/metatrader5-quant-server-python),
+from the *MT5 Quant Server* series ([part 1: MT5 on Linux](https://www.youtube.com/watch?v=0DU0fCwzVgw),
+[part 2: the REST API](https://www.youtube.com/watch?v=SUzvM7g6Z6k)). The whole trick is one line in
+its `07-start-wine-flask.sh`:
+
+```bash
+wine python /app/app.py
+```
+
+Around that it wraps the terminal in Flask — `health`, `symbol`, `data`, `position`, `order`,
+`history` blueprints with Swagger docs — plus Traefik for HTTPS and VNC so you can drive the
+terminal's first interactive login. Only its `backend/mt5` container is of interest here; its
+Django/Celery half duplicates what Laravel already does. Wired in, it would sit behind the same
+`/api/v1/bot/*` contract the EA uses, and `bot/mt5_executor.py` would stop being reference-only.
+
+*Pick this if:* running a Windows VPS becomes untenable and handing a third party live credentials
+is not acceptable.
+
+*Caveats, and they are not small:*
+
+- **Unsupported by MetaQuotes.** Wine + MT5 works until a terminal auto-update breaks it, and the
+  terminal auto-updates. It will break on a day you did not choose.
+- **Their `/order` handler is not hardened.** No runtime symbol resolution, no `volume_step`
+  normalisation, no `trade_stops_level` clamping, no `order_check()` dry run — none of §2, in other
+  words. `bot/mt5_executor.py` is what belongs behind that endpoint, not their version of it.
+- **`sleep 5` then "is the PID alive" is not a health check.** A terminal that is running but logged
+  out passes it. The preflight in §6 is the real readiness probe.
+- **Resources.** `DEPLOYMENT.md` sizes the droplet at 2 GB / 1 vCPU for Laravel plus MySQL. A Wine
+  MT5 terminal on top of that needs a resize first.
+- **Blast radius.** Co-locating the terminal with the dashboard means one box failing takes out both
+  the decider and the executor. A–D at least fail independently.
+- **Unverified here.** Nothing in this repo has been run under Wine. This option is researched, not
+  tested.
+
 ### Decision
 
 **Option B.** Execution lives in an MQL5 EA; Laravel is the source of truth; the terminal polls
@@ -227,8 +272,11 @@ mitigates.
 Option A's artefacts are still worth keeping: `bot/mt5_preflight.py` diagnoses an account faster than
 attaching an EA does, and `bot/mt5_executor.py` remains the reference the MQL5 executor mirrors.
 
-Options E and F stay on the shelf. Revisit E only if running a Windows VPS becomes untenable, and
-accept that it means handing a third party your live credentials.
+Options E, F and H stay on the shelf. If a Windows VPS ever becomes untenable, reach for **H**
+before E: both put execution on Linux, but H keeps the credentials in-house and costs nothing beyond
+a droplet resize, where E costs a per-account subscription and your broker password. H's price is an
+unsupported Wine stack that a terminal auto-update can break; take E only if H proves unstable in
+practice.
 
 ---
 

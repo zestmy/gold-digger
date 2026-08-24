@@ -12,15 +12,23 @@ rejected and what the alternatives to this path are.
 
 ## Platform constraint (read this first)
 
-`MetaTrader5` on PyPI is a thin IPC wrapper around a **running Windows MT5 terminal**.
-It has no Linux or macOS build. The DigitalOcean droplet that `DEPLOYMENT.md`
-provisions runs the Laravel dashboard and **cannot** run this bot.
+`MetaTrader5` on PyPI is a thin IPC wrapper around a **running MT5 terminal**, and it ships as a
+Windows-only build with no Linux or macOS wheel. What it actually requires, though, is that the
+terminal and this package sit on the same machine as *each other* — not that the machine runs
+Windows. Both under Wine in a container satisfies that, so Linux is possible; it is just not what
+the droplet does today.
 
 You need one of:
 
-- a Windows VPS (~$10–20/month) with the MT5 terminal logged in and left running, or
+- a Windows VPS (~$10–20/month) with the MT5 terminal logged in and left running,
+- the terminal plus a Windows Python under Wine in Docker — `docs/MT5_EXECUTION.md` §4 option H.
+  This is the route that would let the DigitalOcean droplet in `DEPLOYMENT.md` run the bot, but
+  the droplet is sized for Laravel and MySQL only and would need resizing first, or
 - one of the non-terminal options in `docs/MT5_EXECUTION.md` §4 (an MQL5 EA, or a
   hosted MT5 API).
+
+Nothing in this repo has been run under Wine. Option H is researched, not verified — the setup
+instructions below assume Windows.
 
 ## Setup
 
