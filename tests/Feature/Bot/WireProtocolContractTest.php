@@ -126,6 +126,33 @@ class WireProtocolContractTest extends TestCase
         );
     }
 
+    /**
+     * Missing trailing columns must not be fatal.
+     *
+     * WIRE_COLUMNS is append-only, so a line arriving with fewer columns than the EA
+     * knows about can only mean the trailing ones were empty - which is exactly what a
+     * payloadless command looks like. Refusing those is what stranded Close All. Only
+     * a line with MORE columns than agreed is genuine protocol drift.
+     */
+    public function test_the_ea_refuses_only_lines_with_too_many_columns(): void
+    {
+        $source = preg_replace('#//[^\n]*#', '', $this->eaSource());
+
+        $this->assertStringContainsString(
+            'n > GD_WIRE_COLUMNS',
+            $source,
+            'The EA must treat only an over-long line as malformed.',
+        );
+
+        $this->assertStringNotContainsString(
+            'n != GD_WIRE_COLUMNS',
+            $source,
+            'Rejecting a line for having FEWER columns than GD_WIRE_COLUMNS refuses every '
+            .'command whose trailing columns are empty - close_all, start and stop. Pad the '
+            .'missing columns instead and let each command type validate what it needs.',
+        );
+    }
+
     public function test_the_ea_does_not_trim_tabs_off_a_command_line(): void
     {
         // The parse loop, from where it takes the line to where it splits on TAB.

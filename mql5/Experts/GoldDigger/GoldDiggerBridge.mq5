@@ -903,11 +903,27 @@ void GDPollCommands(void)
       string fields[];
       const int n = StringSplit(line, StringGetCharacter("\t", 0), fields);
 
-      if(n != GD_WIRE_COLUMNS)
+      //--- More columns than agreed is real drift: the dashboard is sending a format
+      //--- this EA does not understand, and guessing which column became which would
+      //--- be worse than refusing. The line itself is logged because a column count on
+      //--- its own never says what actually arrived - that cost an evening once.
+      if(n < 1 || n > GD_WIRE_COLUMNS)
         {
-         GDLog("error", StringFormat("Malformed command line: expected %d columns, got %d",
-                                     GD_WIRE_COLUMNS, n));
+         GDLog("error", StringFormat("Malformed command line: expected %d columns, got %d: '%s'",
+                                     GD_WIRE_COLUMNS, n, line));
          continue;
+        }
+
+      //--- Fewer columns means the trailing ones were empty, which is the ordinary
+      //--- shape of a payloadless command: close_all and stop are an id, a type, and
+      //--- ten empty columns. WIRE_COLUMNS is append-only, so a missing trailing column
+      //--- can only mean empty. Pad rather than refuse, and let each command type
+      //--- reject the fields it actually needs - Open() already refuses a zero volume.
+      if(n < GD_WIRE_COLUMNS)
+        {
+         ArrayResize(fields, GD_WIRE_COLUMNS);
+         for(int f = n; f < GD_WIRE_COLUMNS; f++)
+            fields[f] = "";
         }
 
       GDHandleCommand(fields);
