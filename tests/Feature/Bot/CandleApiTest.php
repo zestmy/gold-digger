@@ -65,6 +65,10 @@ class CandleApiTest extends TestCase
             'is_active' => true,
             'allowed_sessions' => null,
             'min_atr_threshold' => null,
+            // The news filter fails closed with no calendar loaded, which would be the
+            // first objection on every signal these tests generate. NewsBlackoutTest
+            // covers that behaviour directly.
+            'news_filter_enabled' => false,
         ]);
 
         $this->strategy = Strategy::where('user_id', $this->user->id)->firstOrFail();

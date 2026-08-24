@@ -85,6 +85,22 @@ class Candle extends Model
         return array_map(static fn (self $c) => (float) $c->close, $candles);
     }
 
+    /**
+     * High prices of a series, oldest-first.
+     */
+    public static function highs(array $candles): array
+    {
+        return array_map(static fn (self $c) => (float) $c->high, $candles);
+    }
+
+    /**
+     * Low prices of a series, oldest-first.
+     */
+    public static function lows(array $candles): array
+    {
+        return array_map(static fn (self $c) => (float) $c->low, $candles);
+    }
+
     // =========================================================================
     // RELATIONSHIPS
     // =========================================================================

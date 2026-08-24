@@ -10,6 +10,8 @@ use App\Models\Strategy;
 use App\Models\Trade;
 use App\Models\TradeCommand;
 use App\Models\TradePartial;
+use App\Services\News\NewsBlackout;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -53,6 +55,7 @@ final class SignalGenerator
         private readonly PositionSizer $sizer = new PositionSizer,
         private readonly TradingSession $sessions = new TradingSession,
         private readonly SymbolResolver $symbols = new SymbolResolver,
+        private readonly NewsBlackout $news = new NewsBlackout,
     ) {}
 
     /**
@@ -284,6 +287,23 @@ final class SignalGenerator
 
         if (! $this->sessions->isOpen($settings->allowed_sessions, $setup->barTime)) {
             return 'session_closed';
+        }
+
+        // Beside the session gate rather than further down, because both answer "not
+        // allowed to trade at this moment" - which is more decisive than anything about
+        // the quality of the setup. A signal blocked by NFP and also short of ADX should
+        // report the release: lowering adx_threshold would not have got it traded.
+        //
+        // The strategy's configured symbol, not the resolved one: currenciesFor() reads
+        // the pair off the name and a broker suffix would corrupt it.
+        $newsObjection = $this->news->objection(
+            $settings,
+            $this->news->currenciesFor((string) $strategy->symbol),
+            Carbon::parse($setup->barTime),
+        );
+
+        if ($newsObjection !== null) {
+            return $newsObjection;
         }
 
         if ($setup->adx < (float) $strategy->adx_threshold) {

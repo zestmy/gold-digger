@@ -47,6 +47,8 @@ class Signals extends Component
         'bot_inactive' => ['label' => 'Bot stopped', 'help' => 'The kill switch is off. Start the bot to trade these.'],
         'algo_trading_disabled' => ['label' => 'Algo trading off', 'help' => "The terminal's Algo Trading button is off. Orders would be refused with 10027."],
         'session_closed' => ['label' => 'Outside session', 'help' => 'The bar closed outside the sessions allowed in settings.'],
+        'news_blackout' => ['label' => 'News blackout', 'help' => 'A high-impact release for this pair fell inside the blackout window set in settings.'],
+        'news_data_stale' => ['label' => 'No calendar', 'help' => 'The news filter is on but the calendar is missing or stale, so it cannot be checked. Entries are held rather than taken unprotected — fix the feed, or turn the filter off in settings.'],
         'adx_below_threshold' => ['label' => 'Trend too weak', 'help' => 'ADX was under the strategy threshold. Lower it to take more of these.'],
         'atr_below_threshold' => ['label' => 'Too quiet', 'help' => 'ATR was under the minimum in settings.'],
         'no_symbol_spec' => ['label' => 'No pip size', 'help' => 'The terminal has not reported the pip size, so no honest stop distance exists.'],

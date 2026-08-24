@@ -34,6 +34,15 @@ class Settings extends Component
     #[Validate('boolean')]
     public bool $news_filter_enabled = true;
 
+    // Editable because the filter now enforces them. They were columns nothing could set:
+    // present in the database, absent from the migrations, and read by no code - so a
+    // window nobody could configure gated trading the moment the filter became real.
+    #[Validate('required|integer|min:0|max:240')]
+    public int $news_blackout_before_minutes = 15;
+
+    #[Validate('required|integer|min:0|max:240')]
+    public int $news_blackout_after_minutes = 15;
+
     #[Validate('boolean')]
     public bool $capture_screenshots = true;
 
@@ -56,6 +65,8 @@ class Settings extends Component
             $this->allowed_sessions = $settings->allowed_sessions ?? [];
             $this->min_atr_threshold = $settings->min_atr_threshold ?? '0.50';
             $this->news_filter_enabled = $settings->news_filter_enabled ?? true;
+            $this->news_blackout_before_minutes = (int) ($settings->news_blackout_before_minutes ?? 15);
+            $this->news_blackout_after_minutes = (int) ($settings->news_blackout_after_minutes ?? 15);
             $this->capture_screenshots = $settings->capture_screenshots ?? true;
         }
     }
@@ -74,6 +85,8 @@ class Settings extends Component
             'allowed_sessions' => $this->allowed_sessions,
             'min_atr_threshold' => $this->min_atr_threshold,
             'news_filter_enabled' => $this->news_filter_enabled,
+            'news_blackout_before_minutes' => $this->news_blackout_before_minutes,
+            'news_blackout_after_minutes' => $this->news_blackout_after_minutes,
             'capture_screenshots' => $this->capture_screenshots,
         ]);
 
