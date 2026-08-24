@@ -96,4 +96,89 @@ class WireProtocolContractTest extends TestCase
             $this->assertStringContainsString((string) $retcode, $python, "Python executor does not explain retcode {$retcode}.");
         }
     }
+
+    /**
+     * A command with no payload is nothing but empty trailing columns.
+     *
+     * This is the shape that broke commissioning: `close_all` serialises as an id, a
+     * type, and ten empty columns. Both sides agreed the format had twelve columns, so
+     * the constant check above passed while every such command was rejected.
+     */
+    public function test_a_command_with_no_payload_still_serialises_every_column(): void
+    {
+        $command = new TradeCommand(['type' => 'close_all', 'payload' => []]);
+        $command->id = 5;
+
+        $line = $command->toWireLine();
+
+        $this->assertCount(
+            count(TradeCommand::WIRE_COLUMNS),
+            explode("\t", $line),
+            'A payloadless command must still occupy every column.',
+        );
+
+        // The hazard, stated as an assertion so the test below is not vacuous: the line
+        // ends in TABs, and anything that treats a TAB as trailing whitespace destroys it.
+        $this->assertStringEndsWith("\t", $line);
+        $this->assertNotCount(
+            count(TradeCommand::WIRE_COLUMNS),
+            explode("\t", rtrim($line, " \t\r\n")),
+        );
+    }
+
+    /**
+     * Missing trailing columns must not be fatal.
+     *
+     * WIRE_COLUMNS is append-only, so a line arriving with fewer columns than the EA
+     * knows about can only mean the trailing ones were empty - which is exactly what a
+     * payloadless command looks like. Refusing those is what stranded Close All. Only
+     * a line with MORE columns than agreed is genuine protocol drift.
+     */
+    public function test_the_ea_refuses_only_lines_with_too_many_columns(): void
+    {
+        $source = preg_replace('#//[^\n]*#', '', $this->eaSource());
+
+        $this->assertStringContainsString(
+            'n > GD_WIRE_COLUMNS',
+            $source,
+            'The EA must treat only an over-long line as malformed.',
+        );
+
+        $this->assertStringNotContainsString(
+            'n != GD_WIRE_COLUMNS',
+            $source,
+            'Rejecting a line for having FEWER columns than GD_WIRE_COLUMNS refuses every '
+            .'command whose trailing columns are empty - close_all, start and stop. Pad the '
+            .'missing columns instead and let each command type validate what it needs.',
+        );
+    }
+
+    public function test_the_ea_does_not_trim_tabs_off_a_command_line(): void
+    {
+        // The parse loop, from where it takes the line to where it splits on TAB.
+        $found = preg_match(
+            '/string\s+line\s*=\s*lines\[i\];(.*?)StringSplit\(\s*line\s*,/s',
+            $this->eaSource(),
+            $m,
+        );
+
+        $this->assertSame(1, $found, 'Could not find the command-line parse loop in the EA.');
+
+        // Comments in that span explain this very hazard and name the functions, so
+        // strip them: what matters is whether the code calls one, not whether the
+        // prose mentions one.
+        $code = preg_replace('#//[^\n]*#', '', $m[1]);
+
+        foreach (['StringTrimRight', 'StringTrimLeft'] as $trim) {
+            $this->assertStringNotContainsString(
+                $trim.'(',
+                $code,
+                "The EA must not call {$trim}() on a command line before splitting it. MQL5 "
+                .'counts TAB as whitespace, so trimming deletes the empty trailing columns '
+                .'of any payloadless command: close_all and stop arrive as 2 columns instead '
+                .'of '.count(TradeCommand::WIRE_COLUMNS).' and are refused as malformed. '
+                .'Strip the line terminator explicitly instead.',
+            );
+        }
+    }
 }
