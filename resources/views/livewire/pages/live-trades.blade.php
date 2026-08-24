@@ -55,6 +55,11 @@
         </div>
     </div>
 
+    <!-- Price chart, with every open position's entry, stop and ladder drawn on it -->
+    <div class="mb-6">
+        <livewire:dashboard.price-chart-card />
+    </div>
+
     <!-- Trades Table -->
     <div class="rounded-lg bg-gray-800 overflow-hidden">
         @if($trades->isEmpty())

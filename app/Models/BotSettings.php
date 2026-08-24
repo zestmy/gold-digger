@@ -33,6 +33,8 @@ class BotSettings extends Model
         'allowed_sessions',
         'min_atr_threshold',
         'news_filter_enabled',
+        'news_blackout_before_minutes',
+        'news_blackout_after_minutes',
         'capture_screenshots',
     ];
 
@@ -48,6 +50,11 @@ class BotSettings extends Model
             'is_active' => 'boolean',
             'news_filter_enabled' => 'boolean',
             'capture_screenshots' => 'boolean',
+
+            // Minutes either side of a high-impact release. Cast so NewsBlackout compares
+            // integers rather than the strings a raw column read would give it.
+            'news_blackout_before_minutes' => 'integer',
+            'news_blackout_after_minutes' => 'integer',
 
             // Decimals - Laravel casts these to strings for precision
             'risk_percentage' => 'decimal:2',

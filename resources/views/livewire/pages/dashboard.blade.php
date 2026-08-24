@@ -18,6 +18,16 @@
             </div>
         </div>
 
+        <!-- Market Context: what the strategy is looking at, and whether it is allowed to act -->
+        <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <livewire:dashboard.trend-card />
+            <livewire:dashboard.session-card />
+            <livewire:dashboard.news-card />
+        </div>
+
+        <!-- Written analysis of the same numbers the cards above show -->
+        <livewire:dashboard.ai-analysis-card />
+
         <!-- Quick Actions Row -->
         <livewire:dashboard.quick-actions-card />
 

@@ -34,3 +34,13 @@ Schedule::command('commands:sweep')->everyFiveMinutes()->withoutOverlapping();
 // withoutOverlapping is what lets HealthMonitor enforce "one open incident per key" in
 // application code instead of a unique index MySQL cannot express.
 Schedule::command('bot:monitor')->everyMinute()->withoutOverlapping();
+
+// The economic calendar behind the news blackout filter. Hourly: the week's schedule
+// barely moves, but `actual` values print through the day, and NewsBlackout stops
+// trusting the data after six hours - so this is five consecutive failures of headroom
+// before the filter begins holding entries.
+//
+// Without cron this never runs, and a news filter that is switched on will hold every
+// entry as `news_data_stale` rather than trade unprotected. That is the intended
+// direction, and it is the one thing in this file whose absence changes trading.
+Schedule::command('news:fetch')->hourly()->withoutOverlapping();

@@ -119,6 +119,16 @@ jobs:
             php artisan view:cache
             php artisan storage:link --force || true
 
+            # Seed the economic calendar before traffic returns. NewsBlackout fails closed
+            # when the calendar is missing, so a deploy that left it empty would hold every
+            # entry as `news_data_stale` until the hourly cron caught up - an hour of not
+            # trading, caused by a deploy rather than by anything about the market.
+            #
+            # `|| true` because the feed rate-limits and is not worth failing a deploy over:
+            # if this misses, the scheduled run covers it, and the filter is holding entries
+            # rather than taking them unprotected in the meantime.
+            php artisan news:fetch || true
+
             chown -R www-data:www-data /var/www/gold-digger
 
             # Derived, not hardcoded. This said php8.3-fpm while scripts/server-setup.sh

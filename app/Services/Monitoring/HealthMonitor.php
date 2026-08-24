@@ -10,6 +10,7 @@ use App\Models\Strategy;
 use App\Models\Trade;
 use App\Models\TradePartial;
 use App\Models\User;
+use App\Services\Strategy\TradingSession;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -239,6 +240,30 @@ final class HealthMonitor
         $deadline = $newest->copy()->addSeconds($seconds * self::FEED_STALE_BARS);
 
         if ($deadline->isFuture()) {
+            return null;
+        }
+
+        // A feed that stops when this account would not trade anyway is not a fault.
+        //
+        // Brokers close gold for a daily rollover - Elev8 does it at 21:00 UTC, and the
+        // last bar before a break never closes, so the push legitimately stops. Without
+        // this gate that fires a warning every single night. The class comment above
+        // already says an alert that never clears trains you to ignore the channel; one
+        // that cries wolf on a schedule does the same thing faster, and the channel it
+        // teaches you to ignore is the one carrying "your executor is dead".
+        //
+        // Gated on the account's own sessions rather than a hardcoded break window,
+        // because break times vary by broker and this is the question that actually
+        // matters: if no allowed session is open, a missing bar changes nothing.
+        if (! (new TradingSession)->isOpen($settings->allowed_sessions, Carbon::now('UTC'))) {
+            return null;
+        }
+
+        // Weekends, regardless of session configuration. `allowed_sessions` may be empty,
+        // which TradingSession reads as "always allowed" - correct for trading, wrong as
+        // evidence the market is open. FX is shut from Friday close to Sunday open, and
+        // no configuration makes a missing Saturday bar interesting.
+        if (Carbon::now('UTC')->isWeekend()) {
             return null;
         }
 

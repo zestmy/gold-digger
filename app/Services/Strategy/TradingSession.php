@@ -90,6 +90,55 @@ final class TradingSession
         return $active;
     }
 
+    /**
+     * Every session name this class understands, for building a settings UI or a legend.
+     *
+     * 'tokyo' is omitted for the reason `active()` skips it: it is a second name for the
+     * same window as 'asian', and offering both invites a configuration that looks like
+     * two sessions and behaves like one.
+     *
+     * @return array<int, string>
+     */
+    public function names(): array
+    {
+        return array_values(array_diff(array_keys(self::WINDOWS), ['tokyo']));
+    }
+
+    /**
+     * When the next allowed session opens, or null if one is open now or none is configured.
+     *
+     * Answers the question the dashboard actually gets asked - "why is nothing happening,
+     * and how long until it does?" - which `isOpen()` alone leaves as an exercise. Scans
+     * forward hour by hour over a full day rather than reasoning about the window
+     * arithmetic: the windows wrap midnight, several may be allowed at once, and an
+     * off-by-one in that arithmetic would misreport quietly. A 24-step loop is cheap and
+     * cannot be subtly wrong.
+     *
+     * @param  array<int, string>|null  $allowedSessions
+     */
+    public function nextOpenAt(?array $allowedSessions, CarbonInterface $moment): ?CarbonInterface
+    {
+        if ($this->isOpen($allowedSessions, $moment)) {
+            return null;
+        }
+
+        // Start from the top of the next hour: the windows have hour granularity, so
+        // that is the earliest boundary at which the answer can change.
+        $probe = $moment->copy()->utc()->startOfHour()->addHour();
+
+        for ($i = 0; $i < 24; $i++) {
+            if ($this->isOpen($allowedSessions, $probe)) {
+                return $probe;
+            }
+
+            $probe = $probe->copy()->addHour();
+        }
+
+        // Unreachable for any recognised session, but a list of only unrecognised names
+        // is closed for every hour of the day and must not loop forever or lie.
+        return null;
+    }
+
     private function inWindow(string $session, CarbonInterface $moment): bool
     {
         $window = self::WINDOWS[strtolower($session)] ?? null;

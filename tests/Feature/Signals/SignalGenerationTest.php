@@ -6,6 +6,7 @@ use App\Models\BotHeartbeat;
 use App\Models\BotSettings;
 use App\Models\BrokerAccount;
 use App\Models\Candle;
+use App\Models\EconomicEvent;
 use App\Models\Signal;
 use App\Models\Strategy;
 use App\Models\Trade;
@@ -16,6 +17,7 @@ use App\Services\Strategy\SignalGenerator;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Tests\Support\MakesPriceSeries;
 use Tests\TestCase;
 
@@ -73,6 +75,11 @@ class SignalGenerationTest extends TestCase
             // Session filtering has its own test. Leaving it unset here keeps every other
             // test from depending on what time of day the fixture bars land on.
             'allowed_sessions' => null,
+            // Likewise the news filter, which UserObserver defaults to on. It fails closed
+            // when no calendar is present - correct behaviour, and it would otherwise be
+            // the first objection every one of these tests hit, masking the gate each is
+            // actually about. NewsBlackoutTest covers the filter itself.
+            'news_filter_enabled' => false,
             'min_atr_threshold' => null,
         ]);
 
@@ -392,6 +399,64 @@ class SignalGenerationTest extends TestCase
         $this->settings->update(['allowed_sessions' => ['london', 'overlap']]);
 
         $this->assertNull($this->generate()->skip_reason);
+    }
+
+    /**
+     * The news filter, end to end through the signal path.
+     *
+     * `news_filter_enabled` was a settings toggle with nothing behind it until the
+     * calendar existed. NewsBlackoutTest covers the window arithmetic; these prove the
+     * gate is actually wired into signal generation and reports itself distinctly.
+     */
+    public function test_a_bar_inside_a_news_blackout_is_skipped(): void
+    {
+        $this->seedBullishSetup();
+        $this->settings->update(['news_filter_enabled' => true]);
+        $this->calendarEvent('2026-03-10 13:05:00');
+
+        $signal = $this->generate();
+
+        $this->assertSame('news_blackout', $signal->skip_reason);
+        $this->assertSame(0, TradeCommand::count());
+    }
+
+    public function test_a_bar_clear_of_the_calendar_is_not_skipped(): void
+    {
+        $this->seedBullishSetup();
+        $this->settings->update(['news_filter_enabled' => true]);
+        // Six hours away, far outside the 15-minute window.
+        $this->calendarEvent('2026-03-10 19:00:00');
+
+        $this->assertNull($this->generate()->skip_reason);
+    }
+
+    /**
+     * The direction this fails in is the whole point of the design.
+     */
+    public function test_the_filter_holds_entries_when_there_is_no_calendar_to_check(): void
+    {
+        $this->seedBullishSetup();
+        $this->settings->update(['news_filter_enabled' => true]);
+        // No events loaded at all.
+
+        $signal = $this->generate();
+
+        $this->assertSame('news_data_stale', $signal->skip_reason);
+        $this->assertSame(0, TradeCommand::count(), 'An unverifiable filter must not let an entry through.');
+    }
+
+    private function calendarEvent(string $scheduledAtUtc): void
+    {
+        Cache::flush();
+
+        EconomicEvent::create([
+            'external_id' => 'sig-test-'.md5($scheduledAtUtc),
+            'title' => 'Non-Farm Employment Change',
+            'currency' => 'USD',
+            'impact' => 'high',
+            'scheduled_at' => Carbon::parse($scheduledAtUtc, 'UTC'),
+            'fetched_at' => now(),
+        ]);
     }
 
     /**

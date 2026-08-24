@@ -173,10 +173,15 @@ final class StrategyEvaluator
     /**
      * Which way the higher timeframe is pointing, or null while its EMAs are still cold.
      *
+     * Public for the same reason `crossDirection()` is: the dashboard's trend card shows
+     * this to a human, and a card that called the trend bullish while the strategy that
+     * trades it called it bearish would be worse than showing nothing. One definition,
+     * read by both.
+     *
      * @param  array<int, Candle>  $trendCandles
      * @return 'buy'|'sell'|null
      */
-    private function trendDirection(array $trendCandles, int $emaFast, int $emaSlow): ?string
+    public function trendDirection(array $trendCandles, int $emaFast, int $emaSlow): ?string
     {
         $closes = Candle::closes($trendCandles);
 

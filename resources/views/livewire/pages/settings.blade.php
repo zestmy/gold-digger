@@ -148,8 +148,38 @@
                     >
                     <div>
                         <label for="news_filter_enabled" class="text-sm font-medium text-gray-300 cursor-pointer">Enable News Filter</label>
-                        <p class="text-xs text-gray-500">Pause trading during high-impact news events</p>
+                        <p class="text-xs text-gray-500">Hold entries around high-impact releases for this pair's currencies</p>
                     </div>
+                </div>
+
+                {{-- The window the filter applies. These were columns nothing could set
+                     while the filter itself did nothing; both are now load-bearing. --}}
+                <div class="mt-4 grid grid-cols-2 gap-4 pl-7" x-data x-show="$wire.news_filter_enabled" x-cloak>
+                    <div>
+                        <label for="news_blackout_before_minutes" class="block text-sm font-medium text-gray-300">Minutes before</label>
+                        <input
+                            type="number" min="0" max="240"
+                            id="news_blackout_before_minutes"
+                            wire:model="news_blackout_before_minutes"
+                            class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm"
+                        >
+                        @error('news_blackout_before_minutes') <p class="mt-1 text-xs text-red-400">{{ $message }}</p> @enderror
+                    </div>
+                    <div>
+                        <label for="news_blackout_after_minutes" class="block text-sm font-medium text-gray-300">Minutes after</label>
+                        <input
+                            type="number" min="0" max="240"
+                            id="news_blackout_after_minutes"
+                            wire:model="news_blackout_after_minutes"
+                            class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm"
+                        >
+                        @error('news_blackout_after_minutes') <p class="mt-1 text-xs text-red-400">{{ $message }}</p> @enderror
+                    </div>
+                    <p class="col-span-2 text-xs text-gray-500">
+                        Both zero means the filter is on and blocks nothing. If the calendar
+                        cannot be reached, entries are held rather than taken unprotected &mdash;
+                        recorded as <code class="text-gray-400">news_data_stale</code>.
+                    </p>
                 </div>
             </div>
         </div>

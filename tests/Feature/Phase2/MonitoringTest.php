@@ -232,8 +232,57 @@ class MonitoringTest extends TestCase
      */
     public function test_a_stalled_price_feed_raises_an_alert(): void
     {
-        $this->heartbeat();
+        // Frozen inside the New York session. The check is now session-aware, so a test
+        // that runs at whatever the wall clock happens to say would pass all afternoon
+        // and fail every evening.
+        $this->travelTo(Carbon::parse('2026-08-24 14:00:00', 'UTC'));
 
+        $this->heartbeat();
+        $this->staleCandle();
+
+        app(HealthMonitor::class)->sweep();
+
+        $this->assertContains('feed_stalled:M5', $this->keys());
+    }
+
+    /**
+     * The daily rollover must not page anyone.
+     *
+     * Brokers close gold for an hour a day - Elev8 at 21:00 UTC - and the last bar before
+     * a break never closes, so the push stops legitimately. Alerting on it would fire a
+     * warning every night until the channel stopped being read.
+     */
+    public function test_a_stalled_feed_outside_the_allowed_sessions_is_not_an_alert(): void
+    {
+        // 21:30 UTC on a Monday: New York (12-21) has closed, and this account trades
+        // london/newyork/overlap only.
+        $this->travelTo(Carbon::parse('2026-08-24 21:30:00', 'UTC'));
+
+        $this->heartbeat();
+        $this->staleCandle();
+
+        app(HealthMonitor::class)->sweep();
+
+        $this->assertNotContains('feed_stalled:M5', $this->keys());
+    }
+
+    public function test_a_stalled_feed_at_the_weekend_is_not_an_alert(): void
+    {
+        // Saturday. No session configuration makes a missing weekend bar interesting, so
+        // this holds even for an account with no session restriction at all.
+        $this->travelTo(Carbon::parse('2026-08-29 14:00:00', 'UTC'));
+        $this->settings->update(['allowed_sessions' => []]);
+
+        $this->heartbeat();
+        $this->staleCandle();
+
+        app(HealthMonitor::class)->sweep();
+
+        $this->assertNotContains('feed_stalled:M5', $this->keys());
+    }
+
+    private function staleCandle(): void
+    {
         Candle::create([
             'user_id' => $this->user->id,
             'broker_account_id' => $this->account->id,
@@ -242,10 +291,6 @@ class MonitoringTest extends TestCase
             'open_time' => now()->subHour(),
             'open' => 2000, 'high' => 2001, 'low' => 1999, 'close' => 2000,
         ]);
-
-        app(HealthMonitor::class)->sweep();
-
-        $this->assertContains('feed_stalled:M5', $this->keys());
     }
 
     /**
