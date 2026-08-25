@@ -229,15 +229,33 @@ async def forward(tg: TelegramClient, state: dict, chat_id: str, messages) -> in
     return result["stored"]
 
 
+async def resolve(tg: TelegramClient, watch: set[str]) -> dict:
+    """
+    Map watched ids back to entities by walking the dialog list.
+
+    Rather than `get_entity(id)`, which needs an access hash Telethon may not have cached
+    and fails on a fresh process for exactly the channels this exists to read. Iterating
+    dialogs fetches the hashes as a side effect, so this both resolves and warms the cache.
+    """
+    found = {}
+
+    async for dialog in tg.iter_dialogs():
+        chat_id = chat_id_of(dialog.entity)
+
+        if chat_id in watch:
+            found[chat_id] = dialog.entity
+
+    for missing in watch - found.keys():
+        print(f"[{missing}] enabled in the dashboard, but this account is not in it.")
+
+    return found
+
+
 async def catch_up(tg: TelegramClient, state: dict, watch: list[str]) -> None:
     """Fetch what arrived while this was not running."""
-    for chat_id in watch:
-        try:
-            entity = await tg.get_entity(int(chat_id))
-        except (ValueError, TypeError) as error:
-            print(f"[{chat_id}] cannot resolve: {error}")
-            continue
+    entities = await resolve(tg, set(watch))
 
+    for chat_id, entity in entities.items():
         last = state["seen"].get(chat_id)
 
         messages = [
