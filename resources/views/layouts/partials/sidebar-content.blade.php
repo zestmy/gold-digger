@@ -29,6 +29,7 @@
             ['signals', 'Signals', 'M9.348 14.652a3.75 3.75 0 010-5.304m5.304 0a3.75 3.75 0 010 5.304m-7.425 2.121a6.75 6.75 0 010-9.546m9.546 0a6.75 6.75 0 010 9.546M5.106 18.894c-3.808-3.807-3.808-9.98 0-13.788m13.788 0c3.808 3.807 3.808 9.98 0 13.788M12 12h.008v.008H12V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z'],
         ],
         'Copier' => [
+            ['signals.accounts', 'Telegram Accounts', 'M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z'],
             ['signals.copier', 'Signal Copier', 'M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5'],
             ['signals.channels', 'Channels', 'M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 008.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.413.811 1.035.811 1.73 0 .695-.316 1.317-.811 1.73m0-3.46a24.347 24.347 0 010 3.46'],
         ],
@@ -59,13 +60,38 @@
     </a>
 </div>
 
-<nav class="flex flex-1 flex-col">
-    <ul role="list" class="flex flex-1 flex-col gap-y-6">
+{{-- Collapsed state lives in localStorage rather than on the server: it is a preference
+     about this browser window, it has to survive a full page load without a round trip,
+     and a section that reopened itself on every navigation would be worse than one that
+     never closed. A section containing the current page is forced open, so collapsing
+     something can never hide where you are. --}}
+<nav class="flex flex-1 flex-col"
+     x-data="{
+         shut: JSON.parse(localStorage.getItem('gd-nav-shut') || '[]'),
+         toggle(name) {
+             this.shut = this.shut.includes(name)
+                 ? this.shut.filter(n => n !== name)
+                 : [...this.shut, name];
+             localStorage.setItem('gd-nav-shut', JSON.stringify(this.shut));
+         },
+         open(name, hasCurrent) { return hasCurrent || ! this.shut.includes(name); }
+     }">
+    <ul role="list" class="flex flex-1 flex-col gap-y-4">
         @foreach($sections as $heading => $links)
+            @php($hasCurrent = collect($links)->contains(fn ($l) => request()->routeIs($l[0])))
             <li>
-                <div class="px-2 text-xs font-semibold uppercase tracking-wider text-gray-600">{{ $heading }}</div>
+                <button type="button" x-on:click="toggle('{{ $heading }}')"
+                        class="flex w-full items-center gap-x-1.5 rounded px-2 py-1 text-xs font-semibold uppercase tracking-wider text-gray-600 hover:text-gray-400">
+                    <svg class="h-3 w-3 shrink-0 transition-transform"
+                         x-bind:class="open('{{ $heading }}', {{ $hasCurrent ? 'true' : 'false' }}) ? 'rotate-90' : ''"
+                         fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                    </svg>
+                    {{ $heading }}
+                </button>
 
-                <ul role="list" class="-mx-2 mt-1 space-y-0.5">
+                <ul role="list" class="-mx-2 mt-1 space-y-0.5"
+                    x-show="open('{{ $heading }}', {{ $hasCurrent ? 'true' : 'false' }})" x-cloak>
                     @foreach($links as [$route, $label, $icon])
                         @php($active = request()->routeIs($route))
                         <li>

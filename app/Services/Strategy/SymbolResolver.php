@@ -42,6 +42,10 @@ final class SymbolResolver
         if ($spec !== null) {
             return [
                 'symbol' => $spec->symbol,
+                // How many decimals the broker quotes this in. Needed to turn a spread
+                // measured in points into one measured in pips, which are not the same
+                // unit and differ by a factor of ten on gold.
+                'digits' => $spec->digits !== null ? (int) $spec->digits : null,
                 'pip_size' => $spec->pip_size !== null ? (float) $spec->pip_size : null,
                 'pip_value_per_lot' => $spec->pip_value_per_lot !== null ? (float) $spec->pip_value_per_lot : null,
                 'volume_min' => $spec->volume_min !== null ? (float) $spec->volume_min : null,
@@ -60,6 +64,7 @@ final class SymbolResolver
         if ($describesThisSymbol) {
             return [
                 'symbol' => $heartbeat->resolved_symbol,
+                'digits' => $heartbeat->digits !== null ? (int) $heartbeat->digits : null,
                 'pip_size' => $heartbeat->pip_size !== null ? (float) $heartbeat->pip_size : null,
                 'pip_value_per_lot' => $heartbeat->pip_value_per_lot !== null ? (float) $heartbeat->pip_value_per_lot : null,
                 'volume_min' => $heartbeat->volume_min !== null ? (float) $heartbeat->volume_min : null,
@@ -71,6 +76,7 @@ final class SymbolResolver
         // Nothing known. The caller records the signal unexecuted rather than guessing.
         return [
             'symbol' => $symbol,
+            'digits' => null,
             'pip_size' => null,
             'pip_value_per_lot' => null,
             'volume_min' => null,

@@ -7,6 +7,7 @@ use App\Livewire\Pages\BrokerAccounts;
 use App\Livewire\Pages\Dashboard;
 use App\Livewire\Pages\LiveTrades;
 use App\Livewire\Pages\Settings;
+use App\Livewire\Pages\TelegramAccounts;
 use App\Livewire\Pages\Setup;
 use App\Livewire\Pages\SignalChannels;
 use App\Livewire\Pages\SignalCopier;
@@ -56,6 +57,8 @@ Route::middleware(['auth'])->group(function () {
     // Which providers are on, and what each has been worth. Same page, because they are
     // the same decision.
     Route::get('/signals/channels', SignalChannels::class)->name('signals.channels');
+    // One collector per account, each with its own token and its own session.
+    Route::get('/signals/accounts', TelegramAccounts::class)->name('signals.accounts');
 
     // Configuration
     Route::get('/strategies', Strategies::class)->name('strategies');

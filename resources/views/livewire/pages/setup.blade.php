@@ -103,12 +103,9 @@
                 @endforeach
             </ul>
 
-            {{-- Said here because it is the thing people compare on, and the comparison is
-                 not in our favour on convenience. --}}
             <p class="mt-4 border-t border-gray-700 pt-4 text-xs text-gray-500">
-                Hosted copiers skip the terminal step by asking for your broker password and logging into
-                your account from their cloud. That is genuinely less work. It also means a company holds a
-                credential that can trade your account, which is the trade this makes differently.
+                Each step is checked live rather than remembered, so a revoked token or a terminal that
+                stops reporting shows up here straight away.
             </p>
         </div>
     </div>

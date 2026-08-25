@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Telegram;
 
 use App\Http\Controllers\Controller;
+use App\Models\TelegramAccount;
 use App\Models\TelegramChannel;
 use App\Models\User;
 use App\Services\Telegram\SignalIngest;
@@ -54,6 +55,10 @@ class CollectorController extends Controller
     {
         $user = $this->user($request);
 
+        // Polled every minute, which makes this the reliable liveness signal - announce
+        // runs once at startup and a busy channel may post nothing for hours.
+        $this->account($request)?->update(['last_seen_at' => now()]);
+
         $channels = TelegramChannel::where('source', TelegramChannel::SOURCE_ACCOUNT)
             ->orderBy('id')
             ->get();
@@ -81,21 +86,39 @@ class CollectorController extends Controller
             'channels.*.chat_id' => ['required', 'string', 'max:64'],
             'channels.*.title' => ['nullable', 'string', 'max:255'],
             'channels.*.username' => ['nullable', 'string', 'max:64'],
+            'me' => ['nullable', 'array'],
+            'me.username' => ['nullable', 'string', 'max:64'],
+            'me.name' => ['nullable', 'string', 'max:255'],
         ]);
 
         $user = $this->user($request);
+        $account = $this->account($request);
+
+        // Whatever the collector knows about itself. Filled in here rather than typed by
+        // hand, so the list can be checked against the accounts a person actually has.
+        $account?->update(array_filter([
+            'telegram_username' => $request->input('me.username'),
+            'display_name' => $request->input('me.name'),
+        ]) + ['last_seen_at' => now()]);
+
         $registered = 0;
 
         foreach ($data['channels'] as $channel) {
             // register() never widens permission: an existing row keeps its switch and its
             // owner, and only the descriptive fields are refreshed.
-            TelegramChannel::register(
+            $row = TelegramChannel::register(
                 TelegramChannel::SOURCE_ACCOUNT,
                 $channel['chat_id'],
                 $channel['title'] ?? null,
                 $channel['username'] ?? null,
                 $user->id,
             );
+
+            // Which account can see it. Only claimed when unset or already ours, so two
+            // accounts that are both in a channel do not fight over the row.
+            if ($account !== null && ($row->telegram_account_id === null || $row->telegram_account_id === $account->id)) {
+                $row->forceFill(['telegram_account_id' => $account->id])->save();
+            }
 
             $registered++;
         }
@@ -174,5 +197,21 @@ class CollectorController extends Controller
     private function user(Request $request): User
     {
         return $request->attributes->get('bot_user');
+    }
+
+    /**
+     * Which account this collector is, from the token it authenticated with.
+     *
+     * The token is the identity. A collector cannot claim to be an account it was not
+     * issued a token for, which is what keeps two of them on one machine from writing over
+     * each other's channel list.
+     */
+    private function account(Request $request): ?TelegramAccount
+    {
+        $token = $request->attributes->get('bot_token');
+
+        return $token === null
+            ? null
+            : TelegramAccount::where('bot_token_id', $token->id)->first();
     }
 }

@@ -69,9 +69,9 @@ class Setup extends Component
                 'detail' => $known > 0
                     ? "{$known} channels visible to the collector."
                     : 'No collector has reported in yet.',
-                'blurb' => 'A Telegram bot can only read chats it was added to, and providers do not add your bot. '
-                    .'Reading their channel needs a collector signed in as your own account - which stays on a machine you '
-                    .'choose, because that session can read every chat you have.',
+                'blurb' => 'Signals are read by a collector signed in as your own Telegram account, which is what lets it '
+                    .'see provider channels rather than only chats a bot was added to. It runs on a machine you choose and '
+                    .'keeps its session there, because that session can read every chat you have.',
                 'action' => 'Collector setup',
                 'route' => 'terminal',
             ],
@@ -81,8 +81,9 @@ class Setup extends Component
                 'detail' => $enabled > 0
                     ? "{$enabled} enabled of {$known}."
                     : ($known > 0 ? 'None enabled yet.' : 'Nothing to choose from yet.'),
-                'blurb' => 'Everything the collector can see is listed, and none of it is armed. Joining a channel to read '
-                    .'it must not be the same act as trading it, so enabling is a separate, deliberate click.',
+                'blurb' => 'Every channel the collector can see is listed, and all of them start switched off. Enable the '
+                    .'ones you want traded; the rest keep being recorded so you can compare them before committing. Each '
+                    .'channel can also carry its own risk, levels and instrument list.',
                 'action' => 'Choose channels',
                 'route' => 'signals.channels',
             ],
@@ -95,9 +96,9 @@ class Setup extends Component
                     ! $heartbeat->algo_trading_enabled => 'Online, but Algo Trading is off - every order would be refused.',
                     default => 'Online, carrying '.($heartbeat->resolved_symbol ?? 'an instrument').'.',
                 },
-                'blurb' => 'This is where the hosted copiers ask for your broker password, because their cloud logs in as '
-                    .'you. This asks for nothing of the kind: a token this dashboard issued goes into an Expert Advisor you '
-                    .'run, and you can revoke it here. The cost is that you supply the terminal.',
+                'blurb' => 'Orders are placed by an Expert Advisor running in your own MetaTrader terminal. Download it, '
+                    .'paste in a token issued here, and leave the terminal running - on a VPS if you want it trading around '
+                    .'the clock. No broker password is stored anywhere, and revoking the token stops it immediately.',
                 'action' => 'Connect a terminal',
                 'route' => 'terminal',
             ],
@@ -113,9 +114,9 @@ class Setup extends Component
                         $settings->ai_max_trades_per_day ? ", max {$settings->ai_max_trades_per_day} a day" : '',
                     )
                     : 'No fund cap set, so nothing can be sized.',
-                'blurb' => 'The cap bounds how much can ever be lost; the daily limit bounds how fast. Positions are sized '
-                    .'from the fund rather than the account balance, and an order that will not fit is refused rather than '
-                    .'rounded up.',
+                'blurb' => 'Positions are sized from a fund you set aside rather than from the account balance, so the cap '
+                    .'is the most that can ever be lost here. The daily limit bounds how quickly it can be spent. An order '
+                    .'too large for what is left is refused rather than rounded up to fit.',
                 'action' => 'Set the fund',
                 'route' => 'settings',
             ],

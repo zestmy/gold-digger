@@ -30,7 +30,7 @@ class TelegramChannel extends Model
         'user_id', 'source', 'chat_id', 'title', 'username',
         'is_enabled', 'last_message_at', 'notes',
         // Overrides. Null on every one of them means "inherit"; see policy().
-        'risk_percentage', 'copier_levels', 'max_trades_per_day', 'min_confluence',
+        'risk_percentage', 'copier_levels', 'entry_preference', 'max_trades_per_day', 'min_confluence',
         'symbols_allow', 'symbols_deny', 'read_images',
     ];
 
@@ -108,7 +108,7 @@ class TelegramChannel extends Model
     {
         $overridden = [];
 
-        foreach (['risk_percentage', 'copier_levels', 'max_trades_per_day', 'min_confluence', 'read_images'] as $field) {
+        foreach (['risk_percentage', 'copier_levels', 'entry_preference', 'max_trades_per_day', 'min_confluence', 'read_images'] as $field) {
             if ($this->{$field} !== null) {
                 $overridden[] = $field;
             }

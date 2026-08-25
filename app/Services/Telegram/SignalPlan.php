@@ -39,6 +39,33 @@ final class SignalPlan
     public const SOURCE_STRATEGY = 'strategy';
 
     /**
+     * Which end of an entry zone to ask for.
+     *
+     * "Entry: 4633 - 4637" names a range, and the parser already picks the end furthest
+     * from the market - the better fill, and the one that sometimes does not happen. Some
+     * providers write their zones the other way round, quoting the level they expect to
+     * trade and a little room beyond it, and on those the far end simply misses.
+     *
+     * Per channel, because which of those two a provider is doing is a fact about them.
+     */
+    private function entryFor(TelegramSignal $signal): ?float
+    {
+        $entry = $signal->entry_price;
+        $far = $signal->entry_zone_high;
+
+        if ($entry === null || $far === null) {
+            return $entry;
+        }
+
+        return match ($signal->channel?->entry_preference) {
+            'near' => (float) $far,
+            'average' => round(((float) $entry + (float) $far) / 2, 6),
+            // The default and what this has always done: the better price.
+            default => (float) $entry,
+        };
+    }
+
+    /**
      * @return array{
      *     ok: bool,
      *     source: string,
@@ -61,7 +88,7 @@ final class SignalPlan
         $provider = [
             'ok' => true,
             'source' => self::SOURCE_PROVIDER,
-            'entry' => $signal->entry_price,
+            'entry' => $this->entryFor($signal),
             'sl' => $signal->sl_price,
             'tps' => array_map('floatval', $signal->tp_prices ?? []),
             'pending' => false,

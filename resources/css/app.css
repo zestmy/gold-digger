@@ -1,3 +1,12 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+ * Alpine hides x-cloak elements only once it has initialised. Without this rule the
+ * markup flashes fully expanded on every page load before collapsing - which reads as a
+ * bug rather than as a preference being applied.
+ */
+[x-cloak] {
+    display: none !important;
+}

@@ -6,6 +6,7 @@ use App\Models\BotHeartbeat;
 use App\Models\BotSettings;
 use App\Models\Candle;
 use App\Models\TelegramSignal;
+use App\Models\Trade;
 use App\Models\TradeCommand;
 use App\Models\User;
 use App\Services\Ai\AiFund;
@@ -98,6 +99,14 @@ final class SignalExecutor
         // a worse fill than the one that was reviewed, or a decline for drift that would
         // not have applied to a resting order.
         $pending = $sizing['pending'];
+
+        // A provider posting SELL gold while their BUY gold is still open has changed
+        // their mind, and the position taken on the earlier view is now held on nobody's.
+        // Off by default: a provider who hedges deliberately would find their two
+        // positions collapsing into none.
+        if ($settings->copier_close_on_opposite) {
+            $this->closeOpposites($signal, $heartbeat);
+        }
 
         $command = TradeCommand::enqueue(
             user: $user,
@@ -231,6 +240,17 @@ final class SignalExecutor
 
         $slPips = abs($reference - $plan['sl']) / $pipSize;
 
+        // A buy fills at the ask and its stop is hit on the bid, so the market has to
+        // travel the published distance minus the spread. On gold at two points that is a
+        // large share of a five-point stop, and it makes the realised loss bigger than the
+        // one that was sized.
+        //
+        // Added to the distance rather than to the stop itself: a wider distance sizes a
+        // smaller position, which is the safe direction. Moving the stop would risk more.
+        if ($settings?->copier_spread_buffer) {
+            $slPips += $this->spreadPips($signal, $spec, $pipSize);
+        }
+
         if ($slPips <= 0.0) {
             return $none('The stop distance works out to zero pips.');
         }
@@ -288,6 +308,72 @@ final class SignalExecutor
             'source' => $plan['source'],
             'why' => '',
         ];
+    }
+
+    /**
+     * The most recent spread on this instrument, in pips.
+     *
+     * Taken from the stored bars, which carry the spread at their close in broker points.
+     * A live quote would be better and is not something this side of the bridge has; the
+     * last bar's spread is the closest honest answer, and it is only ever used to size a
+     * position slightly smaller.
+     *
+     * @param  array<string, mixed>  $spec
+     */
+    private function spreadPips(TelegramSignal $signal, array $spec, float $pipSize): float
+    {
+        $points = Candle::where('symbol', $signal->symbol)
+            ->orderByDesc('open_time')
+            ->value('spread_points');
+
+        $digits = (int) ($spec['digits'] ?? 0);
+
+        if ($points === null || $digits <= 0 || $pipSize <= 0.0) {
+            return 0.0;
+        }
+
+        // One point is 10^-digits of price; a pip is pip_size of price.
+        $point = 10 ** (-$digits);
+
+        return max(0.0, ((float) $points * $point) / $pipSize);
+    }
+
+    /**
+     * Close anything this account holds on the same instrument in the other direction.
+     *
+     * Only positions the copier itself opened. A hedge somebody placed by hand, or one the
+     * strategy owns, is not this feature's to close - it was taken on a different view for
+     * different reasons.
+     */
+    private function closeOpposites(TelegramSignal $signal, BotHeartbeat $heartbeat): void
+    {
+        $opposite = strtolower((string) $signal->direction) === 'buy' ? 'sell' : 'buy';
+
+        $held = Trade::where('user_id', $signal->user_id)
+            ->where('origin', AiFund::ORIGIN)
+            ->where('symbol', $signal->symbol)
+            ->where('direction', $opposite)
+            ->whereIn('status', ['open', 'partially_closed'])
+            ->get();
+
+        foreach ($held as $trade) {
+            TradeCommand::enqueue(
+                user: User::find($signal->user_id),
+                type: 'close',
+                account: $heartbeat->brokerAccount,
+                payload: [
+                    'symbol' => $trade->symbol,
+                    'ticket' => $trade->mt5_ticket,
+                    'volume' => round((float) $trade->remaining_lot_size, 2),
+                    'reason' => 'opposite-signal',
+                    'origin' => AiFund::ORIGIN,
+                ],
+                // Keyed on the position rather than the signal, so two opposite signals
+                // arriving together do not queue two closes for one ticket.
+                idempotencyKey: "opposite:{$trade->id}",
+                expiresInSeconds: 120,
+            );
+        }
     }
 
     private function lastPrice(TelegramSignal $signal): ?float

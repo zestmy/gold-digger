@@ -210,7 +210,17 @@ async def cmd_announce() -> None:
             print("This account is not in any channels or groups.")
             return
 
-        result = api("POST", "channels", {"channels": channels})
+        me = await tg.get_me()
+
+        result = api("POST", "channels", {
+            "channels": channels,
+            # So the dashboard can show which account this is rather than a row of labels
+            # somebody typed. It identifies, it does not authenticate - the token does that.
+            "me": {
+                "username": getattr(me, "username", None),
+                "name": " ".join(filter(None, [me.first_name, me.last_name])) or None,
+            },
+        })
         print(f"Reported {result['registered']} channels.")
         print("Enable the ones you want in the dashboard: Signals -> Channels.")
 

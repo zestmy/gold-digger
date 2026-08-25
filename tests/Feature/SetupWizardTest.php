@@ -98,12 +98,14 @@ class SetupWizardTest extends TestCase
     }
 
     /**
-     * The comparison people actually make, stated where they make it.
+     * The page is instructions, not a comparison. The security property is worth stating
+     * because it tells somebody what they do and do not have to hand over.
      */
-    public function test_the_page_names_the_trade_off_against_hosted_copiers(): void
+    public function test_the_terminal_step_says_no_broker_password_is_stored(): void
     {
         Livewire::actingAs($this->user)->test(Setup::class)
-            ->assertSee('broker password');
+            ->set('step', 2)
+            ->assertSee('No broker password is stored');
     }
 
     private function channel(bool $enabled): TelegramChannel
