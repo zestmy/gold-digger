@@ -39,6 +39,7 @@ class BotSettings extends Model
         'ai_capital_cap',
         'ai_risk_percentage',
         'ai_max_concurrent_trades',
+        'copier_levels',
         'capture_screenshots',
     ];
 

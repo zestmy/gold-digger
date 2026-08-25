@@ -117,9 +117,10 @@ final class SignalExecutor
         $signal->update([
             'execution_status' => TelegramSignal::EXEC_QUEUED,
             'execution_note' => sprintf(
-                'Queued %s lots, stop %s pips, risking %s of the fund.',
+                'Queued %s lots, stop %s pips (%s levels), risking %s of the fund.',
                 $sizing['lots'],
                 round($sizing['sl_pips'], 1),
+                $sizing['source'],
                 round($sizing['risk'], 2),
             ),
         ]);
@@ -135,11 +136,11 @@ final class SignalExecutor
      * Position size, from the fund and the instrument's own numbers.
      *
      * @param  array<string, mixed>  $spec
-     * @return array{lots: float|null, sl_pips: float, tp_pips: float|null, risk: float, why: string}
+     * @return array{lots: float|null, sl_pips: float, tp_pips: float|null, risk: float, source: string, why: string}
      */
     private function size(TelegramSignal $signal, BotSettings $settings, array $spec): array
     {
-        $none = fn (string $why) => ['lots' => null, 'sl_pips' => 0.0, 'tp_pips' => null, 'risk' => 0.0, 'why' => $why];
+        $none = fn (string $why) => ['lots' => null, 'sl_pips' => 0.0, 'tp_pips' => null, 'risk' => 0.0, 'source' => '', 'why' => $why];
 
         $pipSize = $spec['pip_size'] ?? null;
         $pipValue = $spec['pip_value_per_lot'] ?? null;
@@ -154,13 +155,18 @@ final class SignalExecutor
             return $none("No pip value known for {$spec['symbol']}, so the position cannot be sized.");
         }
 
-        $reference = $signal->entry_price ?? $signal->sl_price;
+        // The same plan the reviewer judged. With `copier_levels = strategy` these are not
+        // the numbers in the message, and sizing off the message while the reviewer
+        // approved something else would open a trade nobody assessed.
+        $plan = app(SignalPlan::class)->for($signal, $settings);
 
-        if ($signal->sl_price === null || $reference === null) {
+        $reference = $plan['entry'] ?? $plan['sl'];
+
+        if ($plan['sl'] === null || $reference === null) {
             return $none('The signal carries no stop, so it cannot be sized.');
         }
 
-        $slPips = abs($reference - $signal->sl_price) / $pipSize;
+        $slPips = abs($reference - $plan['sl']) / $pipSize;
 
         if ($slPips <= 0.0) {
             return $none('The stop distance works out to zero pips.');
@@ -190,7 +196,7 @@ final class SignalExecutor
             ));
         }
 
-        $targets = $signal->tp_prices ?? [];
+        $targets = $plan['tps'];
         $finalTarget = $targets === [] ? null : (float) end($targets);
 
         return [
@@ -200,6 +206,7 @@ final class SignalExecutor
             // at TP1 would close the whole position at a level meant to take part of it.
             'tp_pips' => $finalTarget === null ? null : abs($finalTarget - $reference) / $pipSize,
             'risk' => $risk,
+            'source' => $plan['source'],
             'why' => '',
         ];
     }

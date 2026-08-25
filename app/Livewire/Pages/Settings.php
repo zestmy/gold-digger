@@ -58,6 +58,11 @@ class Settings extends Component
     #[Validate('required|integer|min:1|max:10')]
     public int $ai_max_concurrent_trades = 1;
 
+    // Whose stop and targets a copied signal trades with. Defaults to the provider's,
+    // because changing what a signal means is not something to do by default.
+    #[Validate('required|in:provider,strategy')]
+    public string $copier_levels = 'provider';
+
     #[Validate('boolean')]
     public bool $capture_screenshots = true;
 
@@ -86,6 +91,7 @@ class Settings extends Component
             $this->ai_capital_cap = $settings->ai_capital_cap === null ? null : (string) $settings->ai_capital_cap;
             $this->ai_risk_percentage = (string) ($settings->ai_risk_percentage ?? '1.00');
             $this->ai_max_concurrent_trades = (int) ($settings->ai_max_concurrent_trades ?? 1);
+            $this->copier_levels = (string) ($settings->copier_levels ?? 'provider');
             $this->capture_screenshots = $settings->capture_screenshots ?? true;
         }
     }
@@ -114,6 +120,7 @@ class Settings extends Component
                 : (float) $this->ai_capital_cap,
             'ai_risk_percentage' => $this->ai_risk_percentage,
             'ai_max_concurrent_trades' => $this->ai_max_concurrent_trades,
+            'copier_levels' => $this->copier_levels,
             'capture_screenshots' => $this->capture_screenshots,
         ]);
 
@@ -132,6 +139,12 @@ class Settings extends Component
             // The fund's live state, so the cap is set beside what is actually left of it
             // rather than in isolation. A number typed into an empty box is a guess; a
             // number typed next to "$47.20 remaining of $200" is a decision.
+            // The account's actual stop rule, so the choice above is made against a real
+            // number rather than the phrase "ATR-based".
+            'strategyStop' => ($m = \App\Models\Strategy::where('user_id', \Illuminate\Support\Facades\Auth::id())
+                ->orderByDesc('is_active')->value('sl_atr_multiplier'))
+                    ? rtrim(rtrim((string) $m, '0'), '.').' x ATR'
+                    : null,
             'fund' => app(\App\Services\Ai\AiFund::class)->state(
                 \Illuminate\Support\Facades\Auth::user()?->botSettings,
                 (int) \Illuminate\Support\Facades\Auth::id(),

@@ -168,6 +168,7 @@ final class SignalReviewer
             return null;
         }
 
+
         $last = Candle::where('symbol', $signal->symbol)
             ->orderByDesc('open_time')
             ->value('close');
@@ -255,19 +256,27 @@ final class SignalReviewer
         $last = Candle::where('symbol', $signal->symbol)->orderByDesc('open_time')->value('close');
         $last = $last === null ? null : (float) $last;
 
-        $stopDistance = ($signal->entry_price !== null && $signal->sl_price !== null)
-            ? abs($signal->entry_price - $signal->sl_price)
+        // The levels that would actually be traded, which under `copier_levels = strategy`
+        // are not the ones in the message. Judging the posted package and executing a
+        // different one would be approving a trade that never existed.
+        $plan = app(SignalPlan::class)->for($signal, $settings);
+
+        $entry = $plan['entry'];
+        $stopDistance = ($entry !== null && $plan['sl'] !== null)
+            ? abs($entry - $plan['sl'])
             : null;
 
-        $tps = $signal->tp_prices ?? [];
+        $tps = $plan['tps'];
         $firstTarget = $tps[0] ?? null;
 
         $lines = [
-            'THE SIGNAL, as posted',
+            $plan['source'] === SignalPlan::SOURCE_STRATEGY
+                ? "THE TRADE, using the provider's entry with this account's stop and ladder"
+                : 'THE SIGNAL, as posted',
             "  Instrument      {$signal->symbol} ({$profile['kind']})",
             '  Direction       '.strtoupper((string) $signal->direction),
-            '  Entry           '.($signal->entry_price === null ? 'at market' : $this->num($signal->entry_price)),
-            '  Stop loss       '.$this->num($signal->sl_price),
+            '  Entry           '.($entry === null ? 'at market' : $this->num($entry)),
+            '  Stop loss       '.$this->num($plan['sl']),
             '  Targets         '.($tps === [] ? 'none given' : implode(', ', array_map(fn ($t) => $this->num((float) $t), $tps))),
             '  Posted          '.($signal->posted_at?->diffForHumans() ?? 'unknown'),
             '',
@@ -275,8 +284,8 @@ final class SignalReviewer
             '  Stop distance   '.($stopDistance === null ? 'unknown (market order)' : $this->num($stopDistance)),
         ];
 
-        if ($stopDistance !== null && $firstTarget !== null && $signal->entry_price !== null) {
-            $rewardDistance = abs((float) $firstTarget - $signal->entry_price);
+        if ($stopDistance !== null && $firstTarget !== null && $entry !== null) {
+            $rewardDistance = abs((float) $firstTarget - $entry);
             $lines[] = '  To first target '.$this->num($rewardDistance);
             $lines[] = sprintf('  Reward:risk     %.2f : 1 (to the first target)', $rewardDistance / max($stopDistance, 1e-9));
         }
@@ -285,7 +294,7 @@ final class SignalReviewer
         $lines[] = 'THE MARKET NOW, from this system\'s own stored bars';
         $lines[] = '  Last price      '.($last === null ? 'unknown' : $this->num($last));
 
-        $context = $this->marketContext($signal);
+        $context = $this->marketContext($signal, $plan);
 
         foreach ($context as $label => $value) {
             $lines[] = sprintf('  %-15s %s', $label, $value);
@@ -310,7 +319,7 @@ final class SignalReviewer
      *
      * @return array<string, string>
      */
-    private function marketContext(TelegramSignal $signal): array
+    private function marketContext(TelegramSignal $signal, ?array $plan = null): array
     {
         $bars = Candle::where('symbol', $signal->symbol)
             ->orderByDesc('open_time')
@@ -345,8 +354,8 @@ final class SignalReviewer
 
         // The most useful single comparison the model can make: is this stop inside the
         // instrument's ordinary noise?
-        if ($atr !== null && $atr > 0.0 && $signal->entry_price !== null && $signal->sl_price !== null) {
-            $context['Stop vs ATR'] = number_format(abs($signal->entry_price - $signal->sl_price) / $atr, 2).' x ATR';
+        if ($atr !== null && $atr > 0.0 && $plan !== null && $plan['entry'] !== null && $plan['sl'] !== null) {
+            $context['Stop vs ATR'] = number_format(abs($plan['entry'] - $plan['sl']) / $atr, 2).' x ATR';
         }
 
         return $context;

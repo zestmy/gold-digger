@@ -273,6 +273,25 @@
                     @error('ai_max_concurrent_trades') <p class="mt-1 text-xs text-red-400">{{ $message }}</p> @enderror
                 </div>
             </div>
+
+            {{-- Whose levels a copied signal trades with. Both defensible, which is why it
+                 is a choice: an ATR stop is measurable and consistent, a provider's stop may
+                 sit below a swing low that ATR knows nothing about. --}}
+            <div class="mt-6 border-t border-gray-700 pt-4">
+                <label for="copier_levels" class="block text-sm font-medium text-gray-300">Copied signal levels</label>
+                <select id="copier_levels" wire:model="copier_levels"
+                        class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm">
+                    <option value="provider">Use the provider's stop and targets</option>
+                    <option value="strategy">Use the provider's entry, with this account's stop and ladder</option>
+                </select>
+                <p class="mt-1 text-xs text-gray-500">
+                    Your stop is {{ $strategyStop ?? 'ATR-based' }} and consistent with every other position
+                    the account holds; a provider's may sit at a level ATR knows nothing about.
+                    Either way, a message with no readable stop is still refused &mdash; the stop is the
+                    strongest evidence a message is a signal rather than commentary.
+                </p>
+                @error('copier_levels') <p class="mt-1 text-xs text-red-400">{{ $message }}</p> @enderror
+            </div>
         </div>
 
         <!-- Screenshot Settings -->
