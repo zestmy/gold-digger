@@ -8,6 +8,7 @@ use App\Livewire\Pages\LiveTrades;
 use App\Livewire\Pages\Settings;
 use App\Livewire\Pages\Signals;
 use App\Livewire\Pages\Strategies;
+use App\Livewire\Pages\TerminalSetup;
 use App\Livewire\Pages\SignalCopier;
 use App\Livewire\Pages\StrategyImprover;
 use App\Livewire\Pages\TradeHistory;
@@ -54,6 +55,9 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/strategies', Strategies::class)->name('strategies');
     Route::get('/strategies/improve', StrategyImprover::class)->name('strategies.improve');
     Route::get('/broker-accounts', BrokerAccounts::class)->name('broker-accounts');
+    Route::get('/terminal', TerminalSetup::class)->name('terminal');
+    // Behind auth: the archive is built per request with this dashboard's URL in it.
+    Route::get('/terminal/download', \App\Http\Controllers\ExpertAdvisorDownloadController::class)->name('terminal.download');
 
     // Analytics & Monitoring
     Route::get('/analytics', Analytics::class)->name('analytics');
