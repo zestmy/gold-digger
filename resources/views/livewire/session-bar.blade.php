@@ -28,10 +28,13 @@
 
     <!-- Clocks. UTC always, because sessions are defined in it and support conversations
          are conducted in it. -->
-    <div class="ml-auto flex items-center gap-x-3 text-xs">
+    {{-- The date, not just the clock. These two are routinely on different days - 04:06
+         local against 20:06 UTC is the 26th and the 25th - and a bare time invites reading
+         a trade as having happened today when it did not. --}}
+    <div class="ml-auto flex items-center gap-x-3 whitespace-nowrap text-xs">
         @if($zone)
-            <span class="text-gray-300">{{ $utc->copy()->setTimezone($zone)->format('H:i') }}</span>
+            <span class="text-gray-300">{{ $utc->copy()->setTimezone($zone)->format('D d M H:i') }}</span>
         @endif
-        <span class="text-gray-500">{{ $utc->format('H:i') }} UTC</span>
+        <span class="text-gray-500">{{ $utc->format('D d M H:i') }} UTC</span>
     </div>
 </div>

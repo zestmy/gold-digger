@@ -271,6 +271,56 @@
                     </p>
                     @error('ai_max_trades_per_day') <p class="mt-1 text-xs text-red-400">{{ $message }}</p> @enderror
                 </div>
+            </div>
+
+            {{-- Protecting a copied position after it is open. Until this existed, a copied
+                 trade had two things minding it: the stop the order carries, and whatever
+                 the provider remembered to post. --}}
+            <div class="mt-6 border-t border-gray-700 pt-6">
+                <h4 class="text-sm font-medium text-gray-300">Protecting open copied trades</h4>
+                <p class="mt-1 text-xs text-gray-500">
+                    Measured in R &mdash; one R is what that trade risked. A copied stop is whatever the
+                    provider chose, five points on one signal and forty on the next, so a pip trigger
+                    cannot be right for both. Leave the trigger blank to leave positions alone.
+                </p>
+
+                <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <div>
+                        <label for="copier_protect_at_r" class="block text-sm font-medium text-gray-300">Act at</label>
+                        <input type="number" step="0.1" min="0.1" id="copier_protect_at_r" wire:model="copier_protect_at_r"
+                               placeholder="off"
+                               class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm">
+                        <p class="mt-1 text-xs text-gray-500">R in profit</p>
+                        @error('copier_protect_at_r') <p class="mt-1 text-xs text-red-400">{{ $message }}</p> @enderror
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300">Break even</label>
+                        <label class="mt-2 flex items-center gap-2 text-xs text-gray-400">
+                            <input type="checkbox" wire:model="copier_breakeven"
+                                   class="rounded border-gray-600 bg-gray-700 text-yellow-500 focus:ring-yellow-500">
+                            Move the stop to entry
+                        </label>
+                    </div>
+
+                    <div>
+                        <label for="copier_profit_lock_pct" class="block text-sm font-medium text-gray-300">Bank</label>
+                        <input type="number" step="1" min="1" max="90" id="copier_profit_lock_pct" wire:model="copier_profit_lock_pct"
+                               placeholder="off"
+                               class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm">
+                        <p class="mt-1 text-xs text-gray-500">% of what is open</p>
+                        @error('copier_profit_lock_pct') <p class="mt-1 text-xs text-red-400">{{ $message }}</p> @enderror
+                    </div>
+
+                    <div>
+                        <label for="copier_trail_distance_r" class="block text-sm font-medium text-gray-300">Trail at</label>
+                        <input type="number" step="0.1" min="0.1" id="copier_trail_distance_r" wire:model="copier_trail_distance_r"
+                               placeholder="off"
+                               class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm">
+                        <p class="mt-1 text-xs text-gray-500">R behind the best price</p>
+                        @error('copier_trail_distance_r') <p class="mt-1 text-xs text-red-400">{{ $message }}</p> @enderror
+                    </div>
+                </div>
 
                 <div>
                     <label for="ai_risk_percentage" class="block text-sm font-medium text-gray-300">Risk per trade (% of fund)</label>

@@ -86,3 +86,12 @@ Schedule::command('telegram:execute')->everyMinute()->withoutOverlapping();
 // Nothing here can widen a stop or exceed the fund - see FollowUpExecutor. The schedule
 // entry is not what makes that true.
 Schedule::command('telegram:follow-up')->everyMinute()->withoutOverlapping();
+
+// Trailing, break-even and profit-locking on copied positions.
+//
+// Every minute, and separate from the strategy's own trade management: the two measure in
+// different units - pips the strategy chose against R a stranger chose - and a fault in
+// either must not stop the other from protecting a live position.
+//
+// Nothing here can widen a stop or add to a position; see PositionManager.
+Schedule::command('copier:protect')->everyMinute()->withoutOverlapping();

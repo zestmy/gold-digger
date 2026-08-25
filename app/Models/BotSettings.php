@@ -40,6 +40,7 @@ class BotSettings extends Model
         'ai_risk_percentage',
         'ai_max_concurrent_trades',
         'ai_max_trades_per_day',
+        'copier_protect_at_r', 'copier_breakeven', 'copier_profit_lock_pct', 'copier_trail_distance_r',
         'copier_levels',
         'capture_screenshots',
     ];
@@ -68,6 +69,10 @@ class BotSettings extends Model
             'ai_trading_enabled' => 'boolean',
             'ai_max_concurrent_trades' => 'integer',
             'ai_max_trades_per_day' => 'integer',
+            'copier_protect_at_r' => 'float',
+            'copier_breakeven' => 'boolean',
+            'copier_profit_lock_pct' => 'integer',
+            'copier_trail_distance_r' => 'float',
 
             // Decimals - Laravel casts these to strings for precision
             'risk_percentage' => 'decimal:2',

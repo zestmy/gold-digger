@@ -60,6 +60,22 @@ class Settings extends Component
     #[Validate('nullable|integer|min:0|max:50')]
     public ?string $ai_max_trades_per_day = null;
 
+    // ---- Protecting an open copied position -----------------------------
+    // In R rather than pips: a copied stop is whatever the provider chose, so no pip
+    // trigger can be right across providers. One R means the same thing every time.
+
+    #[Validate('nullable|numeric|min:0.1|max:20')]
+    public ?string $copier_protect_at_r = null;
+
+    #[Validate('boolean')]
+    public bool $copier_breakeven = false;
+
+    #[Validate('nullable|integer|min:1|max:90')]
+    public ?string $copier_profit_lock_pct = null;
+
+    #[Validate('nullable|numeric|min:0.1|max:20')]
+    public ?string $copier_trail_distance_r = null;
+
     #[Validate('required|integer|min:1|max:10')]
     public int $ai_max_concurrent_trades = 1;
 
@@ -97,6 +113,13 @@ class Settings extends Component
             $this->ai_risk_percentage = (string) ($settings->ai_risk_percentage ?? '1.00');
             $this->ai_max_trades_per_day = $settings->ai_max_trades_per_day === null
                 ? null : (string) $settings->ai_max_trades_per_day;
+            $this->copier_protect_at_r = $settings->copier_protect_at_r === null
+                ? null : (string) $settings->copier_protect_at_r;
+            $this->copier_breakeven = (bool) $settings->copier_breakeven;
+            $this->copier_profit_lock_pct = $settings->copier_profit_lock_pct === null
+                ? null : (string) $settings->copier_profit_lock_pct;
+            $this->copier_trail_distance_r = $settings->copier_trail_distance_r === null
+                ? null : (string) $settings->copier_trail_distance_r;
             $this->ai_max_concurrent_trades = (int) ($settings->ai_max_concurrent_trades ?? 1);
             $this->copier_levels = (string) ($settings->copier_levels ?? 'provider');
             $this->capture_screenshots = $settings->capture_screenshots ?? true;
@@ -129,6 +152,13 @@ class Settings extends Component
             'ai_max_trades_per_day' => ($this->ai_max_trades_per_day === null || $this->ai_max_trades_per_day === '')
                 ? null
                 : (int) $this->ai_max_trades_per_day,
+            'copier_protect_at_r' => ($this->copier_protect_at_r === null || $this->copier_protect_at_r === '')
+                ? null : (float) $this->copier_protect_at_r,
+            'copier_breakeven' => $this->copier_breakeven,
+            'copier_profit_lock_pct' => ($this->copier_profit_lock_pct === null || $this->copier_profit_lock_pct === '')
+                ? null : (int) $this->copier_profit_lock_pct,
+            'copier_trail_distance_r' => ($this->copier_trail_distance_r === null || $this->copier_trail_distance_r === '')
+                ? null : (float) $this->copier_trail_distance_r,
             'ai_max_concurrent_trades' => $this->ai_max_concurrent_trades,
             'copier_levels' => $this->copier_levels,
             'capture_screenshots' => $this->capture_screenshots,
