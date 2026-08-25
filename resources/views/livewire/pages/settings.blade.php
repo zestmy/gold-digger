@@ -273,6 +273,40 @@
                 </div>
             </div>
 
+            {{-- Trading on its own opinion, which is a different permission from spending
+                 the fund on somebody else's. --}}
+            <div class="mt-6 border-t border-gray-700 pt-6">
+                <h4 class="text-sm font-medium text-gray-300">Trading on its own opinion</h4>
+                <p class="mt-1 text-xs text-gray-500">
+                    Separate from copying. The model decides whether there is a trade and which way; the
+                    stop comes from ATR and the targets are multiples of it, so no price is ever invented.
+                    Every gate the copier passes applies, and it spends the same capped fund.
+                </p>
+
+                <div class="mt-4 space-y-3">
+                    <label class="flex items-start gap-2 text-xs text-gray-400">
+                        <input type="checkbox" wire:model="ai_autonomous"
+                               class="mt-0.5 rounded border-gray-600 bg-gray-700 text-yellow-500 focus:ring-yellow-500">
+                        <span>
+                            <span class="text-gray-300">Let it open positions of its own</span><br>
+                            Considered every fifteen minutes. Nothing here demonstrates an edge &mdash; it is
+                            bounded by the fund, which is what makes it an experiment with a number attached.
+                        </span>
+                    </label>
+
+                    <div>
+                        <label for="ai_autonomous_symbols" class="block text-xs text-gray-500">Instruments it may consider</label>
+                        <input type="text" id="ai_autonomous_symbols" wire:model="ai_autonomous_symbols"
+                               placeholder="XAUUSD, GBPUSD"
+                               class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm">
+                        <p class="mt-1 text-xs text-gray-500">
+                            Listed deliberately. A terminal pushing five symbols has not volunteered all five.
+                        </p>
+                        @error('ai_autonomous_symbols') <p class="mt-1 text-xs text-red-400">{{ $message }}</p> @enderror
+                    </div>
+                </div>
+            </div>
+
             {{-- Protecting a copied position after it is open. Until this existed, a copied
                  trade had two things minding it: the stop the order carries, and whatever
                  the provider remembered to post. --}}
@@ -320,6 +354,28 @@
                         <p class="mt-1 text-xs text-gray-500">R behind the best price</p>
                         @error('copier_trail_distance_r') <p class="mt-1 text-xs text-red-400">{{ $message }}</p> @enderror
                     </div>
+                </div>
+
+                <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <label class="flex items-start gap-2 text-xs text-gray-400">
+                        <input type="checkbox" wire:model="copier_close_on_opposite"
+                               class="mt-0.5 rounded border-gray-600 bg-gray-700 text-yellow-500 focus:ring-yellow-500">
+                        <span>
+                            <span class="text-gray-300">Close on an opposite signal</span><br>
+                            A provider posting SELL while their BUY is open has changed their mind. Leave off if
+                            they hedge deliberately &mdash; their two positions would collapse into none.
+                        </span>
+                    </label>
+
+                    <label class="flex items-start gap-2 text-xs text-gray-400">
+                        <input type="checkbox" wire:model="copier_spread_buffer"
+                               class="mt-0.5 rounded border-gray-600 bg-gray-700 text-yellow-500 focus:ring-yellow-500">
+                        <span>
+                            <span class="text-gray-300">Count the spread in the stop distance</span><br>
+                            A buy fills at the ask and its stop is hit on the bid. Including it sizes a slightly
+                            smaller position, so the loss when it comes is the one intended.
+                        </span>
+                    </label>
                 </div>
 
                 <div>

@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\Bot\HeartbeatController;
 use App\Http\Controllers\Api\Bot\LogController;
 use App\Http\Controllers\Api\Bot\PositionController;
 use App\Http\Controllers\Api\Telegram\CollectorController;
+use App\Http\Controllers\Api\Telegram\LoginController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -71,4 +72,9 @@ Route::prefix('v1/telegram')->middleware('bot.auth')->group(function () {
 
     // Messages. Idempotent on chat + message id, so a retry cannot become a second trade.
     Route::post('messages', [CollectorController::class, 'store'])->name('api.telegram.messages.store');
+
+    // Signing in, relayed. The dashboard takes the phone and the code; the collector does
+    // the sign-in and keeps the session. Nothing about it is stored here.
+    Route::get('login', [LoginController::class, 'show'])->name('api.telegram.login.show');
+    Route::post('login', [LoginController::class, 'store'])->name('api.telegram.login.store');
 });

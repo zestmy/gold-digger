@@ -4,6 +4,7 @@ namespace App\Livewire\Pages;
 
 use App\Models\BotToken;
 use App\Models\BrokerAccount;
+use App\Models\TradeCommand;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -95,7 +96,7 @@ class TerminalSetup extends Component
             // The exact string that must be whitelisted, from the app's own configuration
             // rather than from whatever the browser happens to be showing.
             'whitelistUrl' => rtrim((string) config('app.url'), '/'),
-            'wireVersion' => \App\Models\TradeCommand::WIRE_VERSION,
+            'wireVersion' => TradeCommand::WIRE_VERSION,
         ]);
     }
 }

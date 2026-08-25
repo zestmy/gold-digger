@@ -2,8 +2,8 @@
 
 namespace App\Livewire\Pages;
 
-use App\Models\Trade;
 use App\Models\Strategy;
+use App\Models\Trade;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;

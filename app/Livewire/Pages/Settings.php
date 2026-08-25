@@ -76,6 +76,24 @@ class Settings extends Component
     #[Validate('nullable|numeric|min:0.1|max:20')]
     public ?string $copier_trail_distance_r = null;
 
+    #[Validate('boolean')]
+    public bool $copier_close_on_opposite = false;
+
+    #[Validate('boolean')]
+    public bool $copier_spread_buffer = false;
+
+    // ---- Trading on its own opinion --------------------------------------
+    // Separate from ai_trading_enabled, which governs whether the fund may be spent at
+    // all. Copying a vetted provider and forming an independent view are different
+    // permissions, and wanting the first is not asking for the second.
+
+    #[Validate('boolean')]
+    public bool $ai_autonomous = false;
+
+    /** Comma-separated in the form, an array in the column. */
+    #[Validate('nullable|string|max:200')]
+    public ?string $ai_autonomous_symbols = null;
+
     #[Validate('required|integer|min:1|max:10')]
     public int $ai_max_concurrent_trades = 1;
 
@@ -120,6 +138,10 @@ class Settings extends Component
                 ? null : (string) $settings->copier_profit_lock_pct;
             $this->copier_trail_distance_r = $settings->copier_trail_distance_r === null
                 ? null : (string) $settings->copier_trail_distance_r;
+            $this->copier_close_on_opposite = (bool) $settings->copier_close_on_opposite;
+            $this->copier_spread_buffer = (bool) $settings->copier_spread_buffer;
+            $this->ai_autonomous = (bool) $settings->ai_autonomous;
+            $this->ai_autonomous_symbols = implode(', ', (array) ($settings->ai_autonomous_symbols ?? [])) ?: null;
             $this->ai_max_concurrent_trades = (int) ($settings->ai_max_concurrent_trades ?? 1);
             $this->copier_levels = (string) ($settings->copier_levels ?? 'provider');
             $this->capture_screenshots = $settings->capture_screenshots ?? true;
@@ -159,6 +181,12 @@ class Settings extends Component
                 ? null : (int) $this->copier_profit_lock_pct,
             'copier_trail_distance_r' => ($this->copier_trail_distance_r === null || $this->copier_trail_distance_r === '')
                 ? null : (float) $this->copier_trail_distance_r,
+            'copier_close_on_opposite' => $this->copier_close_on_opposite,
+            'copier_spread_buffer' => $this->copier_spread_buffer,
+            'ai_autonomous' => $this->ai_autonomous,
+            // Listed rather than inferred from what has candles: a terminal pushing five
+            // symbols has not thereby volunteered all five for autonomous trading.
+            'ai_autonomous_symbols' => $this->symbolList(),
             'ai_max_concurrent_trades' => $this->ai_max_concurrent_trades,
             'copier_levels' => $this->copier_levels,
             'capture_screenshots' => $this->capture_screenshots,
@@ -171,6 +199,19 @@ class Settings extends Component
     {
         $this->is_active = ! $this->is_active;
         $this->save();
+    }
+
+    /**
+     * @return array<int, string>|null
+     */
+    private function symbolList(): ?array
+    {
+        $symbols = array_values(array_filter(array_map(
+            fn (string $s) => strtoupper(trim($s)),
+            explode(',', (string) $this->ai_autonomous_symbols),
+        )));
+
+        return $symbols === [] ? null : $symbols;
     }
 
     public function render()

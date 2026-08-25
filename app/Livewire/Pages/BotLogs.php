@@ -3,7 +3,6 @@
 namespace App\Livewire\Pages;
 
 use App\Models\BotLog;
-use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;

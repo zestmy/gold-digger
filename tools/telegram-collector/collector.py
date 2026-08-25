@@ -47,6 +47,7 @@ from pathlib import Path
 
 import requests
 from telethon import TelegramClient, events
+from telethon.errors import SessionPasswordNeededError
 from telethon.tl.types import Channel, Chat, User
 
 HERE = Path(__file__).resolve().parent
@@ -324,15 +325,104 @@ async def catch_up(tg: TelegramClient, state: dict, watch: list[str]) -> None:
             await forward(tg, state, chat_id, reversed(messages))
 
 
+async def report(state: str, message: str | None = None, me=None) -> None:
+    """Tell the dashboard how the sign-in went."""
+    payload = {"state": state, "message": message}
+
+    if me is not None:
+        payload["username"] = getattr(me, "username", None)
+        payload["name"] = " ".join(filter(None, [me.first_name, me.last_name])) or None
+
+    try:
+        api("POST", "login", payload)
+    except requests.RequestException as error:
+        print(f"could not report login state: {error}")
+
+
+async def serve_login(tg: TelegramClient) -> bool:
+    """
+    Carry out whatever step of a sign-in the dashboard is waiting on.
+
+    The dashboard holds the conversation and none of its outcome: it relays a phone number
+    and a code, and the session that results is written here, on this machine. Returns True
+    once the account is authorised.
+
+    Secrets are delivered exactly once - asking again returns nothing - so a step that
+    fails has to be restarted from the dashboard rather than retried blindly with a code
+    that has already been spent.
+    """
+    try:
+        work = api("GET", "login")
+    except requests.RequestException:
+        return await tg.is_user_authorized()
+
+    action = work.get("action", "none")
+
+    if action == "none":
+        return await tg.is_user_authorized()
+
+    try:
+        if action == "send_code":
+            await tg.send_code_request(work["phone"])
+            await report("code_sent")
+            print("Code requested; waiting for it to be entered in the dashboard.")
+
+        elif action == "sign_in":
+            code = work.get("code")
+
+            if not code:
+                await report("failed", "The code was not delivered. Start again.")
+                return False
+
+            await tg.sign_in(phone=work["phone"], code=code)
+            await report("active", me=await tg.get_me())
+            print("Signed in.")
+            return True
+
+        elif action == "password":
+            password = work.get("password")
+
+            if not password:
+                await report("failed", "The password was not delivered. Start again.")
+                return False
+
+            await tg.sign_in(password=password)
+            await report("active", me=await tg.get_me())
+            print("Signed in.")
+            return True
+
+    except SessionPasswordNeededError:
+        # Two-step verification. Asked for separately so the password is only ever
+        # requested when it is genuinely required.
+        await report("password_needed")
+        print("Two-step verification is on; waiting for the password.")
+
+    except Exception as error:  # noqa: BLE001 - Telegram's message is the useful part
+        # Reported verbatim: "wrong code" and "this number is banned" need entirely
+        # different responses, and "failed" sends people to the wrong one.
+        await report("failed", str(error)[:200])
+        print(f"Sign-in failed: {error}")
+
+    return False
+
+
 async def cmd_run() -> None:
     state = load_state()
     watch: set[str] = set()
 
     tg = client()
-    await tg.start()
+    await tg.connect()
 
-    if not await tg.is_user_authorized():
-        sys.exit("Not signed in. Run: python collector.py login")
+    # Not signed in is no longer fatal. The dashboard can drive a sign-in through this
+    # process, which is the whole point: adding an account should not mean opening a
+    # terminal on this machine.
+    while not await tg.is_user_authorized():
+        if await serve_login(tg):
+            break
+
+        await asyncio.sleep(5)
+
+    print("Authorised.")
 
     async def refresh() -> None:
         """Re-read the watch list, so the dashboard's switch takes effect while running."""

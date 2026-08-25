@@ -133,28 +133,134 @@ class TelegramAccountsTest extends TestCase
     }
 
     /**
-     * Never signed in and stopped an hour ago are both not-connected, and they mean
-     * completely different things.
+     * Four states, and they need different actions.
+     *
+     * Not signed in wants a phone number; signed in but not running wants the collector
+     * started; connected wants nothing. Collapsing them into "offline" would send somebody
+     * to re-authenticate an account whose sign-in is perfectly good.
      */
-    public function test_a_never_seen_account_is_distinguished_from_a_stopped_one(): void
+    public function test_signed_in_is_distinguished_from_running(): void
     {
-        $never = TelegramAccount::create(['user_id' => $this->user->id, 'label' => 'Fresh']);
-        $stopped = TelegramAccount::create([
-            'user_id' => $this->user->id, 'label' => 'Was running',
-            'last_seen_at' => now()->subHour(),
-        ]);
-        $live = TelegramAccount::create([
-            'user_id' => $this->user->id, 'label' => 'Running',
-            'last_seen_at' => now(),
+        TelegramAccount::create(['user_id' => $this->user->id, 'label' => 'Fresh']);
+
+        TelegramAccount::create([
+            'user_id' => $this->user->id, 'label' => 'Signed in, stopped',
+            'login_state' => TelegramAccount::ACTIVE, 'last_seen_at' => now()->subHour(),
         ]);
 
-        $this->assertFalse($never->isConnected());
-        $this->assertFalse($stopped->isConnected());
+        $live = TelegramAccount::create([
+            'user_id' => $this->user->id, 'label' => 'Running',
+            'login_state' => TelegramAccount::ACTIVE, 'last_seen_at' => now(),
+        ]);
+
         $this->assertTrue($live->isConnected());
 
         Livewire::actingAs($this->user)->test(TelegramAccounts::class)
             ->assertSee('NOT SIGNED IN')
-            ->assertSee('STOPPED')
+            ->assertSee('SIGNED IN, NOT RUNNING')
             ->assertSee('CONNECTED');
+    }
+
+    // =====================================================================
+    // SIGNING IN FROM THE DASHBOARD
+    // =====================================================================
+
+    public function test_a_phone_number_starts_a_sign_in(): void
+    {
+        $account = TelegramAccount::create(['user_id' => $this->user->id, 'label' => 'Personal']);
+
+        Livewire::actingAs($this->user)->test(TelegramAccounts::class)
+            ->set('phone', '+60123456789')
+            ->call('beginLogin', $account->id);
+
+        $account->refresh();
+
+        $this->assertSame(TelegramAccount::REQUESTED, $account->login_state);
+        $this->assertSame('+60123456789', $account->login_phone);
+    }
+
+    /**
+     * The property that keeps this better than storing a session here.
+     */
+    public function test_a_code_is_relayed_once_and_never_stored(): void
+    {
+        $account = TelegramAccount::create([
+            'user_id' => $this->user->id, 'label' => 'Personal',
+            'bot_token_id' => null, 'login_state' => TelegramAccount::CODE_SENT,
+            'login_phone' => '+60123456789',
+        ]);
+
+        [$plaintext, $token] = BotToken::generate($this->user, 'Collector');
+        $account->update(['bot_token_id' => $token->id]);
+
+        Livewire::actingAs($this->user)->test(TelegramAccounts::class)
+            ->set('code', '54321')
+            ->call('submitCode', $account->id);
+
+        // Not in any column.
+        $this->assertStringNotContainsString('54321', json_encode($account->fresh()->toArray()));
+
+        // Delivered to the collector exactly once...
+        $first = $this->withToken($plaintext)->getJson('/api/v1/telegram/login');
+        $first->assertOk()->assertJsonPath('code', '54321');
+
+        // ...and gone afterwards, so a stolen token cannot replay it.
+        $this->withToken($plaintext)->getJson('/api/v1/telegram/login')->assertJsonPath('code', null);
+    }
+
+    public function test_the_collector_reports_the_sign_in_as_finished(): void
+    {
+        $account = TelegramAccount::create([
+            'user_id' => $this->user->id, 'label' => 'Personal',
+            'login_state' => TelegramAccount::CODE_SUBMITTED, 'login_phone' => '+60123456789',
+        ]);
+
+        [$plaintext, $token] = BotToken::generate($this->user, 'Collector');
+        $account->update(['bot_token_id' => $token->id]);
+
+        $this->withToken($plaintext)->postJson('/api/v1/telegram/login', [
+            'state' => 'active', 'username' => 'affandy', 'name' => 'Affandy',
+        ])->assertOk();
+
+        $account->refresh();
+
+        $this->assertSame(TelegramAccount::ACTIVE, $account->login_state);
+        $this->assertSame('affandy', $account->telegram_username);
+        // The number is not kept once it has served its purpose.
+        $this->assertNull($account->login_phone);
+    }
+
+    /**
+     * "Failed" alone sends people to the wrong place.
+     */
+    public function test_a_failure_keeps_telegrams_own_words(): void
+    {
+        $account = TelegramAccount::create([
+            'user_id' => $this->user->id, 'label' => 'Personal',
+            'login_state' => TelegramAccount::CODE_SUBMITTED,
+        ]);
+
+        [$plaintext, $token] = BotToken::generate($this->user, 'Collector');
+        $account->update(['bot_token_id' => $token->id]);
+
+        $this->withToken($plaintext)->postJson('/api/v1/telegram/login', [
+            'state' => 'failed', 'message' => 'The confirmation code has expired',
+        ])->assertOk();
+
+        $this->assertStringContainsString('expired', $account->fresh()->login_message);
+    }
+
+    public function test_a_stalled_sign_in_is_recognised(): void
+    {
+        $stalled = TelegramAccount::create([
+            'user_id' => $this->user->id, 'label' => 'Personal',
+            'login_state' => TelegramAccount::CODE_SENT,
+            'login_updated_at' => now()->subHour(),
+        ]);
+
+        // Otherwise the page waits for ever on a conversation nothing will continue.
+        $this->assertTrue($stalled->loginStalled());
+
+        Livewire::actingAs($this->user)->test(TelegramAccounts::class)->assertSee('stalled');
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Pages;
 
+use App\Http\Controllers\Api\Telegram\LoginController;
 use App\Models\BotToken;
 use App\Models\TelegramAccount;
 use Illuminate\Support\Facades\Auth;
@@ -43,6 +44,18 @@ class TelegramAccounts extends Component
     public ?string $issuedToken = null;
 
     public ?int $issuedFor = null;
+
+    /** The account whose sign-in is being driven from this page. */
+    public ?int $signingIn = null;
+
+    #[Validate('nullable|string|max:32')]
+    public string $phone = '';
+
+    #[Validate('nullable|string|max:16')]
+    public string $code = '';
+
+    #[Validate('nullable|string|max:128')]
+    public string $password = '';
 
     public function add(): void
     {
@@ -105,6 +118,83 @@ class TelegramAccounts extends Component
         $this->dispatch('notify', message: 'Account removed and its token revoked.', type: 'success');
     }
 
+    /**
+     * Start a sign-in. The collector for this account does the rest.
+     */
+    public function beginLogin(int $id): void
+    {
+        $account = $this->find($id);
+
+        if ($account === null) {
+            return;
+        }
+
+        $this->validate(['phone' => ['required', 'string', 'max:32']]);
+
+        // Only the number is stored, and only so the page can say which one is being signed
+        // in. It is not a secret and is not usable on its own.
+        $account->update(['login_phone' => trim($this->phone)]);
+        $account->advance(TelegramAccount::REQUESTED);
+
+        $this->signingIn = $id;
+        $this->phone = '';
+
+        $this->dispatch('notify', message: 'Asking Telegram for a code. Check your Telegram app.', type: 'info');
+    }
+
+    /**
+     * Hand the code to the collector, once.
+     */
+    public function submitCode(int $id): void
+    {
+        $account = $this->find($id);
+
+        if ($account === null) {
+            return;
+        }
+
+        $this->validate(['code' => ['required', 'string', 'max:16']]);
+
+        // Into the cache with a short expiry, deleted the instant the collector takes it.
+        // Never a column, never a log.
+        LoginController::relay($account, 'code', trim($this->code));
+        $account->advance(TelegramAccount::CODE_SUBMITTED);
+
+        $this->code = '';
+    }
+
+    public function submitPassword(int $id): void
+    {
+        $account = $this->find($id);
+
+        if ($account === null) {
+            return;
+        }
+
+        $this->validate(['password' => ['required', 'string', 'max:128']]);
+
+        LoginController::relay($account, 'password', $this->password);
+        $account->advance(TelegramAccount::PASSWORD_SUBMITTED);
+
+        $this->password = '';
+    }
+
+    /**
+     * Abandon a half-finished attempt.
+     */
+    public function cancelLogin(int $id): void
+    {
+        $this->find($id)?->advance(TelegramAccount::IDLE);
+
+        $this->signingIn = null;
+        $this->phone = $this->code = $this->password = '';
+    }
+
+    private function find(int $id): ?TelegramAccount
+    {
+        return TelegramAccount::where('user_id', Auth::id())->find($id);
+    }
+
     public function dismissToken(): void
     {
         $this->issuedToken = null;
@@ -119,6 +209,11 @@ class TelegramAccounts extends Component
                 'channels as enabled_channels_count' => fn ($q) => $q->where('is_enabled', true),
             ])->where('user_id', Auth::id())->orderBy('id')->get(),
             'baseUrl' => rtrim((string) config('app.url'), '/'),
+            // Polled only while a conversation is under way, so an idle page is not
+            // refetching every few seconds for nothing.
+            'awaiting' => TelegramAccount::where('user_id', Auth::id())
+                ->whereNotIn('login_state', [TelegramAccount::IDLE, TelegramAccount::ACTIVE, TelegramAccount::FAILED])
+                ->exists(),
         ]);
     }
 }
