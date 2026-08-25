@@ -7,6 +7,7 @@ use App\Livewire\Pages\BrokerAccounts;
 use App\Livewire\Pages\Dashboard;
 use App\Livewire\Pages\LiveTrades;
 use App\Livewire\Pages\Settings;
+use App\Livewire\Pages\ChartAnalysis;
 use App\Livewire\Pages\TelegramAccounts;
 use App\Livewire\Pages\Setup;
 use App\Livewire\Pages\SignalChannels;
@@ -53,6 +54,8 @@ Route::middleware(['auth'])->group(function () {
 
     // Every decision the strategy layer made, including the refusals.
     Route::get('/signals', Signals::class)->name('signals');
+    // Structure, levels and a proposal - on request, and it places nothing.
+    Route::get('/analysis', ChartAnalysis::class)->name('analysis');
     Route::get('/signals/copier', SignalCopier::class)->name('signals.copier');
     // Which providers are on, and what each has been worth. Same page, because they are
     // the same decision.
