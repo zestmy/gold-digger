@@ -34,6 +34,13 @@ class HeartbeatController extends Controller
             'algo_trading_enabled' => ['nullable', 'boolean'],
             'broker_connected' => ['nullable', 'boolean'],
             'resolved_symbol' => ['nullable', 'string', 'max:32'],
+            // Every instrument this terminal will accept an order on. The dashboard can
+            // generate a signal for anything it has candles for; only the terminal knows
+            // what it can actually trade, and silent disagreement surfaces as an order
+            // refused hours later.
+            'symbols' => ['nullable', 'array', 'max:16'],
+            'symbols.*.base' => ['required_with:symbols', 'string', 'max:32'],
+            'symbols.*.resolved' => ['required_with:symbols', 'string', 'max:32'],
             // Symbol truth. The dashboard cannot derive any of these and must not guess
             // them - see the migration that adds the columns for what each one decides.
             'pip_size' => ['nullable', 'numeric', 'gt:0'],
@@ -60,6 +67,7 @@ class HeartbeatController extends Controller
                 'algo_trading_enabled' => $data['algo_trading_enabled'] ?? false,
                 'broker_connected' => $data['broker_connected'] ?? false,
                 'resolved_symbol' => $data['resolved_symbol'] ?? null,
+                'symbols' => $data['symbols'] ?? null,
                 'pip_size' => $data['pip_size'] ?? null,
                 'digits' => $data['digits'] ?? null,
                 'pip_value_per_lot' => $data['pip_value_per_lot'] ?? null,

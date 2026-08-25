@@ -30,6 +30,7 @@ class BotHeartbeat extends Model
         'algo_trading_enabled',
         'broker_connected',
         'resolved_symbol',
+        'symbols',
         'pip_size',
         'digits',
         'pip_value_per_lot',
@@ -45,6 +46,7 @@ class BotHeartbeat extends Model
     protected function casts(): array
     {
         return [
+            'symbols' => 'array',
             'algo_trading_enabled' => 'boolean',
             'broker_connected' => 'boolean',
             'pip_size' => 'decimal:5',

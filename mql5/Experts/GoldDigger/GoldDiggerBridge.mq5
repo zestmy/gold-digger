@@ -47,7 +47,7 @@ input int      PollSeconds   = 5;                                    // Seconds 
 input int      HttpTimeoutMs = 4000;                                 // Per-request timeout
 
 input group             "Trading"
-input string   BaseSymbol    = "XAUUSD";     // Base symbol; suffixes resolved automatically
+input string   BaseSymbols   = "XAUUSD";     // Base symbols, comma separated; suffixes resolved per symbol
 input double   PipSize       = 0.10;         // Price move of one pip (0 = infer; gold is usually 0.10)
 input long     MagicNumber   = 20240101;     // Identifies this EA's positions
 input int      Deviation     = 20;           // Max slippage in points (gold needs 20-30)
@@ -81,16 +81,27 @@ input bool     DemoOnly      = true;         // Refuse to run on a live account
 //+------------------------------------------------------------------+
 //| State                                                             |
 //+------------------------------------------------------------------+
-CGDExecutor  g_exec;
+//--- One executor per instrument. Bounded rather than dynamic: each one holds a
+//--- symbol's specification and every poll walks the whole list, so a terminal
+//--- carrying dozens would spend its timer on HTTP rather than trading. Eight is far
+//--- more than any account here runs and makes the array a fixed cost.
+#define GD_MAX_SYMBOLS 8
+
+CGDExecutor  g_exec[GD_MAX_SYMBOLS];
+string       g_base[GD_MAX_SYMBOLS];       // what the dashboard calls each one
+int          g_symbols          = 0;       // how many were resolved at init
+
 bool         g_ready            = false;   // OnInit completed successfully
 bool         g_trading_enabled  = false;   // mirrors bot_settings.is_active
 datetime     g_last_warned      = 0;       // rate-limits the repeated-warning spam
 
-//--- Newest closed bar already pushed, per series. Zero until the first push.
-datetime     g_last_entry_bar   = 0;
-datetime     g_last_trend_bar   = 0;
-bool         g_entry_seeded     = false;
-bool         g_trend_seeded     = false;
+//--- Newest closed bar already pushed, per series *per symbol*. Shared state here was
+//--- the whole of what made this EA single-instrument in practice: one cursor across
+//--- several feeds means the first symbol to close a bar suppresses the rest.
+datetime     g_last_entry_bar[GD_MAX_SYMBOLS];
+datetime     g_last_trend_bar[GD_MAX_SYMBOLS];
+bool         g_entry_seeded[GD_MAX_SYMBOLS];
+bool         g_trend_seeded[GD_MAX_SYMBOLS];
 
 //--- Why this EA was told to close a position, kept until the resulting deal shows
 //--- up in OnTradeTransaction. A broker deal cannot say which rung of the take-profit
@@ -265,7 +276,10 @@ void GDReportResult(const long command_id, const bool ok, const uint retcode,
    const string body = StringFormat(
       "{\"ok\":%s,\"retcode\":%d,\"ticket\":%s,\"price\":%s,\"volume\":%s,\"error\":\"%s\"}",
       (ok ? "true" : "false"), retcode, IntegerToString((long)ticket),
-      DoubleToString(price, g_exec.Digits()), DoubleToString(volume, 2),
+      //--- Six places because that is what trades.entry_price stores. Formatting to a
+      //--- particular symbol's digits was only ever cosmetic here, and with several
+      //--- instruments loaded there is no longer one right answer to pick.
+      DoubleToString(price, 6), DoubleToString(volume, 2),
       GDJsonEscape(error));
 
    string response;
@@ -352,17 +366,65 @@ string GDTakeCloseReason(const ulong ticket)
 //| the symbol does not supply them, because a wrong value does not   |
 //| fail loudly - it silently trades the wrong size.                  |
 //+------------------------------------------------------------------+
-double GDPipValuePerLot(void)
+//+------------------------------------------------------------------+
+//| Which executor speaks for a symbol.                               |
+//|                                                                   |
+//| The dashboard names instruments the way it stores them - XAUUSD - |
+//| while the broker may quote XAUUSDm or XAUUSD.raw. Each executor    |
+//| resolved its own suffix at init, so both spellings are matched:    |
+//| the base name the dashboard sent, and the resolved name the        |
+//| terminal actually trades.                                          |
+//|                                                                   |
+//| Returns -1 for an instrument this terminal was not told to carry,  |
+//| which is a refusal rather than a default. Falling back to the      |
+//| first symbol would fill a gold order on whatever happened to be    |
+//| loaded first, which is the worst available outcome.                |
+//+------------------------------------------------------------------+
+int GDIndexFor(const string symbol)
   {
-   const string sym = g_exec.Symbol();
+   if(symbol == "")
+      return -1;
+
+   for(int i = 0; i < g_symbols; i++)
+      if(g_base[i] == symbol || g_exec[i].Symbol() == symbol)
+         return i;
+
+   //--- Prefix match last: the dashboard sends the base, the terminal holds the
+   //--- suffixed name, and StringFind at position 0 is what ties them together.
+   for(int i = 0; i < g_symbols; i++)
+      if(StringFind(g_exec[i].Symbol(), symbol) == 0)
+         return i;
+
+   return -1;
+  }
+
+//+------------------------------------------------------------------+
+//| Which executor owns an open position.                             |
+//|                                                                   |
+//| Closing and modifying take a ticket, but the arithmetic around     |
+//| them does not: ModifyPosition clamps against its own symbol's tick |
+//| and normalises to its own digits. Routed by the position's symbol  |
+//| so a stop on EURUSD is never clamped against the price of gold.    |
+//+------------------------------------------------------------------+
+int GDIndexForTicket(const ulong ticket)
+  {
+   if(!PositionSelectByTicket(ticket))
+      return -1;
+
+   return GDIndexFor(PositionGetString(POSITION_SYMBOL));
+  }
+
+double GDPipValuePerLot(const int idx)
+  {
+   const string sym = g_exec[idx].Symbol();
 
    const double tick_value = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_VALUE);
    const double tick_size  = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE);
 
-   if(tick_value <= 0.0 || tick_size <= 0.0 || g_exec.PipSize() <= 0.0)
+   if(tick_value <= 0.0 || tick_size <= 0.0 || g_exec[idx].PipSize() <= 0.0)
       return 0.0;
 
-   return tick_value * (g_exec.PipSize() / tick_size);
+   return tick_value * (g_exec[idx].PipSize() / tick_size);
   }
 
 //+------------------------------------------------------------------+
@@ -409,7 +471,7 @@ long GDServerToUtc(const datetime server_time)
 //| vanish inside the same bar - an entry the completed bar never     |
 //| justified.                                                        |
 //+------------------------------------------------------------------+
-bool GDPushCandles(const ENUM_TIMEFRAMES tf, const int count)
+bool GDPushCandles(const int idx, const ENUM_TIMEFRAMES tf, const int count)
   {
    if(count < 1)
       return false;
@@ -417,16 +479,16 @@ bool GDPushCandles(const ENUM_TIMEFRAMES tf, const int count)
    MqlRates rates[];
    ArraySetAsSeries(rates, false);
 
-   const int copied = CopyRates(g_exec.Symbol(), tf, 1, count, rates);
+   const int copied = CopyRates(g_exec[idx].Symbol(), tf, 1, count, rates);
 
    if(copied <= 0)
      {
       PrintFormat("[GD] CopyRates(%s, %s) returned %d - history may still be loading.",
-                  g_exec.Symbol(), GDTimeframeName(tf), copied);
+                  g_exec[idx].Symbol(), GDTimeframeName(tf), copied);
       return false;
      }
 
-   const int digits = g_exec.Digits();
+   const int digits = g_exec[idx].Digits();
    string bars = "";
 
    for(int i = 0; i < copied; i++)
@@ -461,21 +523,21 @@ bool GDPushCandles(const ENUM_TIMEFRAMES tf, const int count)
    //--- with price history also has a specification and the two cannot drift apart. This is
    //--- what lets the dashboard hold more than one instrument: its heartbeat has room for
    //--- exactly one symbol's figures, and this does not.
-   const double pip_value = GDPipValuePerLot();
+   const double pip_value = GDPipValuePerLot(idx);
 
    const string spec = StringFormat(
       "{\"pip_size\":%s,\"digits\":%d,\"pip_value_per_lot\":%s,"
       "\"volume_min\":%s,\"volume_step\":%s}",
-      (g_exec.PipSize() > 0.0 ? DoubleToString(g_exec.PipSize(), 5) : "null"),
-      g_exec.Digits(),
+      (g_exec[idx].PipSize() > 0.0 ? DoubleToString(g_exec[idx].PipSize(), 5) : "null"),
+      g_exec[idx].Digits(),
       (pip_value > 0.0 ? DoubleToString(pip_value, 5) : "null"),
-      DoubleToString(g_exec.VolumeMin(), 4),
-      DoubleToString(g_exec.VolumeStep(), 4));
+      DoubleToString(g_exec[idx].VolumeMin(), 4),
+      DoubleToString(g_exec[idx].VolumeStep(), 4));
 
    const string body = StringFormat(
       "{\"symbol\":\"%s\",\"base_symbol\":\"%s\",\"timeframe\":\"%s\","
       "\"source\":\"mql5_ea\",\"spec\":%s,\"bars\":[%s]}",
-      GDJsonEscape(g_exec.Symbol()), GDJsonEscape(BaseSymbol), GDTimeframeName(tf), spec, bars);
+      GDJsonEscape(g_exec[idx].Symbol()), GDJsonEscape(g_base[idx]), GDTimeframeName(tf), spec, bars);
 
    string response;
    const int status = GDHttp("POST", "/api/v1/bot/candles", body, "application/json", response);
@@ -491,9 +553,9 @@ bool GDPushCandles(const ENUM_TIMEFRAMES tf, const int count)
 //| what makes a dropped push self-healing - the dashboard upserts,   |
 //| so re-sending a stored bar costs nothing and fills any gap.       |
 //+------------------------------------------------------------------+
-void GDMaintainSeries(const ENUM_TIMEFRAMES tf, datetime &last_bar, bool &seeded)
+void GDMaintainSeries(const int idx, const ENUM_TIMEFRAMES tf, datetime &last_bar, bool &seeded)
   {
-   const datetime closed = iTime(g_exec.Symbol(), tf, 1);
+   const datetime closed = iTime(g_exec[idx].Symbol(), tf, 1);
 
    if(closed == 0 || closed == last_bar)
       return;
@@ -502,7 +564,7 @@ void GDMaintainSeries(const ENUM_TIMEFRAMES tf, datetime &last_bar, bool &seeded
 
    //--- Only advance the marker on success, so a failed push is retried on the next
    //--- timer rather than being silently skipped until the following bar.
-   if(GDPushCandles(tf, count))
+   if(GDPushCandles(idx, tf, count))
      {
       last_bar = closed;
       seeded   = true;
@@ -517,12 +579,17 @@ void GDMaintainCandles(void)
    if(!PushCandles)
       return;
 
-   GDMaintainSeries(EntryTimeframe, g_last_entry_bar, g_entry_seeded);
+   //--- Every instrument, each with its own cursor. One shared cursor across several
+   //--- feeds meant the first symbol to close a bar suppressed the others' pushes.
+   for(int i = 0; i < g_symbols; i++)
+     {
+      GDMaintainSeries(i, EntryTimeframe, g_last_entry_bar[i], g_entry_seeded[i]);
 
-   //--- The trend series is an input to the next entry bar, not a trigger of its
-   //--- own; the dashboard generates nothing when it arrives.
-   if(TrendTimeframe != EntryTimeframe)
-      GDMaintainSeries(TrendTimeframe, g_last_trend_bar, g_trend_seeded);
+      //--- The trend series is an input to the next entry bar, not a trigger of its
+      //--- own; the dashboard generates nothing when it arrives.
+      if(TrendTimeframe != EntryTimeframe)
+         GDMaintainSeries(i, TrendTimeframe, g_last_trend_bar[i], g_trend_seeded[i]);
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -631,6 +698,10 @@ void GDReplayClosedDeals(const int days)
 
       const ENUM_DEAL_REASON why = (ENUM_DEAL_REASON)HistoryDealGetInteger(deal, DEAL_REASON);
 
+      //--- The deal names its own instrument, which is the only reliable way to format
+      //--- it once this terminal carries more than one.
+      const int di = GDIndexFor(HistoryDealGetString(deal, DEAL_SYMBOL));
+
       string reason_enum = "manual";
       if(why == DEAL_REASON_SL || why == DEAL_REASON_SO) reason_enum = "sl";
       else if(why == DEAL_REASON_TP)                     reason_enum = "tp3";
@@ -645,7 +716,7 @@ void GDReplayClosedDeals(const int days)
          "\"price\":%s,\"pips_profit\":%s,\"profit\":%s,\"commission\":%s,\"swap\":%s,"
          "\"reason\":\"%s\",\"closure_note\":\"replayed from history on attach\"}",
          IntegerToString(position_id), IntegerToString((long)deal),
-         DoubleToString(volume, 2), DoubleToString(price, g_exec.Digits()),
+         DoubleToString(volume, 2), DoubleToString(price, di >= 0 ? g_exec[di].Digits() : 6),
          DoubleToString(pips, 2), DoubleToString(profit, 2),
          DoubleToString(commission, 2), DoubleToString(swap, 2),
          reason_enum));
@@ -673,28 +744,48 @@ void GDHeartbeat(void)
    //--- targets into price levels, and pip value to size a position at all. Both are
    //--- sent as null rather than zero when unknown: the dashboard then records the
    //--- signal unexecuted instead of trading a size derived from a guess.
-   const double pip_value = GDPipValuePerLot();
+   //--- The heartbeat has room for exactly one symbol's figures and predates this EA
+   //--- carrying several, so index 0 keeps that field meaning what it always meant: the
+   //--- primary instrument. Every other symbol's specification travels with its own
+   //--- candles instead, which is why a second instrument needs no wire change here.
+   const double pip_value = GDPipValuePerLot(0);
 
-   const string pip_size_json  = (g_exec.PipSize() > 0.0)
-                                 ? DoubleToString(g_exec.PipSize(), 5) : "null";
+   const string pip_size_json  = (g_exec[0].PipSize() > 0.0)
+                                 ? DoubleToString(g_exec[0].PipSize(), 5) : "null";
    const string pip_value_json = (pip_value > 0.0)
                                  ? DoubleToString(pip_value, 5) : "null";
+
+   //--- Additive: an older dashboard ignores it, a newer one learns what this terminal
+   //--- can actually trade without being told separately.
+   string symbols_json = "";
+
+   for(int i = 0; i < g_symbols; i++)
+     {
+      if(symbols_json != "")
+         symbols_json += ",";
+
+      symbols_json += StringFormat("{\"base\":\"%s\",\"resolved\":\"%s\"}",
+                                   GDJsonEscape(g_base[i]), GDJsonEscape(g_exec[i].Symbol()));
+     }
 
    const string body = StringFormat(
       "{\"source\":\"mql5_ea\",\"version\":\"%s\",\"terminal_build\":%d,"
       "\"algo_trading_enabled\":%s,\"broker_connected\":%s,\"resolved_symbol\":\"%s\","
       "\"pip_size\":%s,\"digits\":%d,\"pip_value_per_lot\":%s,"
       "\"volume_min\":%s,\"volume_step\":%s,"
-      "\"balance\":%s,\"equity\":%s,\"margin_free\":%s,\"open_positions\":%d}",
+      "\"balance\":%s,\"equity\":%s,\"margin_free\":%s,\"open_positions\":%d,"
+      "\"symbols\":[%s]}",
       GD_EA_VERSION, (int)TerminalInfoInteger(TERMINAL_BUILD),
       (algo ? "true" : "false"), (connected ? "true" : "false"),
-      GDJsonEscape(g_exec.Symbol()),
-      pip_size_json, g_exec.Digits(), pip_value_json,
-      DoubleToString(g_exec.VolumeMin(), 4), DoubleToString(g_exec.VolumeStep(), 4),
+      GDJsonEscape(g_exec[0].Symbol()),
+      pip_size_json, g_exec[0].Digits(), pip_value_json,
+      DoubleToString(g_exec[0].VolumeMin(), 4), DoubleToString(g_exec[0].VolumeStep(), 4),
       DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2),
       DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2),
       DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_FREE), 2),
-      g_exec.CountOwnedPositions());
+      //--- Magic-scoped, so this already counts every instrument.
+      g_exec[0].CountOwnedPositions(),
+      symbols_json);
 
    string response;
    if(GDHttp("POST", "/api/v1/bot/heartbeat", body, "application/json", response) != 200)
@@ -756,9 +847,12 @@ void GDHandleCommand(const string &f[])
    if(type == "close_all")
      {
       uint retcode = 0;
-      const int closed = g_exec.CloseAllOwned(retcode);
+      //--- Magic-scoped rather than symbol-scoped, so this one call flattens every
+      //--- instrument this EA owns. Looping the executors would re-walk the same
+      //--- position list once per symbol and report the count several times over.
+      const int closed = g_exec[0].CloseAllOwned(retcode);
       GDReportResult(id, retcode == 0, retcode, 0, 0.0, (double)closed,
-                     retcode == 0 ? "" : g_exec.LastError());
+                     retcode == 0 ? "" : g_exec[0].LastError());
       GDLog(retcode == 0 ? "info" : "error",
             StringFormat("Close All: %d position(s) closed", closed));
       return;
@@ -772,7 +866,20 @@ void GDHandleCommand(const string &f[])
       //--- OnTradeTransaction as soon as this handler returns.
       GDRememberCloseReason(ticket, reason);
 
-      if(g_exec.ClosePosition(ticket, volume, retcode))
+      //--- Routed by the position rather than the command: a close carries a ticket,
+      //--- and the executor doing the arithmetic must be the one that knows that
+      //--- instrument's digits.
+      const int ci = GDIndexForTicket(ticket);
+
+      if(ci < 0)
+        {
+         GDTakeCloseReason(ticket);
+         GDReportResult(id, false, 0, ticket, 0.0, 0.0,
+                        "Position is on an instrument this terminal was not told to carry");
+         return;
+        }
+
+      if(g_exec[ci].ClosePosition(ticket, volume, retcode))
         {
          GDReportResult(id, true, retcode, ticket, 0.0, volume, "");
         }
@@ -781,7 +888,7 @@ void GDHandleCommand(const string &f[])
          //--- Nothing closed, so nothing will arrive to consume the reason. Left in
          //--- place it would be attached to whatever closed this position next.
          GDTakeCloseReason(ticket);
-         GDReportResult(id, false, retcode, ticket, 0.0, 0.0, g_exec.LastError());
+         GDReportResult(id, false, retcode, ticket, 0.0, 0.0, g_exec[ci].LastError());
         }
       return;
      }
@@ -792,7 +899,16 @@ void GDHandleCommand(const string &f[])
      {
       uint retcode = 0;
 
-      if(g_exec.ModifyPosition(ticket, sl_prc, tp_prc, retcode))
+      const int mi = GDIndexForTicket(ticket);
+
+      if(mi < 0)
+        {
+         GDReportResult(id, false, 0, ticket, 0.0, 0.0,
+                        "Position is on an instrument this terminal was not told to carry");
+         return;
+        }
+
+      if(g_exec[mi].ModifyPosition(ticket, sl_prc, tp_prc, retcode))
         {
          GDReportResult(id, true, retcode, ticket, 0.0, 0.0, "");
          GDLog("info", StringFormat("Position #%s stop/target moved (%s)",
@@ -801,9 +917,9 @@ void GDHandleCommand(const string &f[])
         }
       else
         {
-         GDReportResult(id, false, retcode, ticket, 0.0, 0.0, g_exec.LastError());
+         GDReportResult(id, false, retcode, ticket, 0.0, 0.0, g_exec[mi].LastError());
          GDLog("error", StringFormat("Modify rejected on #%s: %s",
-                                     IntegerToString((long)ticket), g_exec.LastError()));
+                                     IntegerToString((long)ticket), g_exec[mi].LastError()));
         }
       return;
      }
@@ -819,29 +935,34 @@ void GDHandleCommand(const string &f[])
          return;
         }
 
-      if(symbol != "" && StringFind(g_exec.Symbol(), symbol) != 0)
+      //--- Refused rather than defaulted. Falling back to the first symbol would fill
+      //--- a gold order on whatever this terminal happened to load first, which is the
+      //--- worst outcome available here.
+      const int si = GDIndexFor(symbol);
+
+      if(si < 0)
         {
          GDReportResult(id, false, 0, 0, 0.0, 0.0,
-                        StringFormat("Command names symbol '%s' but this EA is bound to '%s'",
-                                     symbol, g_exec.Symbol()));
+                        StringFormat("Command names symbol '%s', which this terminal was not told to carry",
+                                     symbol));
          return;
         }
 
       ulong order_ticket = 0;
       uint  retcode      = 0;
 
-      if(g_exec.OpenPending(dir == "buy", volume, entry_prc, sl_prc, tp_prc,
-                            PendingExpiryMinutes, comment, order_ticket, retcode))
+      if(g_exec[si].OpenPending(dir == "buy", volume, entry_prc, sl_prc, tp_prc,
+                                PendingExpiryMinutes, comment, order_ticket, retcode))
         {
          GDReportResult(id, true, retcode, order_ticket, entry_prc, volume, "");
          GDLog("info", StringFormat("Resting %s order placed at %s, expires in %d minutes",
-                                    dir, DoubleToString(entry_prc, g_exec.Digits()),
+                                    dir, DoubleToString(entry_prc, g_exec[si].Digits()),
                                     PendingExpiryMinutes));
         }
       else
         {
-         GDReportResult(id, false, retcode, 0, 0.0, 0.0, g_exec.LastError());
-         GDLog("error", StringFormat("Resting order rejected: %s", g_exec.LastError()));
+         GDReportResult(id, false, retcode, 0, 0.0, 0.0, g_exec[si].LastError());
+         GDLog("error", StringFormat("Resting order rejected: %s", g_exec[si].LastError()));
         }
 
       return;
@@ -860,11 +981,16 @@ void GDHandleCommand(const string &f[])
 
       //--- Symbols other than the configured one are refused rather than guessed at:
       //--- position sizing and pip conversion are calibrated for this instrument.
-      if(symbol != "" && StringFind(g_exec.Symbol(), symbol) != 0)
+      //--- Refused rather than defaulted. Falling back to the first symbol would fill
+      //--- a gold order on whatever this terminal happened to load first, which is the
+      //--- worst outcome available here.
+      const int si = GDIndexFor(symbol);
+
+      if(si < 0)
         {
          GDReportResult(id, false, 0, 0, 0.0, 0.0,
-                        StringFormat("Command names symbol '%s' but this EA is bound to '%s'",
-                                     symbol, g_exec.Symbol()));
+                        StringFormat("Command names symbol '%s', which this terminal was not told to carry",
+                                     symbol));
          return;
         }
 
@@ -874,7 +1000,7 @@ void GDHandleCommand(const string &f[])
       double out_volume = 0.0;
       uint   retcode    = 0;
 
-      if(g_exec.Open(is_buy, volume, sl_pips, tp_pips, sl_prc, tp_prc, comment,
+      if(g_exec[si].Open(is_buy, volume, sl_pips, tp_pips, sl_prc, tp_prc, comment,
                      out_ticket, out_price, out_volume, retcode))
         {
          GDReportResult(id, true, retcode, out_ticket, out_price, out_volume, "");
@@ -885,16 +1011,16 @@ void GDHandleCommand(const string &f[])
             "{\"event\":\"opened\",\"command_id\":%s,\"ticket\":%s,\"symbol\":\"%s\","
             "\"direction\":\"%s\",\"volume\":%s,\"price\":%s,\"magic\":%s,\"spread_pips\":%s}",
             IntegerToString(id), IntegerToString((long)out_ticket),
-            GDJsonEscape(g_exec.Symbol()), (is_buy ? "buy" : "sell"),
-            DoubleToString(out_volume, 2), DoubleToString(out_price, g_exec.Digits()),
+            GDJsonEscape(g_exec[si].Symbol()), (is_buy ? "buy" : "sell"),
+            DoubleToString(out_volume, 2), DoubleToString(out_price, g_exec[si].Digits()),
             IntegerToString(MagicNumber),
-            DoubleToString(SymbolInfoInteger(g_exec.Symbol(), SYMBOL_SPREAD) * g_exec.Point()
-                           / g_exec.PipSize(), 2)));
+            DoubleToString(SymbolInfoInteger(g_exec[si].Symbol(), SYMBOL_SPREAD) * g_exec[si].Point()
+                           / g_exec[si].PipSize(), 2)));
         }
       else
         {
-         GDReportResult(id, false, retcode, 0, 0.0, 0.0, g_exec.LastError());
-         GDLog("error", StringFormat("Open rejected: %s", g_exec.LastError()));
+         GDReportResult(id, false, retcode, 0, 0.0, 0.0, g_exec[si].LastError());
+         GDLog("error", StringFormat("Open rejected: %s", g_exec[si].LastError()));
         }
 
       return;
@@ -999,16 +1125,78 @@ int OnInit(void)
       return INIT_FAILED;
      }
 
-   if(!g_exec.Init(BaseSymbol, MagicNumber, Deviation, PipSize, MaxRetries))
+   //--- One executor per instrument, each resolving its own broker suffix.
+   //---
+   //--- A symbol that will not resolve fails the whole init rather than being skipped.
+   //--- Starting with three of four instruments looks identical to starting with all
+   //--- four until an order for the missing one is refused hours later, and the
+   //--- dashboard would meanwhile be generating signals for a feed nothing is pushing.
+   string requested[];
+   const int wanted = StringSplit(BaseSymbols, ',', requested);
+
+   if(wanted < 1)
      {
-      PrintFormat("[GD] %s", g_exec.LastError());
-      return INIT_FAILED;
+      Print("[GD] BaseSymbols is empty. Name at least one instrument.");
+      return INIT_PARAMETERS_INCORRECT;
      }
 
-   PrintFormat("[GD] Symbol %s -> %s (digits=%d point=%s pip=%s stops_level=%d min_lot=%s)",
-               BaseSymbol, g_exec.Symbol(), g_exec.Digits(),
-               DoubleToString(g_exec.Point(), 5), DoubleToString(g_exec.PipSize(), 5),
-               g_exec.StopsLevel(), DoubleToString(g_exec.VolumeMin(), 2));
+   if(wanted > GD_MAX_SYMBOLS)
+     {
+      PrintFormat("[GD] %d symbols requested but this build carries at most %d. "
+                  "Every poll walks the whole list, so a longer one spends the timer on HTTP.",
+                  wanted, GD_MAX_SYMBOLS);
+      return INIT_PARAMETERS_INCORRECT;
+     }
+
+   g_symbols = 0;
+
+   for(int i = 0; i < wanted; i++)
+     {
+      string base = requested[i];
+      StringTrimLeft(base);
+      StringTrimRight(base);
+
+      if(base == "")
+         continue;
+
+      //--- PipSize is the input's value for the first symbol only. A single figure
+      //--- cannot be right for gold and EURUSD at once, so everything after the first
+      //--- infers its own - and says so, because an inferred pip that is wrong by 10x
+      //--- makes every order on that instrument return 10016.
+      const double pip_for = (g_symbols == 0) ? PipSize : 0.0;
+
+      if(!g_exec[g_symbols].Init(base, MagicNumber, Deviation, pip_for, MaxRetries))
+        {
+         PrintFormat("[GD] %s (%s)", g_exec[g_symbols].LastError(), base);
+         return INIT_FAILED;
+        }
+
+      g_base[g_symbols] = base;
+
+      //--- Cursors start clean rather than inheriting whatever the array held.
+      g_last_entry_bar[g_symbols] = 0;
+      g_last_trend_bar[g_symbols] = 0;
+      g_entry_seeded[g_symbols]   = false;
+      g_trend_seeded[g_symbols]   = false;
+
+      PrintFormat("[GD] Symbol %s -> %s (digits=%d point=%s pip=%s stops_level=%d min_lot=%s)",
+                  base, g_exec[g_symbols].Symbol(), g_exec[g_symbols].Digits(),
+                  DoubleToString(g_exec[g_symbols].Point(), 5),
+                  DoubleToString(g_exec[g_symbols].PipSize(), 5),
+                  g_exec[g_symbols].StopsLevel(),
+                  DoubleToString(g_exec[g_symbols].VolumeMin(), 2));
+
+      if(g_symbols > 0 && g_exec[g_symbols].PipSize() <= 0.0)
+         PrintFormat("[GD] WARNING: pip size for %s could not be inferred.", base);
+
+      g_symbols++;
+     }
+
+   if(g_symbols < 1)
+     {
+      Print("[GD] BaseSymbols named nothing usable.");
+      return INIT_PARAMETERS_INCORRECT;
+     }
 
    if(PipSize <= 0.0)
       Print("[GD] WARNING: PipSize was inferred. On gold the broker's point is 0.01 but most "
@@ -1041,7 +1229,7 @@ int OnInit(void)
                   GDTimeframeName(EntryTimeframe), GDTimeframeName(TrendTimeframe),
                   HistoryBars, WindowBars);
 
-      const double pip_value = GDPipValuePerLot();
+      const double pip_value = GDPipValuePerLot(0);
 
       //--- Without this the dashboard cannot size a position and will record every
       //--- signal as lot_size_unavailable, which looks like the strategy never firing.
@@ -1050,7 +1238,7 @@ int OnInit(void)
                "The dashboard will refuse to size positions rather than guess.");
       else
          PrintFormat("[GD] Pip value per lot: %s (pip size %s)",
-                     DoubleToString(pip_value, 5), DoubleToString(g_exec.PipSize(), 5));
+                     DoubleToString(pip_value, 5), DoubleToString(g_exec[0].PipSize(), 5));
      }
 
    if(Reconcile && ReconcileMinutes < 1)
@@ -1075,8 +1263,13 @@ int OnInit(void)
       GDReportPositions();
      }
 
-   GDLog("info", StringFormat("EA %s attached on %s (terminal build %d)",
-                              GD_EA_VERSION, g_exec.Symbol(),
+   string carried = "";
+
+   for(int i = 0; i < g_symbols; i++)
+      carried += (i == 0 ? "" : ", ") + g_exec[i].Symbol();
+
+   GDLog("info", StringFormat("EA %s attached carrying %s (terminal build %d)",
+                              GD_EA_VERSION, carried,
                               (int)TerminalInfoInteger(TERMINAL_BUILD)));
 
    return INIT_SUCCEEDED;
@@ -1209,9 +1402,14 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
         }
      }
 
+   //--- Pips are a per-instrument unit: a gold pip is 0.10 and a EURUSD pip is 0.0001,
+   //--- so taking the figure from whichever executor loaded first would have been wrong
+   //--- by orders of magnitude on every symbol but one.
+   const int ti = GDIndexFor(HistoryDealGetString(trans.deal, DEAL_SYMBOL));
+
    double pips = 0.0;
-   if(entry_price > 0.0 && g_exec.PipSize() > 0.0)
-      pips = ((close_price - entry_price) / g_exec.PipSize()) * (was_buy ? 1.0 : -1.0);
+   if(entry_price > 0.0 && ti >= 0 && g_exec[ti].PipSize() > 0.0)
+      pips = ((close_price - entry_price) / g_exec[ti].PipSize()) * (was_buy ? 1.0 : -1.0);
 
    //--- Still open means this was one step of the TP ladder, not the exit.
    const bool still_open = PositionSelectByTicket((ulong)position_id);
@@ -1250,7 +1448,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       "\"reason\":\"%s\",\"closure_note\":\"%s\"}",
       (still_open ? "partial" : "closed"),
       IntegerToString(position_id), IntegerToString((long)trans.deal),
-      DoubleToString(volume, 2), DoubleToString(close_price, g_exec.Digits()),
+      DoubleToString(volume, 2), DoubleToString(close_price, ti >= 0 ? g_exec[ti].Digits() : 6),
       DoubleToString(pips, 2), DoubleToString(profit, 2),
       DoubleToString(commission, 2), DoubleToString(swap, 2),
       reason_enum, GDJsonEscape(reason_note)));
