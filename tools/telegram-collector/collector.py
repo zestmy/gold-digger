@@ -186,44 +186,58 @@ async def cmd_login() -> None:
         print(f"Session stored at {SESSION}.session - treat it as a password.")
 
 
+async def announce(tg: TelegramClient) -> int:
+    """
+    Report every dialog this account can see, so channels can be picked from a list.
+
+    Called on start rather than as a separate command. Telethon keeps its session in a
+    SQLite file that one process holds open, so a running collector makes a second
+    invocation impossible - and requiring one meant every new collector needed a manual
+    step on the machine, which is the thing this whole flow exists to avoid.
+    """
+    channels = []
+
+    async for dialog in tg.iter_dialogs():
+        entity = dialog.entity
+
+        # Only broadcast channels and groups. Private conversations with people are not
+        # signal sources and there is no reason to name them to a web server.
+        if not isinstance(entity, (Channel, Chat)):
+            continue
+
+        channels.append(
+            {
+                "chat_id": chat_id_of(entity),
+                "title": title_of(entity),
+                "username": getattr(entity, "username", None),
+            }
+        )
+
+    if not channels:
+        print("This account is not in any channels or groups.")
+        return 0
+
+    me = await tg.get_me()
+
+    result = api("POST", "channels", {
+        "channels": channels,
+        # So the dashboard can show which account this is rather than a row of labels
+        # somebody typed. It identifies, it does not authenticate - the token does that.
+        "me": {
+            "username": getattr(me, "username", None),
+            "name": " ".join(filter(None, [me.first_name, me.last_name])) or None,
+        },
+    })
+
+    print(f"Reported {result['registered']} channels.")
+
+    return result["registered"]
+
+
 async def cmd_announce() -> None:
-    """Report every dialog this account can see, so channels can be picked from a list."""
+    """Kept for a collector that is not running; `run` does this on start."""
     async with client() as tg:
-        channels = []
-
-        async for dialog in tg.iter_dialogs():
-            entity = dialog.entity
-
-            # Only broadcast channels and groups. Private conversations with people are
-            # not signal sources and there is no reason to name them to a web server.
-            if not isinstance(entity, (Channel, Chat)):
-                continue
-
-            channels.append(
-                {
-                    "chat_id": chat_id_of(entity),
-                    "title": title_of(entity),
-                    "username": getattr(entity, "username", None),
-                }
-            )
-
-        if not channels:
-            print("This account is not in any channels or groups.")
-            return
-
-        me = await tg.get_me()
-
-        result = api("POST", "channels", {
-            "channels": channels,
-            # So the dashboard can show which account this is rather than a row of labels
-            # somebody typed. It identifies, it does not authenticate - the token does that.
-            "me": {
-                "username": getattr(me, "username", None),
-                "name": " ".join(filter(None, [me.first_name, me.last_name])) or None,
-            },
-        })
-        print(f"Reported {result['registered']} channels.")
-        print("Enable the ones you want in the dashboard: Signals -> Channels.")
+        await announce(tg)
 
 
 async def forward(tg: TelegramClient, state: dict, chat_id: str, messages) -> int:
@@ -429,6 +443,14 @@ async def cmd_run() -> None:
     await report("active", me=await tg.get_me())
 
     print("Authorised.")
+
+    # Register what this account can see, every start. Cheap, idempotent, and it means a
+    # channel joined since the last run is selectable without anybody being told to run
+    # anything.
+    try:
+        await announce(tg)
+    except requests.RequestException as error:
+        print(f"Could not report channels: {error}")
 
     async def refresh() -> None:
         """Re-read the watch list, so the dashboard's switch takes effect while running."""

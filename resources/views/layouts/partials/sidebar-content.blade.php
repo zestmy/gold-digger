@@ -57,7 +57,28 @@
             <path d="M16 6L24 14" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round"/>
             <path d="M22 12L28 6M24 14L30 8" stroke="#6B7280" stroke-width="2" stroke-linecap="round"/>
         </svg>
-        <span class="text-xl font-bold text-white">FX<span class="text-yellow-400">SignalPro</span></span>
+        <span class="whitespace-nowrap text-xl font-bold text-white" x-show="!collapsed">FX<span class="text-yellow-400">SignalPro</span></span>
+    </a>
+</div>
+
+{{-- Two independent preferences, both in localStorage rather than on the server: they are
+     about this browser window, they have to survive a full page load without a round trip,
+     and a sidebar that reopened itself on every navigation would be worse than one that
+     never closed.
+
+     Sections start closed apart from Overview. Fourteen links open at once is a wall to
+     scan on every page; the section containing the current page is forced open, so
+     collapsing something can never hide where you are. --}}
+<!-- Logo -->
+<div class="flex h-16 shrink-0 items-center">
+    <a href="{{ route('dashboard') }}" class="flex items-center gap-x-3">
+        <svg class="h-8 w-8" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M4 20L8 14H24L28 20V26H4V20Z" fill="#FFD700" stroke="#DAA520" stroke-width="1"/>
+            <path d="M8 14L12 8H20L24 14H8Z" fill="#FFD700" stroke="#DAA520" stroke-width="1"/>
+            <path d="M16 6L24 14" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round"/>
+            <path d="M22 12L28 6M24 14L30 8" stroke="#6B7280" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="whitespace-nowrap text-xl font-bold text-white" x-show="!collapsed">FX<span class="text-yellow-400">SignalPro</span></span>
     </a>
 </div>
 
@@ -68,27 +89,30 @@
      something can never hide where you are. --}}
 <nav class="flex flex-1 flex-col"
      x-data="{
-         shut: JSON.parse(localStorage.getItem('gd-nav-shut') || '[]'),
+         /* Sections opened by hand. Closed is the default, so this list is what somebody
+            has deliberately expanded rather than what they have hidden. */
+         opened: JSON.parse(localStorage.getItem('gd-nav-open') || '['Overview']'),
          toggle(name) {
-             this.shut = this.shut.includes(name)
-                 ? this.shut.filter(n => n !== name)
-                 : [...this.shut, name];
-             localStorage.setItem('gd-nav-shut', JSON.stringify(this.shut));
+             this.opened = this.opened.includes(name)
+                 ? this.opened.filter(n => n !== name)
+                 : [...this.opened, name];
+             localStorage.setItem('gd-nav-open', JSON.stringify(this.opened));
          },
-         open(name, hasCurrent) { return hasCurrent || ! this.shut.includes(name); }
+         open(name, hasCurrent) { return hasCurrent || this.opened.includes(name); }
      }">
     <ul role="list" class="flex flex-1 flex-col gap-y-4">
         @foreach($sections as $heading => $links)
             @php($hasCurrent = collect($links)->contains(fn ($l) => request()->routeIs($l[0])))
             <li>
                 <button type="button" x-on:click="toggle('{{ $heading }}')"
-                        class="flex w-full items-center gap-x-1.5 rounded px-2 py-1 text-xs font-semibold uppercase tracking-wider text-gray-600 hover:text-gray-400">
+                        class="flex w-full items-center gap-x-1.5 rounded px-2 py-1 text-xs font-semibold uppercase tracking-wider text-gray-600 hover:text-gray-400"
+                        x-bind:title="collapsed ? '{{ $heading }}' : null">
                     <svg class="h-3 w-3 shrink-0 transition-transform"
                          x-bind:class="open('{{ $heading }}', {{ $hasCurrent ? 'true' : 'false' }}) ? 'rotate-90' : ''"
                          fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
                     </svg>
-                    {{ $heading }}
+                    <span x-show="!collapsed">{{ $heading }}</span>
                 </button>
 
                 <ul role="list" class="-mx-2 mt-1 space-y-0.5"
@@ -105,7 +129,7 @@
                                 <svg class="h-6 w-6 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" d="{{ $icon }}" />
                                 </svg>
-                                {{ $label }}
+                                <span x-show="!collapsed">{{ $label }}</span>
                             </a>
                         </li>
                     @endforeach
@@ -118,7 +142,7 @@
              HTML one, or the label leaks into the markup for everybody. --}}
         @if(auth()->user()?->is_admin)
             <li>
-                <div class="px-2 text-xs font-semibold uppercase tracking-wider text-gray-600">Admin</div>
+                <div class="px-2 text-xs font-semibold uppercase tracking-wider text-gray-600" x-show="!collapsed">Admin</div>
 
                 <ul role="list" class="-mx-2 mt-1 space-y-0.5">
                     <li>
@@ -127,7 +151,7 @@
                             <svg class="h-6 w-6 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
                             </svg>
-                            Admin Panel
+                            <span x-show="!collapsed">Admin Panel</span>
                         </a>
                     </li>
                 </ul>

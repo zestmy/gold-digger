@@ -17,7 +17,18 @@
     <body class="font-sans antialiased">
         <div class="min-h-screen bg-gray-900">
             <!-- Mobile sidebar backdrop -->
-            <div x-data="{ sidebarOpen: false }">
+            <div x-data="{
+                 sidebarOpen: false,
+                 /* Minimised is a per-browser preference and has to survive a full page
+                    load without a round trip, so it lives in localStorage rather than on
+                    the server. Desktop only - on a phone the sidebar is a drawer and
+                    there is nothing to reclaim. */
+                 collapsed: localStorage.getItem('gd-nav-collapsed') === '1',
+                 toggleCollapsed() {
+                     this.collapsed = ! this.collapsed;
+                     localStorage.setItem('gd-nav-collapsed', this.collapsed ? '1' : '0');
+                 }
+             }">
                 <!-- Off-canvas menu for mobile -->
                 <div x-show="sidebarOpen" class="relative z-50 lg:hidden" role="dialog" aria-modal="true">
                     <div x-show="sidebarOpen"
@@ -48,8 +59,12 @@
                                 </button>
                             </div>
 
-                            <!-- Mobile sidebar content -->
-                            <div class="flex grow flex-col gap-y-5 overflow-y-auto bg-gray-900 px-6 pb-4 ring-1 ring-white/10">
+                            {{-- The drawer shadows `collapsed` to false: minimising is a
+                                 desktop preference about reclaiming width, and on a phone
+                                 the drawer covers the screen anyway - inheriting it would
+                                 hide every label for no gain. --}}
+                            <div class="flex grow flex-col gap-y-5 overflow-y-auto bg-gray-900 px-6 pb-4 ring-1 ring-white/10"
+                                 x-data="{ collapsed: false }">
                                 @include('layouts.partials.sidebar-content')
                             </div>
                         </div>
@@ -57,14 +72,29 @@
                 </div>
 
                 <!-- Static sidebar for desktop -->
-                <div class="hidden lg:fixed lg:inset-y-0 lg:z-50 lg:flex lg:w-72 lg:flex-col">
-                    <div class="flex grow flex-col gap-y-5 overflow-y-auto bg-gray-900 px-6 pb-4 border-r border-gray-800">
+                <div class="hidden lg:fixed lg:inset-y-0 lg:z-50 lg:flex lg:flex-col"
+                     x-bind:class="collapsed ? 'lg:w-20' : 'lg:w-72'">
+                    <div class="relative flex grow flex-col gap-y-5 overflow-y-auto overflow-x-hidden border-r border-gray-800 bg-gray-900 pb-4"
+                         x-bind:class="collapsed ? 'px-3' : 'px-6'">
                         @include('layouts.partials.sidebar-content')
+
+                        {{-- At the foot rather than beside the logo: it is used rarely, and
+                             beside the logo it competes with the one control on the page
+                             somebody actually clicks. --}}
+                        <button type="button" x-on:click="toggleCollapsed()"
+                                class="mt-auto flex items-center gap-x-2 rounded-md p-2 text-xs text-gray-600 hover:bg-gray-800 hover:text-gray-300"
+                                x-bind:title="collapsed ? 'Expand menu' : 'Minimise menu'">
+                            <svg class="h-5 w-5 shrink-0 transition-transform" x-bind:class="collapsed ? 'rotate-180' : ''"
+                                 fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M18.75 19.5l-7.5-7.5 7.5-7.5m-6 15L5.25 12l7.5-7.5" />
+                            </svg>
+                            <span x-show="!collapsed">Minimise</span>
+                        </button>
                     </div>
                 </div>
 
                 <!-- Main content area -->
-                <div class="lg:pl-72">
+                <div x-bind:class="collapsed ? 'lg:pl-20' : 'lg:pl-72'">
                     <!-- Top bar with mobile menu button -->
                     <div class="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b border-gray-800 bg-gray-900 px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8">
                         <button type="button" class="-m-2.5 p-2.5 text-gray-400 lg:hidden" @click="sidebarOpen = true">

@@ -92,17 +92,18 @@
                             </div>
                         </div>
 
-                        @if($reading['stop_price'] && $reading['target_price'])
-                            @php
-                                $risk = abs($reading['entry_price'] - $reading['stop_price']);
-                                $reward = abs($reading['target_price'] - $reading['entry_price']);
-                            @endphp
-                            <p class="mt-2 text-xs text-gray-500">
-                                {{-- Computed here rather than taken from the model: a ratio is
-                                     arithmetic, and arithmetic should not be asked for. --}}
-                                Reward against risk: {{ $risk > 0 ? number_format($reward / $risk, 2) : '—' }} to 1
-                            </p>
-                        @endif
+                        {{-- Flat on purpose. Livewire wraps some conditionals in its own
+                             DOM-diffing markers, and where it does, a nested @endif sitting
+                             immediately before the outer @else puts a marker between the two
+                             and the compiled PHP no longer pairs - a 500 with a parse error
+                             naming a line in generated code. It does not happen everywhere,
+                             which is what makes it worth avoiding rather than reasoning
+                             about: rendering the value conditionally instead of the block
+                             sidesteps it and reads better anyway. --}}
+                        <p class="mt-2 text-xs text-gray-500">
+                            Reward against risk:
+                            {{ $reading['reward_ratio'] === null ? '—' : number_format($reading['reward_ratio'], 2).' to 1' }}
+                        </p>
                     @else
                         <p class="mt-4 rounded-md bg-gray-900 p-3 text-sm text-gray-400">
                             No plan proposed. Waiting is a legitimate reading, and a mixed chart has no

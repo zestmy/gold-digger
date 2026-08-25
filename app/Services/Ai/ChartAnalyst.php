@@ -152,10 +152,22 @@ final class ChartAnalyst
             return ($i !== null && isset($levels[$i])) ? (float) $levels[$i]['price'] : null;
         };
 
+        $entry = $price($reading['entry_level'] ?? null);
+        $stop = $price($reading['stop_level'] ?? null);
+        $target = $price($reading['target_level'] ?? null);
+
+        // Computed here rather than in the view, and never asked of the model: a ratio is
+        // arithmetic, and arithmetic is not a thing to request an opinion about.
+        $risk = ($entry !== null && $stop !== null) ? abs($entry - $stop) : null;
+        $reward = ($entry !== null && $target !== null) ? abs($target - $entry) : null;
+
         return $reading + [
-            'entry_price' => $price($reading['entry_level'] ?? null),
-            'stop_price' => $price($reading['stop_level'] ?? null),
-            'target_price' => $price($reading['target_level'] ?? null),
+            'entry_price' => $entry,
+            'stop_price' => $stop,
+            'target_price' => $target,
+            'reward_ratio' => ($risk !== null && $reward !== null && $risk > 0.0)
+                ? round($reward / $risk, 2)
+                : null,
         ];
     }
 

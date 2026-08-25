@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\Ai;
 
+use App\Livewire\Pages\ChartAnalysis;
+use App\Models\BotHeartbeat;
 use App\Models\BrokerAccount;
 use App\Models\Candle;
 use App\Models\Strategy;
@@ -11,6 +13,7 @@ use App\Services\Indicators\Structure;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
@@ -44,6 +47,15 @@ class ChartAnalysisTest extends TestCase
         $this->account = BrokerAccount::create([
             'user_id' => $this->user->id, 'label' => 'Demo', 'broker_name' => 'Elev8',
             'account_number' => '1', 'server' => 'Elev8-Demo2', 'is_demo' => true, 'is_active' => true,
+        ]);
+
+        // The page resolves its broker account from the connected terminal, which is where
+        // every other part of this system gets it. Candles are stored per account, so
+        // without a heartbeat the page reads an empty series and reports missing history.
+        BotHeartbeat::create([
+            'user_id' => $this->user->id, 'broker_account_id' => $this->account->id,
+            'source' => 'mql5_ea', 'algo_trading_enabled' => true, 'broker_connected' => true,
+            'resolved_symbol' => 'XAUUSD', 'last_seen_at' => now(),
         ]);
     }
 
@@ -178,6 +190,52 @@ class ChartAnalysisTest extends TestCase
 
         $this->assertFalse($result['ok']);
         $this->assertSame([], $result['levels']);
+    }
+
+    // =====================================================================
+    // THE PAGE ITSELF
+    // =====================================================================
+
+    /**
+     * The service was covered and the page was not, so a Blade fault reached production as
+     * a 500 that no test could have caught. Rendering it is the cheap half of that lesson.
+     */
+    public function test_the_page_renders_a_plan(): void
+    {
+        $this->bars();
+        $this->reads(plan: 'buy', entry: 0, stop: 1, target: 1);
+
+        Livewire::actingAs($this->user)
+            ->test(ChartAnalysis::class)
+            ->set('symbol', 'XAUUSD')
+            ->set('timeframe', 'M5')
+            ->call('analyse')
+            ->assertOk()
+            ->assertSee('Reward against risk');
+    }
+
+    public function test_the_page_renders_a_wait(): void
+    {
+        $this->bars();
+        $this->reads(plan: 'wait', entry: null, stop: null, target: null);
+
+        Livewire::actingAs($this->user)
+            ->test(ChartAnalysis::class)
+            ->set('symbol', 'XAUUSD')
+            ->set('timeframe', 'M5')
+            ->call('analyse')
+            ->assertOk()
+            ->assertSee('No plan proposed');
+    }
+
+    public function test_the_page_renders_before_anything_is_analysed(): void
+    {
+        $this->bars();
+
+        Livewire::actingAs($this->user)
+            ->test(ChartAnalysis::class)
+            ->assertOk()
+            ->assertSee('press Analyse');
     }
 
     // =====================================================================
