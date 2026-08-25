@@ -1,0 +1,398 @@
+<?php
+
+namespace App\Services\Telegram;
+
+use App\Models\BotSettings;
+use App\Models\Candle;
+use App\Models\TelegramSignal;
+use App\Services\Ai\AiFund;
+use App\Services\Ai\OpenRouter;
+use App\Services\Instruments\InstrumentProfile;
+use App\Services\News\NewsBlackout;
+use App\Services\Strategy\TradingSession;
+use Illuminate\Support\Carbon;
+
+/**
+ * Signal Reviewer
+ *
+ * Decides whether a copied signal is worth executing.
+ *
+ * ## The gates run first, in code
+ *
+ * Every deterministic objection - closed session, news blackout, exhausted fund, a signal
+ * too old to still be about this market, a price that has already run past the entry - is
+ * checked here before the model is asked anything.
+ *
+ * That ordering is the design, not an optimisation. The model can only ever decline
+ * something the gates already allowed; it is never in a position to approve something they
+ * blocked. An LLM that could talk its way past a risk control would make every risk control
+ * in this system advisory, and they are not advisory.
+ *
+ * It also means a blocked signal costs nothing. There is no reason to pay for an opinion
+ * about a trade that cannot be taken.
+ *
+ * ## It is built to decline
+ *
+ * The backtests on this account say the same thing repeatedly: loosening filters trades
+ * more and loses more. A reviewer that looked for reasons to take things would be the same
+ * mistake wearing a different hat, so the prompt requires a positive case rather than the
+ * absence of a negative one, and "not enough evidence" is a decline.
+ *
+ * A high decline rate is the expected result. If this approves most of what it sees, that
+ * is a finding about the reviewer, not about the signals.
+ */
+final class SignalReviewer
+{
+    /** Beyond this, the market that produced the signal is not the market you would enter. */
+    public const MAX_AGE_MINUTES = 45;
+
+    /**
+     * How far price may drift toward the target before the trade is no longer the one that
+     * was posted. Expressed in stop distances: half the stop eaten means the reward has
+     * shrunk and the risk has not.
+     */
+    public const MAX_DRIFT_OF_STOP = 0.5;
+
+    public function __construct(
+        private readonly OpenRouter $router = new OpenRouter,
+        private readonly AiFund $fund = new AiFund,
+    ) {}
+
+    /**
+     * @return array{status: string, reasoning: string, confidence: int|null, model: string|null}
+     */
+    public function review(TelegramSignal $signal): array
+    {
+        if ($signal->parse_status !== TelegramSignal::PARSE_OK) {
+            return $this->decline('The message never parsed into a signal, so there is nothing to review.');
+        }
+
+        $settings = BotSettings::where('user_id', $signal->user_id)->first();
+
+        $objection = $this->gate($signal, $settings);
+
+        if ($objection !== null) {
+            // Declined without asking. A gate is not a consideration to be weighed.
+            return $this->decline($objection);
+        }
+
+        if (! $this->router->configured()) {
+            return $this->decline('No OPENROUTER_API_KEY is configured, so the signal cannot be reviewed. Nothing is executed unreviewed.');
+        }
+
+        $result = $this->router->structured(
+            model: (string) config('ai.model'),
+            system: $this->systemPrompt(),
+            brief: $this->brief($signal, $settings),
+            schemaName: 'signal_review',
+            schema: $this->schema(),
+        );
+
+        if (! $result['ok']) {
+            // A failed review is a decline, never a default-approve. The one direction this
+            // must never fail in is "we could not check, so we traded it".
+            return $this->decline('The review could not be completed: '.($result['error'] ?? 'unknown error').'.');
+        }
+
+        $approved = (bool) ($result['data']['approve'] ?? false);
+        $reasoning = trim((string) ($result['data']['reasoning'] ?? ''));
+        $confidence = (int) ($result['data']['confidence'] ?? 0);
+
+        return [
+            'status' => $approved ? TelegramSignal::REVIEW_APPROVED : TelegramSignal::REVIEW_DECLINED,
+            'reasoning' => $reasoning !== '' ? $reasoning : 'No reasoning given.',
+            'confidence' => max(0, min(100, $confidence)),
+            'model' => $result['model'],
+        ];
+    }
+
+    /**
+     * The deterministic objections, in the order that costs least to check.
+     */
+    private function gate(TelegramSignal $signal, ?BotSettings $settings): ?string
+    {
+        if ($settings === null || ! $settings->is_active) {
+            return 'The kill switch is off, so nothing may be opened.';
+        }
+
+        if (! $this->fund->canOpen($settings, $signal->user_id)) {
+            $reason = $this->fund->state($settings, $signal->user_id)['blocked_reason'];
+
+            return $this->fund->explain((string) $reason);
+        }
+
+        $profile = app(InstrumentProfile::class)->for((string) $signal->symbol);
+
+        if ($profile['kind'] === InstrumentProfile::UNKNOWN) {
+            return "{$signal->symbol} is not an instrument this system can classify, so its risk cannot be sized.";
+        }
+
+        $now = Carbon::now('UTC');
+        $posted = $signal->posted_at ?? $signal->created_at;
+
+        if ($posted !== null && $posted->diffInMinutes($now) > self::MAX_AGE_MINUTES) {
+            return sprintf(
+                'The signal is %d minutes old. Past %d minutes the market that produced it is not the market you would be entering.',
+                $posted->diffInMinutes($now),
+                self::MAX_AGE_MINUTES,
+            );
+        }
+
+        if ($profile['session_gated'] && ! app(TradingSession::class)->isOpen($settings->allowed_sessions, $now)) {
+            return 'No allowed trading session is open.';
+        }
+
+        $news = app(NewsBlackout::class)->objection($settings, $profile['currencies'], $now);
+
+        if ($news !== null) {
+            return $news === NewsBlackout::REASON_BLACKOUT
+                ? 'A high-impact release for this instrument falls inside the blackout window.'
+                : 'The economic calendar is unavailable, so the news filter cannot be checked.';
+        }
+
+        return $this->driftObjection($signal);
+    }
+
+    /**
+     * Has the trade that was posted stopped being available?
+     *
+     * A signal is a package: this entry, that stop, those targets. Price moving toward the
+     * target before you are in shrinks the reward while leaving the risk exactly where it
+     * was - so the trade you would take is not the trade that was posted, even though every
+     * number in the message is still the same.
+     */
+    private function driftObjection(TelegramSignal $signal): ?string
+    {
+        if ($signal->entry_price === null || $signal->sl_price === null) {
+            // A market order has no entry to drift from.
+            return null;
+        }
+
+        $last = Candle::where('symbol', $signal->symbol)
+            ->orderByDesc('open_time')
+            ->value('close');
+
+        if ($last === null) {
+            // No price for this instrument. Not evidence against the signal, but nothing
+            // downstream could size it either.
+            return "No stored price for {$signal->symbol}, so the entry cannot be checked against the market.";
+        }
+
+        $last = (float) $last;
+        $stopDistance = abs($signal->entry_price - $signal->sl_price);
+
+        if ($stopDistance <= 0.0) {
+            return 'The signal\'s stop sits on its entry, which is not a stop.';
+        }
+
+        $movement = $signal->direction === 'buy'
+            ? $last - $signal->entry_price
+            : $signal->entry_price - $last;
+
+        // Past the stop already: the trade is over before it was taken.
+        if ($movement <= -$stopDistance) {
+            return 'Price has already passed the signal\'s stop loss.';
+        }
+
+        if ($movement > self::MAX_DRIFT_OF_STOP * $stopDistance) {
+            return sprintf(
+                'Price has already run %.2f of the way to target in stop-distance terms; the reward has shrunk and the risk has not.',
+                $movement / $stopDistance,
+            );
+        }
+
+        return null;
+    }
+
+    private function systemPrompt(): string
+    {
+        return <<<'PROMPT'
+        You review trade signals copied from a Telegram provider, for an automated system
+        that will execute what you approve on a real account.
+
+        Everything you are told has already passed the mechanical checks: the session is
+        open, no high-impact release is near, the fund has capital, and price has not run
+        away from the entry. Those are not yours to re-litigate. Your job is the judgement
+        those checks cannot make - whether this particular trade is worth taking.
+
+        Decline unless there is a positive case for taking it.
+
+        "Nothing looks wrong" is not a positive case. Absence of objection is not evidence,
+        and approving on it is how a copier ends up taking everything a provider posts,
+        which is indistinguishable from having no reviewer at all.
+
+        What makes a positive case:
+
+        - The reward justifies the risk. Compare the distance to the first target against
+          the distance to the stop. Less than roughly 1:1 needs a specific reason.
+        - The direction is not fighting the higher-timeframe trend you are shown. Taking a
+          buy against a clearly falling trend needs to be argued for, not assumed.
+        - The stop is somewhere defensible rather than an arbitrary round number a few
+          points away, and it is wide enough that ordinary noise will not take it out. You
+          are given ATR; use it.
+        - The instrument is one the account already has price history for, so the system
+          can size the position honestly.
+
+        Reasons to decline that are worth stating plainly:
+
+        - Reward that does not justify risk, however confident the provider sounds.
+        - A stop so tight relative to ATR that it is likely to be hit by noise alone.
+        - A direction opposing the trend with nothing offered to justify it.
+        - Anything you cannot assess from what you were given. Say so rather than guessing.
+
+        Never assume information you were not given. You cannot see a chart, the provider's
+        record, or anything outside this brief. If the deciding factor is something you do
+        not have, that is a decline and the reason is that you do not have it.
+
+        Be brief and concrete. Two or three sentences. No hedging boilerplate.
+        PROMPT;
+    }
+
+    private function brief(TelegramSignal $signal, ?BotSettings $settings): string
+    {
+        $profile = app(InstrumentProfile::class)->for((string) $signal->symbol);
+
+        $last = Candle::where('symbol', $signal->symbol)->orderByDesc('open_time')->value('close');
+        $last = $last === null ? null : (float) $last;
+
+        $stopDistance = ($signal->entry_price !== null && $signal->sl_price !== null)
+            ? abs($signal->entry_price - $signal->sl_price)
+            : null;
+
+        $tps = $signal->tp_prices ?? [];
+        $firstTarget = $tps[0] ?? null;
+
+        $lines = [
+            'THE SIGNAL, as posted',
+            "  Instrument      {$signal->symbol} ({$profile['kind']})",
+            '  Direction       '.strtoupper((string) $signal->direction),
+            '  Entry           '.($signal->entry_price === null ? 'at market' : $this->num($signal->entry_price)),
+            '  Stop loss       '.$this->num($signal->sl_price),
+            '  Targets         '.($tps === [] ? 'none given' : implode(', ', array_map(fn ($t) => $this->num((float) $t), $tps))),
+            '  Posted          '.($signal->posted_at?->diffForHumans() ?? 'unknown'),
+            '',
+            'RISK AND REWARD',
+            '  Stop distance   '.($stopDistance === null ? 'unknown (market order)' : $this->num($stopDistance)),
+        ];
+
+        if ($stopDistance !== null && $firstTarget !== null && $signal->entry_price !== null) {
+            $rewardDistance = abs((float) $firstTarget - $signal->entry_price);
+            $lines[] = '  To first target '.$this->num($rewardDistance);
+            $lines[] = sprintf('  Reward:risk     %.2f : 1 (to the first target)', $rewardDistance / max($stopDistance, 1e-9));
+        }
+
+        $lines[] = '';
+        $lines[] = 'THE MARKET NOW, from this system\'s own stored bars';
+        $lines[] = '  Last price      '.($last === null ? 'unknown' : $this->num($last));
+
+        $context = $this->marketContext($signal);
+
+        foreach ($context as $label => $value) {
+            $lines[] = sprintf('  %-15s %s', $label, $value);
+        }
+
+        if ($settings !== null) {
+            $state = $this->fund->state($settings, $signal->user_id);
+            $lines[] = '';
+            $lines[] = 'THE FUND';
+            $lines[] = '  Remaining       '.$this->num($state['remaining']).' of '.$this->num($state['cap']);
+            $lines[] = '  Risk this trade '.$this->num($state['risk_per_trade']);
+        }
+
+        $lines[] = '';
+        $lines[] = 'Approve only if there is a positive case. Absence of objection is not one.';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * Trend and volatility for the signal's instrument, where the system has bars for it.
+     *
+     * @return array<string, string>
+     */
+    private function marketContext(TelegramSignal $signal): array
+    {
+        $bars = Candle::where('symbol', $signal->symbol)
+            ->orderByDesc('open_time')
+            ->limit(300)
+            ->get()
+            ->reverse()
+            ->values()
+            ->all();
+
+        if (count($bars) < 60) {
+            return ['History' => 'too few stored bars for this instrument to describe its trend'];
+        }
+
+        $closes = Candle::closes($bars);
+        $highs = Candle::highs($bars);
+        $lows = Candle::lows($bars);
+
+        $fast = \App\Services\Indicators\Indicators::last(\App\Services\Indicators\Indicators::ema($closes, 20));
+        $slow = \App\Services\Indicators\Indicators::last(\App\Services\Indicators\Indicators::ema($closes, 50));
+        $atr = \App\Services\Indicators\Indicators::last(\App\Services\Indicators\Indicators::atr($highs, $lows, $closes, 14));
+        $adx = \App\Services\Indicators\Indicators::last(\App\Services\Indicators\Indicators::adx($highs, $lows, $closes, 14)['adx']);
+
+        $trend = ($fast === null || $slow === null || $fast === $slow)
+            ? 'flat'
+            : ($fast > $slow ? 'up' : 'down');
+
+        $context = [
+            'Trend' => $trend.' (EMA 20 vs 50 on the stored series)',
+            'ADX' => $adx === null ? 'unknown' : number_format($adx, 1),
+            'ATR' => $atr === null ? 'unknown' : $this->num($atr),
+        ];
+
+        // The most useful single comparison the model can make: is this stop inside the
+        // instrument's ordinary noise?
+        if ($atr !== null && $atr > 0.0 && $signal->entry_price !== null && $signal->sl_price !== null) {
+            $context['Stop vs ATR'] = number_format(abs($signal->entry_price - $signal->sl_price) / $atr, 2).' x ATR';
+        }
+
+        return $context;
+    }
+
+    private function num(?float $value): string
+    {
+        return $value === null ? 'unknown' : rtrim(rtrim(number_format($value, 5, '.', ''), '0'), '.');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function schema(): array
+    {
+        return [
+            'type' => 'object',
+            'properties' => [
+                'approve' => [
+                    'type' => 'boolean',
+                    'description' => 'True only if there is a positive case for taking this trade. Absence of objection is not a positive case.',
+                ],
+                'confidence' => [
+                    'type' => 'integer',
+                    'description' => 'How strongly the evidence supports the verdict, 0-100. Low confidence on an approval means it should probably be a decline.',
+                ],
+                'reasoning' => [
+                    'type' => 'string',
+                    'description' => 'Two or three concrete sentences naming the deciding factor. No hedging.',
+                ],
+            ],
+            'required' => ['approve', 'confidence', 'reasoning'],
+            'additionalProperties' => false,
+        ];
+    }
+
+    /**
+     * @return array{status: string, reasoning: string, confidence: null, model: null}
+     */
+    private function decline(string $reasoning): array
+    {
+        return [
+            'status' => TelegramSignal::REVIEW_DECLINED,
+            'reasoning' => $reasoning,
+            'confidence' => null,
+            'model' => null,
+        ];
+    }
+}
