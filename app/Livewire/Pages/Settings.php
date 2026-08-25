@@ -43,6 +43,21 @@ class Settings extends Component
     #[Validate('required|integer|min:0|max:240')]
     public int $news_blackout_after_minutes = 15;
 
+    // The AI fund. Kept as a string so an empty box stays empty rather than becoming zero -
+    // "no cap set" and "a cap of nothing" are different states and only one of them means
+    // somebody has decided.
+    #[Validate('boolean')]
+    public bool $ai_trading_enabled = false;
+
+    #[Validate('nullable|numeric|min:0')]
+    public ?string $ai_capital_cap = null;
+
+    #[Validate('required|numeric|min:0.1|max:100')]
+    public string $ai_risk_percentage = '1.00';
+
+    #[Validate('required|integer|min:1|max:10')]
+    public int $ai_max_concurrent_trades = 1;
+
     #[Validate('boolean')]
     public bool $capture_screenshots = true;
 
@@ -67,6 +82,10 @@ class Settings extends Component
             $this->news_filter_enabled = $settings->news_filter_enabled ?? true;
             $this->news_blackout_before_minutes = (int) ($settings->news_blackout_before_minutes ?? 15);
             $this->news_blackout_after_minutes = (int) ($settings->news_blackout_after_minutes ?? 15);
+            $this->ai_trading_enabled = (bool) ($settings->ai_trading_enabled ?? false);
+            $this->ai_capital_cap = $settings->ai_capital_cap === null ? null : (string) $settings->ai_capital_cap;
+            $this->ai_risk_percentage = (string) ($settings->ai_risk_percentage ?? '1.00');
+            $this->ai_max_concurrent_trades = (int) ($settings->ai_max_concurrent_trades ?? 1);
             $this->capture_screenshots = $settings->capture_screenshots ?? true;
         }
     }
@@ -87,6 +106,14 @@ class Settings extends Component
             'news_filter_enabled' => $this->news_filter_enabled,
             'news_blackout_before_minutes' => $this->news_blackout_before_minutes,
             'news_blackout_after_minutes' => $this->news_blackout_after_minutes,
+            'ai_trading_enabled' => $this->ai_trading_enabled,
+            // Empty stays null. Casting a blank box to 0.0 would read as "the AI may risk
+            // nothing", which the fund treats as exhausted rather than unconfigured.
+            'ai_capital_cap' => ($this->ai_capital_cap === null || $this->ai_capital_cap === '')
+                ? null
+                : (float) $this->ai_capital_cap,
+            'ai_risk_percentage' => $this->ai_risk_percentage,
+            'ai_max_concurrent_trades' => $this->ai_max_concurrent_trades,
             'capture_screenshots' => $this->capture_screenshots,
         ]);
 
@@ -101,6 +128,14 @@ class Settings extends Component
 
     public function render()
     {
-        return view('livewire.pages.settings');
+        return view('livewire.pages.settings', [
+            // The fund's live state, so the cap is set beside what is actually left of it
+            // rather than in isolation. A number typed into an empty box is a guess; a
+            // number typed next to "$47.20 remaining of $200" is a decision.
+            'fund' => app(\App\Services\Ai\AiFund::class)->state(
+                \Illuminate\Support\Facades\Auth::user()?->botSettings,
+                (int) \Illuminate\Support\Facades\Auth::id(),
+            ),
+        ]);
     }
 }
