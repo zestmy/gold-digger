@@ -234,6 +234,99 @@ final class Indicators
      *
      * @param  array<int, float|null>  $series
      */
+    /**
+     * Bollinger band width as a fraction of the middle band.
+     *
+     * The raw width is in price units, which makes it incomparable across instruments and
+     * across time on the same one - a 5-point band on gold at 1800 is not the 5-point band
+     * it was at 4600. Dividing by the mean makes it a ratio that can be compared with its
+     * own history, which is the only comparison that means anything here.
+     *
+     * @param  array<int, float>  $closes
+     * @return array<int, float|null> Null until the window is full
+     */
+    public static function bandwidth(array $closes, int $period = 20, float $deviations = 2.0): array
+    {
+        $out = [];
+        $n = count($closes);
+
+        for ($i = 0; $i < $n; $i++) {
+            if ($i < $period - 1) {
+                $out[] = null;
+
+                continue;
+            }
+
+            $window = array_slice($closes, $i - $period + 1, $period);
+            $mean = array_sum($window) / $period;
+
+            if ($mean == 0.0) {
+                $out[] = null;
+
+                continue;
+            }
+
+            $variance = 0.0;
+
+            foreach ($window as $value) {
+                $variance += ($value - $mean) ** 2;
+            }
+
+            // Population rather than sample: this is the whole window, not a draw from it,
+            // and the convention Bollinger bands are drawn with.
+            $sd = sqrt($variance / $period);
+
+            $out[] = (2 * $deviations * $sd) / abs($mean);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Is volatility compressed relative to its own recent range?
+     *
+     * The "pre-mover" idea: bands narrowing means the market has stopped disagreeing about
+     * price, and disagreement usually returns. What it emphatically does not say is which
+     * way - a squeeze precedes a move, not a direction, and treating it as a direction is
+     * the mistake this measurement invites.
+     *
+     * So it is offered as a factor that can support an entry whose direction came from
+     * somewhere else, never as a reason to take one.
+     *
+     * @param  array<int, float>  $closes
+     * @param  float  $percentile  How tight counts as tight, against the lookback
+     * @return array{squeezed: bool, bandwidth: float|null, threshold: float|null}
+     */
+    public static function squeeze(array $closes, int $period = 20, int $lookback = 120, float $percentile = 0.25): array
+    {
+        $widths = self::bandwidth($closes, $period);
+
+        $recent = array_values(array_filter(
+            array_slice($widths, -$lookback),
+            fn (?float $w) => $w !== null,
+        ));
+
+        $current = self::last($widths);
+
+        // Not enough history to say what "narrow" means for this instrument. Reported as
+        // unknown rather than as not-squeezed: the two are different, and only one of them
+        // should count against a signal.
+        if ($current === null || count($recent) < 20) {
+            return ['squeezed' => false, 'bandwidth' => $current, 'threshold' => null];
+        }
+
+        sort($recent);
+
+        $index = (int) floor($percentile * (count($recent) - 1));
+        $threshold = $recent[$index];
+
+        return [
+            'squeezed' => $current <= $threshold,
+            'bandwidth' => $current,
+            'threshold' => $threshold,
+        ];
+    }
+
     public static function last(array $series): ?float
     {
         for ($i = count($series) - 1; $i >= 0; $i--) {

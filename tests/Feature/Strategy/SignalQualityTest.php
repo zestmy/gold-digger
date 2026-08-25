@@ -105,17 +105,30 @@ class SignalQualityTest extends TestCase
     // WHAT IT REFUSES
     // =====================================================================
 
-    public function test_too_little_agreement_asks_for_confirmation(): void
+    /**
+     * The flaw this test found, and the floor that fixes it.
+     *
+     * A dead-flat market reaches exactly three factors on ambient conditions alone: the
+     * session is open, no news is due, volatility is ordinary and the bands are narrow.
+     * Those describe permission to trade, not a reason to - and a signal could otherwise
+     * clear the bar on the strength of the market merely being open.
+     */
+    public function test_ambient_conditions_alone_do_not_make_a_signal_tradeable(): void
     {
-        // Flat bars: no trend, no ADX, nothing to agree with.
+        // Flat bars: no trend, no bias, no ADX. Nothing agrees about direction.
         $this->candles(rising: null);
 
         $result = $this->assess('buy');
 
-        $this->assertLessThan(SignalQuality::MIN_CONFLUENCE, $result['confluence']);
+        // The total can reach the floor; that is precisely the problem.
+        $this->assertGreaterThanOrEqual(SignalQuality::MIN_CONFLUENCE, $result['confluence']);
+
+        // And it is still refused, because none of it is directional.
+        $this->assertLessThan(SignalQuality::MIN_DIRECTIONAL, $result['directional']);
         $this->assertSame(SignalQuality::ENTRY_CONFIRMATION, $result['entry_status']);
         $this->assertSame(SignalQuality::RISK_HIGH, $result['risk']);
         $this->assertFalse($result['tradeable']);
+        $this->assertStringContainsString('permission to trade rather than a reason', $result['why']);
     }
 
     /**

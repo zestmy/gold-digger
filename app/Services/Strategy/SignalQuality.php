@@ -3,8 +3,10 @@
 namespace App\Services\Strategy;
 
 use App\Models\BotSettings;
+use App\Models\Candle;
 use App\Models\Strategy;
 use App\Models\Trade;
+use App\Services\Indicators\Indicators;
 use App\Services\News\NewsBlackout;
 
 /**
@@ -43,6 +45,15 @@ final class SignalQuality
 {
     /** Below this, an entry is not taken. The SOP's "three confluences" rule. */
     public const MIN_CONFLUENCE = 3.0;
+
+    /**
+     * How much of that has to be about direction.
+     *
+     * Without this floor the ambient factors alone - open session, no news, ordinary
+     * volatility, narrow bands - reach exactly three in a market where nothing agrees
+     * about which way to trade. They describe permission to trade, not a reason to.
+     */
+    public const MIN_DIRECTIONAL = 1.5;
 
     public const ENTRY_NOW = 'CAN ENTRY NOW';
 
@@ -116,7 +127,17 @@ final class SignalQuality
             $factors,
         ));
 
-        $status = $this->entryStatus($market, $confluence, $direction, $entryLow, $entryHigh);
+        // Ambient conditions are permissions, not evidence. Session open, no news due,
+        // volatility normal and bands narrow sum to exactly the three-factor floor in a
+        // market where nothing whatsoever agrees about direction - so a signal could clear
+        // the bar on the strength of the market merely being open. Directional agreement
+        // is therefore necessary, not merely additive.
+        $directional = array_sum(array_map(
+            fn (array $f) => ($f['directional'] && $f['met']) ? $f['weight'] : 0.0,
+            $factors,
+        ));
+
+        $status = $this->entryStatus($market, $confluence, $directional, $direction, $entryLow, $entryHigh);
 
         return [
             'confluence' => round($confluence, 1),
@@ -124,10 +145,13 @@ final class SignalQuality
             // A ratio of what agreed to what could have. Recomputable from stored data,
             // which is the whole point of it.
             'confidence' => $possible > 0.0 ? (int) round($confluence / $possible * 100) : 0,
-            'risk' => $this->risk($confluence, $market),
+            'risk' => $this->risk($confluence, $directional, $market),
             'entry_status' => $status,
-            'tradeable' => $confluence >= self::MIN_CONFLUENCE && $status === self::ENTRY_NOW,
-            'why' => $this->why($factors, $confluence, $status),
+            'directional' => round($directional, 1),
+            'tradeable' => $confluence >= self::MIN_CONFLUENCE
+                && $directional >= self::MIN_DIRECTIONAL
+                && $status === self::ENTRY_NOW,
+            'why' => $this->why($factors, $confluence, $directional, $status),
         ];
     }
 
@@ -173,6 +197,21 @@ final class SignalQuality
 
         $sessionOpen = $this->session->isOpen($settings?->allowed_sessions, now());
 
+        // Volatility compression, on the entry series. A squeeze says a move is more
+        // likely, never which way - so it can support a direction that came from
+        // elsewhere and can never supply one.
+        $closes = Candle::where('symbol', $symbol)
+            ->where('timeframe', $market['entry_timeframe'])
+            ->orderByDesc('open_time')
+            ->limit(200)
+            ->pluck('close')
+            ->reverse()
+            ->map(fn ($c) => (float) $c)
+            ->values()
+            ->all();
+
+        $squeeze = Indicators::squeeze($closes);
+
         $newsObjection = $this->news->objection(
             $settings,
             $this->news->currenciesFor($symbol),
@@ -182,6 +221,7 @@ final class SignalQuality
         return [
             [
                 'name' => 'Higher-timeframe trend',
+                'directional' => true,
                 'weight' => 1.0,
                 'met' => $trendAgrees,
                 'note' => $market['trend'] === null
@@ -192,6 +232,7 @@ final class SignalQuality
             ],
             [
                 'name' => 'Entry-timeframe bias',
+                'directional' => true,
                 'weight' => 1.0,
                 'met' => $market['entry_bias'] !== null && $market['entry_bias'] === $direction,
                 'note' => $market['entry_bias'] === null
@@ -203,6 +244,7 @@ final class SignalQuality
                 // independent agreements, and double-counting it flatters exactly the
                 // trending market where a late entry hurts most.
                 'name' => 'Directional strength (DI)',
+                'directional' => true,
                 'weight' => 0.5,
                 'met' => $diFavours,
                 'note' => $market['plus_di'] === null
@@ -211,6 +253,7 @@ final class SignalQuality
             ],
             [
                 'name' => 'Trend is present (ADX)',
+                'directional' => true,
                 'weight' => 1.0,
                 'met' => $adx !== null && $adx >= self::ADX_PRESENT,
                 'note' => $adx === null
@@ -219,6 +262,7 @@ final class SignalQuality
             ],
             [
                 'name' => 'Session open',
+                'directional' => false,
                 'weight' => 1.0,
                 'met' => $sessionOpen,
                 'note' => $sessionOpen
@@ -227,12 +271,29 @@ final class SignalQuality
             ],
             [
                 'name' => 'Clear of high-impact news',
+                'directional' => false,
                 'weight' => 1.0,
                 'met' => $newsObjection === null,
                 'note' => $newsObjection ?? 'No high-impact release nearby.',
             ],
             [
+                // Half-weight: it raises the odds of a move without saying anything about
+                // direction, so it is corroboration rather than evidence.
+                'name' => 'Volatility compressed (pre-mover)',
+                'directional' => false,
+                'weight' => 0.5,
+                'met' => $squeeze['squeezed'],
+                'note' => $squeeze['threshold'] === null
+                    ? 'Not enough history to say what narrow means here.'
+                    : sprintf(
+                        'Band width %.4f against a %.4f floor for the quietest quarter.',
+                        $squeeze['bandwidth'],
+                        $squeeze['threshold'],
+                    ),
+            ],
+            [
                 'name' => 'Volatility is usable',
+                'directional' => false,
                 'weight' => 0.5,
                 'met' => $atrPct !== null && $atrPct >= self::ATR_FLOOR && $atrPct <= self::ATR_CEILING,
                 'note' => $atrPct === null
@@ -251,9 +312,9 @@ final class SignalQuality
      *
      * @param  array<string, mixed>  $market
      */
-    private function entryStatus(array $market, float $confluence, string $direction, ?float $entryLow, ?float $entryHigh): string
+    private function entryStatus(array $market, float $confluence, float $directional, string $direction, ?float $entryLow, ?float $entryHigh): string
     {
-        if ($confluence < self::MIN_CONFLUENCE) {
+        if ($confluence < self::MIN_CONFLUENCE || $directional < self::MIN_DIRECTIONAL) {
             return self::ENTRY_CONFIRMATION;
         }
 
@@ -280,13 +341,15 @@ final class SignalQuality
     /**
      * @param  array<string, mixed>  $market
      */
-    private function risk(float $confluence, array $market): string
+    private function risk(float $confluence, float $directional, array $market): string
     {
         // Volatility escalates risk independently of agreement: five factors agreeing
         // during a violent hour is still a violent hour, and the stop is what pays for it.
         $wild = $market['atr_pct'] !== null && $market['atr_pct'] > self::ATR_CEILING;
 
-        if ($wild || $confluence < self::MIN_CONFLUENCE) {
+        // A directionless signal is a high-risk one whatever the total says: the score
+        // it reached describes the market being open, not the trade being good.
+        if ($wild || $confluence < self::MIN_CONFLUENCE || $directional < self::MIN_DIRECTIONAL) {
             return self::RISK_HIGH;
         }
 
@@ -296,8 +359,16 @@ final class SignalQuality
     /**
      * @param  array<int, array{name: string, weight: float, met: bool, note: string}>  $factors
      */
-    private function why(array $factors, float $confluence, string $status): string
+    private function why(array $factors, float $confluence, float $directional, string $status): string
     {
+        if ($directional < self::MIN_DIRECTIONAL && $status === self::ENTRY_CONFIRMATION) {
+            return sprintf(
+                'Nothing much agrees about direction (%.1f of a required %.1f). The rest of the score is the market being open and quiet, which is permission to trade rather than a reason to.',
+                $directional,
+                self::MIN_DIRECTIONAL,
+            );
+        }
+
         $missing = array_values(array_filter($factors, fn (array $f) => ! $f['met']));
 
         if ($status === self::ENTRY_PULLBACK) {
