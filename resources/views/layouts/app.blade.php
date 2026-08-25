@@ -87,6 +87,10 @@
 
                             <!-- User dropdown -->
                             <div class="flex items-center gap-x-4 lg:gap-x-6">
+                                <div class="hidden sm:block">
+                                    <livewire:bot-status-indicator />
+                                </div>
+
                                 <div class="relative" x-data="{ open: false }">
                                     <button type="button"
                                             class="flex items-center gap-x-2 text-sm font-medium text-gray-300 hover:text-white"
@@ -112,6 +116,15 @@
                                 </div>
                             </div>
                         </div>
+                    </div>
+
+                    {{-- Session strip, under the title bar and above everything else.
+                         Session is the one piece of context that changes the meaning of the
+                         rest of the screen: a signal declined at 03:00 UTC and the same
+                         signal declined at 09:00 are different events, and a page cannot
+                         say which without it. --}}
+                    <div class="sticky top-16 z-30 border-b border-gray-800 bg-gray-900/95 px-4 py-2 backdrop-blur sm:px-6 lg:px-8">
+                        <livewire:session-bar />
                     </div>
 
                     <!-- Page content -->
