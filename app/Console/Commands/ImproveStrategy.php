@@ -2,15 +2,8 @@
 
 namespace App\Console\Commands;
 
-use App\Models\BotHeartbeat;
-use App\Models\BotSettings;
-use App\Models\Candle;
-use App\Models\Signal;
 use App\Models\Strategy;
-use App\Services\Ai\StrategyProposer;
-use App\Services\Backtest\MarketAssumptions;
-use App\Services\Backtest\WalkForward;
-use App\Services\Backtest\WalkForwardReport;
+use App\Services\Ai\StrategyImprovement;
 use Illuminate\Console\Command;
 
 /**
@@ -28,12 +21,16 @@ use Illuminate\Console\Command;
  * attached to each row, and the reasoning is there to be judged against the number beside
  * it rather than instead of it.
  *
+ * The work itself lives in `StrategyImprovement`, shared with the queued job behind the
+ * dashboard's Improver page. A console run and a dashboard run that disagreed about the
+ * baseline or the bar window would produce two answers to one question, and the one you
+ * would believe is whichever you saw last.
+ *
  * ## It changes nothing
  *
- * No parameter is written. The command prints the `backtest:optimise` invocation that
- * would confirm a winner independently, and leaves applying it to a person. A proposer
- * that could edit the strategy it is proposing about would be marking its own homework -
- * and BACKTESTING.md exists because these settings used to be opinions.
+ * No parameter is written. A proposer that could edit the strategy it is proposing about
+ * would be marking its own homework - and BACKTESTING.md exists because these settings
+ * used to be opinions.
  */
 class ImproveStrategy extends Command
 {
@@ -41,6 +38,7 @@ class ImproveStrategy extends Command
                             {strategy? : Strategy id. Defaults to the only active one}
                             {--account= : Broker account id the candles belong to}
                             {--symbol= : Series to measure. Defaults to the resolved symbol on the heartbeat}
+                            {--bars=20000 : Most recent bars to measure over}
                             {--folds=4 : Walk-forward folds}
                             {--min-trades=10 : Fold results below this are not counted}
                             {--from= : Only use bars from this date}
@@ -52,76 +50,36 @@ class ImproveStrategy extends Command
 
     protected $description = 'Have a model propose strategy parameters, then walk-forward validate them';
 
-    public function handle(StrategyProposer $proposer, WalkForward $walkForward): int
+    public function handle(StrategyImprovement $improver): int
     {
-        if (! $proposer->configured()) {
-            $this->error('No OPENROUTER_API_KEY is configured, so nothing can be proposed.');
-            $this->line('  backtest:optimise still works without it - it just needs you to pick the grid.');
-
-            return self::FAILURE;
-        }
-
         $strategy = $this->resolveStrategy();
 
         if ($strategy === null) {
             return self::FAILURE;
         }
 
-        $heartbeat = BotHeartbeat::where('user_id', $strategy->user_id)->orderByDesc('last_seen_at')->first();
-        $accountId = $this->option('account') !== null ? (int) $this->option('account') : $heartbeat?->broker_account_id;
-        // An override matters when the newest heartbeat describes a different series to
-        // the one holding the history - a stale fixture, or a broker whose suffix changed.
-        $symbol = $this->option('symbol') ?: ($heartbeat?->resolved_symbol ?: $strategy->symbol);
-
-        $entry = $this->candles($accountId, $symbol, $strategy->timeframe_entry);
-        $trend = $this->candles($accountId, $symbol, $strategy->timeframe_trend);
-
-        if ($entry === []) {
-            $this->error("No {$strategy->timeframe_entry} candles stored for {$symbol}.");
-
-            return self::FAILURE;
-        }
-
-        $market = MarketAssumptions::fromHeartbeat($heartbeat, array_filter([
-            'spreadPips' => $this->option('spread') !== null ? (float) $this->option('spread') : null,
-            'slippagePips' => (float) $this->option('slippage'),
-            'commissionPerLot' => (float) $this->option('commission'),
-            'startingBalance' => (float) $this->option('balance'),
-        ], fn ($v) => $v !== null));
-
-        $settings = BotSettings::where('user_id', $strategy->user_id)->first();
-        $folds = (int) $this->option('folds');
-        $minTrades = (int) $this->option('min-trades');
-
         $this->newLine();
-        $this->line("<options=bold>{$strategy->name}</> on {$symbol} · ".count($entry).' entry bars');
+        $this->line("<options=bold>{$strategy->name}</> · measuring the baseline, then the proposals…");
 
-        // Measure the current settings first. Without a baseline "expectancy +0.42" means
-        // nothing - the only question worth answering is whether a change is an improvement.
-        $this->line('Measuring the current parameters as a baseline…');
+        $bar = $this->output->createProgressBar();
+        $bar->start();
 
-        $baseline = $walkForward->run(
-            $strategy, $entry, $trend, [[]], $market, $settings, $folds, $minTrades,
-        );
+        $result = $improver->run($strategy, [
+            'account' => $this->option('account') !== null ? (int) $this->option('account') : null,
+            'symbol' => $this->option('symbol'),
+            'bars' => (int) $this->option('bars'),
+            'folds' => (int) $this->option('folds'),
+            'min_trades' => (int) $this->option('min-trades'),
+            'from' => $this->option('from'),
+            'to' => $this->option('to'),
+            'spread' => $this->option('spread') !== null ? (float) $this->option('spread') : null,
+            'slippage' => (float) $this->option('slippage'),
+            'commission' => (float) $this->option('commission'),
+            'balance' => (float) $this->option('balance'),
+        ], fn () => $bar->advance());
 
-        $baselineOos = $baseline->outOfSample();
-        $this->line('  '.$this->describe($baselineOos));
-        $this->newLine();
-
-        $evidence = [
-            'data_range' => sprintf(
-                '%s bars of %s from %s to %s',
-                count($entry),
-                $strategy->timeframe_entry,
-                $entry[0]->open_time->format('Y-m-d'),
-                $entry[count($entry) - 1]->open_time->format('Y-m-d'),
-            ),
-            'baseline' => $this->describe($baselineOos),
-            'skip_reasons' => $this->skipReasons($strategy),
-        ];
-
-        $this->line('Asking for proposals…');
-        $result = $proposer->propose($strategy, $evidence);
+        $bar->finish();
+        $this->newLine(2);
 
         if (! $result['ok']) {
             $this->error($result['error']);
@@ -129,28 +87,12 @@ class ImproveStrategy extends Command
             return self::FAILURE;
         }
 
-        $proposals = $result['proposals'];
-        $this->line('  '.count($proposals)." proposal(s) from {$result['model']}");
-        $this->newLine();
-
-        $combinations = array_map(fn (array $p) => $p['parameters'], $proposals);
-
-        $bar = $this->output->createProgressBar();
-        $bar->start();
-
-        $report = $walkForward->run(
-            $strategy, $entry, $trend, $combinations, $market, $settings, $folds, $minTrades,
-            fn () => $bar->advance(),
-        );
-
-        $bar->finish();
-        $this->newLine(2);
-
-        foreach ($report->notes as $note) {
+        foreach ($result['notes'] as $note) {
             $this->warn($note);
         }
 
-        $oos = $report->outOfSample();
+        $this->line("On {$result['symbol']} · {$result['bars']} bars · {$result['from']} to {$result['to']}");
+        $this->newLine();
 
         // The verdict before the table, not after it.
         //
@@ -159,38 +101,24 @@ class ImproveStrategy extends Command
         // tidy baseline-versus-proposed comparison off nine trades that looked exactly
         // like a finding. A table is far more persuasive than a caveat underneath it, so
         // the caveat goes first and the numbers arrive already qualified.
-        $thin = ($oos['trades'] ?? 0) < WalkForwardReport::MIN_MEANINGFUL_TRADES;
-
-        if ($thin) {
-            $this->newLine();
-            $this->warn('  '.$report->degradation()['verdict']);
-
-            $this->line(($oos['trades'] ?? 0) === 0
-                ? '  <fg=gray>The table below is all zeros. Either the series is too short for the entry</>'
-                : '  <fg=gray>The table below is printed for completeness. On this many trades the</>');
-            $this->line(($oos['trades'] ?? 0) === 0
-                ? '  <fg=gray>rule to fire at all, or every setup it found was filtered out.</>'
-                : '  <fg=gray>difference between the baseline and any proposal is which way a few</>');
-
-            if (($oos['trades'] ?? 0) > 0) {
-                $this->line('  <fg=gray>trades happened to go. Collect more history before choosing between them.</>');
-            }
+        if ($result['thin']) {
+            $this->warn('  '.$result['verdict']);
             $this->newLine();
         }
 
         $this->line('<options=bold>Out-of-sample, stitched across folds</>');
         $this->table(['Metric', 'Baseline', 'Proposed'], [
-            ['Trades', $baselineOos['trades'], $oos['trades']],
-            ['Net P&L', $this->signed($baselineOos['net_pnl']), $this->signed($oos['net_pnl'])],
-            ['Win rate', $baselineOos['win_rate'].'%', $oos['win_rate'].'%'],
-            ['Expectancy', $this->signed($baselineOos['expectancy']), $this->signed($oos['expectancy'])],
-            ['Profitable folds', $this->folds($baselineOos), $this->folds($oos)],
+            ['Trades', $result['baseline']['trades'] ?? 0, $result['proposed']['trades'] ?? 0],
+            ['Net P&L', $result['baseline']['net_pnl'] ?? 0, $result['proposed']['net_pnl'] ?? 0],
+            ['Win rate', ($result['baseline']['win_rate'] ?? 0).'%', ($result['proposed']['win_rate'] ?? 0).'%'],
+            ['Expectancy', $result['baseline']['expectancy'] ?? 0, $result['proposed']['expectancy'] ?? 0],
+            ['Profitable folds', $this->folds($result['baseline']), $this->folds($result['proposed'])],
         ]);
 
         $this->newLine();
-        $this->line('<options=bold>What was proposed, and why</>');
+        $this->line("<options=bold>What was proposed, and why</> <fg=gray>({$result['model']})</>");
 
-        foreach ($proposals as $i => $proposal) {
+        foreach ($result['proposals'] as $i => $proposal) {
             $changes = [];
 
             foreach ($proposal['parameters'] as $name => $value) {
@@ -202,49 +130,24 @@ class ImproveStrategy extends Command
         }
 
         $this->newLine();
-
-        // The honest closing note. A walk-forward across a handful of folds on one
-        // instrument is evidence, not proof, and the reasoning above is not evidence at all.
         $this->line('<options=bold>Before you apply anything</>');
 
-        if ($thin) {
+        if ($result['thin']) {
             $this->line('  <options=bold>Nothing here supports a change.</> The sample is too small to prefer any of');
             $this->line('  these over what you already run, including the ones that look better.');
             $this->newLine();
         }
 
         // The "Proposed" column is the best combination *per fold*, stitched. Selecting a
-        // winner from six candidates and then reporting the winner's score flatters it,
+        // winner from several candidates and then reporting the winner's score flatters it,
         // which is exactly the bias walk-forward exists to limit and does not remove.
         $this->line('  The proposed column is the best candidate in each fold, stitched together.');
-        $this->line('  Picking a winner from '.count($proposals).' and then quoting its score flatters it.');
+        $this->line('  Picking a winner from '.count($result['proposals']).' and then quoting its score flatters it.');
         $this->newLine();
         $this->line('  Nothing has been changed. Confirm a candidate independently:');
         $this->line('    php artisan backtest:optimise '.$strategy->id.' --param="name=value,value"');
-        $this->line('  A proposal that does not beat the baseline out of sample is a proposal that failed,');
-        $this->line('  however well it reads.');
 
         return self::SUCCESS;
-    }
-
-    /**
-     * @param  array<string, mixed>  $oos
-     */
-    private function describe(array $oos): string
-    {
-        if (($oos['trades'] ?? 0) === 0) {
-            return 'no out-of-sample trades - there is not enough history, or the entry rule is too selective';
-        }
-
-        return sprintf(
-            '%d trades, net %s, %s%% wins, expectancy %s, %d of %d folds profitable',
-            $oos['trades'],
-            $this->signed($oos['net_pnl']),
-            $oos['win_rate'],
-            $this->signed($oos['expectancy']),
-            $oos['folds_profitable'] ?? 0,
-            $oos['folds_tested'] ?? 0,
-        );
     }
 
     /**
@@ -253,26 +156,6 @@ class ImproveStrategy extends Command
     private function folds(array $oos): string
     {
         return ($oos['folds_profitable'] ?? 0).' of '.($oos['folds_tested'] ?? 0);
-    }
-
-    private function signed(float $value): string
-    {
-        return ($value >= 0 ? '+' : '').number_format($value, 2);
-    }
-
-    /**
-     * What actually stopped recent setups - the most useful thing the model is given.
-     *
-     * @return array<string, int>
-     */
-    private function skipReasons(Strategy $strategy): array
-    {
-        return Signal::where('strategy_id', $strategy->id)
-            ->selectRaw('coalesce(skip_reason, ?) as reason, count(*) as total', ['traded'])
-            ->groupBy('reason')
-            ->orderByDesc('total')
-            ->pluck('total', 'reason')
-            ->all();
     }
 
     private function resolveStrategy(): ?Strategy
@@ -298,21 +181,5 @@ class ImproveStrategy extends Command
             : 'Several active strategies. Name the one you mean.');
 
         return null;
-    }
-
-    /**
-     * @return array<int, Candle>
-     */
-    private function candles(?int $accountId, string $symbol, string $timeframe): array
-    {
-        return Candle::query()
-            ->when($accountId !== null, fn ($q) => $q->where('broker_account_id', $accountId))
-            ->where('symbol', $symbol)
-            ->where('timeframe', strtoupper($timeframe))
-            ->when($this->option('from'), fn ($q, $from) => $q->where('open_time', '>=', $from))
-            ->when($this->option('to'), fn ($q, $to) => $q->where('open_time', '<=', $to))
-            ->orderBy('open_time')
-            ->get()
-            ->all();
     }
 }
