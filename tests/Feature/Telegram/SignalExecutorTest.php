@@ -298,4 +298,105 @@ class SignalExecutorTest extends TestCase
         // A copied entry that sat in the queue is no longer the entry that was copied.
         $this->assertLessThanOrEqual(120, TradeCommand::firstOrFail()->expires_at->diffInSeconds(now()));
     }
+
+    // =====================================================================
+    // RESTING ORDERS
+    // =====================================================================
+
+    /**
+     * A fund large enough that lot sizing is not at the 0.01 boundary.
+     *
+     * The sizing tests above deliberately sit on that edge; these are about where an order
+     * rests, and a fixture that happens to round to zero lots would fail for an unrelated
+     * reason and read as a bug in the resting logic.
+     */
+    private function richFund(): void
+    {
+        $this->settings->update(['ai_capital_cap' => 5000.00]);
+    }
+
+    /**
+     * A signal naming an entry is asking to be filled there.
+     */
+    public function test_an_entry_away_from_the_market_rests_rather_than_filling(): void
+    {
+        // Market is 2650 from the seeded bars; the signal wants in at 2640.
+        $this->richFund();
+        $result = (new SignalExecutor)->execute($this->signal([
+            'entry_price' => 2640.0, 'sl_price' => 2630.0, 'tp_prices' => [2670.0],
+        ]));
+
+        $this->assertTrue($result['ok'], $result['note']);
+
+        $command = TradeCommand::firstOrFail();
+
+        $this->assertSame('open_pending', $command->type);
+        $this->assertEqualsWithDelta(2640.0, $command->payload['entry_price'], 1e-9);
+    }
+
+    /**
+     * A resting order's stop belongs to its own entry, not to a market it has not touched.
+     */
+    public function test_a_resting_order_carries_absolute_levels_not_pip_distances(): void
+    {
+        $this->richFund();
+        $r = (new SignalExecutor)->execute($this->signal([
+            'entry_price' => 2640.0, 'sl_price' => 2630.0, 'tp_prices' => [2670.0],
+        ]));
+        $this->assertTrue($r['ok'], $r['note']);
+
+        $payload = TradeCommand::firstOrFail()->payload;
+
+        $this->assertEqualsWithDelta(2630.0, $payload['sl_price'], 1e-9);
+        $this->assertEqualsWithDelta(2670.0, $payload['tp_price'], 1e-9);
+        $this->assertNull($payload['sl_pips']);
+        $this->assertNull($payload['tp_pips']);
+    }
+
+    /**
+     * Resting an order a few cents away just delays the same fill.
+     */
+    public function test_an_entry_at_the_market_still_fills_at_market(): void
+    {
+        // Entry within a tenth of the stop distance of the last price.
+        $this->richFund();
+        $r = (new SignalExecutor)->execute($this->signal([
+            'entry_price' => 2650.2, 'sl_price' => 2640.0, 'tp_prices' => [2680.0],
+        ]));
+        $this->assertTrue($r['ok'], $r['note']);
+
+        $command = TradeCommand::firstOrFail();
+
+        $this->assertSame('open', $command->type);
+        $this->assertNull($command->payload['entry_price']);
+        $this->assertEqualsWithDelta(102.0, $command->payload['sl_pips'], 0.5);
+    }
+
+    public function test_a_market_order_signal_never_rests(): void
+    {
+        // No entry at all means "at market", which is what the provider asked for.
+        $this->richFund();
+        (new SignalExecutor)->execute($this->signal(['entry_price' => null]));
+
+        $this->assertSame('open', TradeCommand::firstOrFail()->type);
+    }
+
+    /**
+     * The EA reads the entry off column thirteen; a short line would place a market order
+     * at whatever price happened to be available.
+     */
+    public function test_the_wire_line_carries_the_entry_in_its_own_column(): void
+    {
+        $this->richFund();
+        $r = (new SignalExecutor)->execute($this->signal([
+            'entry_price' => 2640.0, 'sl_price' => 2630.0, 'tp_prices' => [2670.0],
+        ]));
+        $this->assertTrue($r['ok'], $r['note']);
+
+        $columns = explode("	", TradeCommand::firstOrFail()->toWireLine());
+
+        $this->assertCount(count(TradeCommand::WIRE_COLUMNS), $columns);
+        $this->assertSame('open_pending', $columns[1]);
+        $this->assertSame('2640', $columns[array_search('entry_price', TradeCommand::WIRE_COLUMNS, true)]);
+    }
 }

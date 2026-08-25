@@ -22,12 +22,24 @@ use Illuminate\Support\Str;
 class TradeCommand extends Model
 {
     /** Bumped whenever the column layout changes, so an old EA can refuse politely. */
-    public const WIRE_VERSION = 'GDCMD1';
+    /**
+     * Bumped to GDCMD2 when `entry_price` was appended for pending orders.
+     *
+     * The version is checked before the columns are, so an EA that has not been
+     * recompiled refuses every command with "dashboard sent GDCMD2, this EA understands
+     * GDCMD1" rather than silently reading a thirteen-column line as twelve. Loud and
+     * self-explaining beats subtly misaligned, and no trade happens in the meantime -
+     * which is the safe direction for a protocol change to fail in.
+     */
+    public const WIRE_VERSION = 'GDCMD2';
 
     /** Column order of the tab-separated wire format. Do not reorder - only append. */
     public const WIRE_COLUMNS = [
         'id', 'type', 'symbol', 'direction', 'volume',
         'sl_pips', 'tp_pips', 'sl_price', 'tp_price', 'ticket', 'comment', 'reason',
+        // Where a pending order rests. Empty on a market order, which is every command
+        // type that existed before this column did.
+        'entry_price',
     ];
 
     protected $fillable = [
@@ -254,6 +266,7 @@ class TradeCommand extends Model
             // Which ladder step this close represents. The EA cannot infer it from a
             // broker fill, so the strategy that asked for the close states it here.
             $payload['reason'] ?? '',
+            $payload['entry_price'] ?? '',
         ];
 
         // A stray tab or newline in a free-text comment would shift every later column.

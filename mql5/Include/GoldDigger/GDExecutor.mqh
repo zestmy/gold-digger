@@ -127,6 +127,12 @@ public:
                           ulong &out_ticket, double &out_price, double &out_volume,
                           uint &out_retcode);
 
+   bool              OpenPending(const bool is_buy, const double volume,
+                                  const double entry_price, const double sl_price_in,
+                                  const double tp_price_in, const int expiry_minutes,
+                                  const string comment,
+                                  ulong &out_ticket, uint &out_retcode);
+
    bool              ClosePosition(const ulong ticket, const double volume, uint &out_retcode);
    bool              ModifyPosition(const ulong ticket, const double sl_price_in,
                                     const double tp_price_in, uint &out_retcode);
@@ -430,6 +436,108 @@ bool CGDExecutor::Open(const bool is_buy, const double volume,
 
    m_last_error = "Gave up after " + IntegerToString(m_max_retries) + " attempts: "
                 + GDExplainRetcode(out_retcode);
+   return false;
+  }
+
+//+------------------------------------------------------------------+
+//| Place a resting order at a level the market has not reached      |
+//|                                                                  |
+//| A signal naming an entry is asking to be filled there. A market  |
+//| order ignores that and takes whatever is available now, which on |
+//| a zone signal is a different trade to the one that was reviewed. |
+//|                                                                  |
+//| Limit or stop is decided here rather than by the caller: a buy   |
+//| below price is a limit, a buy above it is a stop, and sending    |
+//| the wrong one is refused with 10015. The dashboard cannot see    |
+//| the current tick, so it must not be the thing that chooses.      |
+//+------------------------------------------------------------------+
+bool CGDExecutor::OpenPending(const bool is_buy, const double volume,
+                              const double entry_price, const double sl_price_in,
+                              const double tp_price_in, const int expiry_minutes,
+                              const string comment,
+                              ulong &out_ticket, uint &out_retcode)
+  {
+   out_ticket  = 0;
+   out_retcode = 0;
+
+   if(entry_price <= 0.0)
+     {
+      m_last_error = "A resting order needs an entry price";
+      return false;
+     }
+
+   const double lots = NormalizeVolume(volume);
+   if(lots <= 0.0)
+     {
+      m_last_error = "Volume rounds to zero on this symbol's grid";
+      return false;
+     }
+
+   MqlTick tick;
+   if(!SymbolInfoTick(m_symbol, tick) || tick.ask <= 0.0 || tick.bid <= 0.0)
+     {
+      m_last_error = "No tick data; the market may be closed";
+      return false;
+     }
+
+   const double entry  = NormalizeDouble(entry_price, m_digits);
+   const double market = is_buy ? tick.ask : tick.bid;
+
+   //--- A resting order must sit at least the broker's stops level from the market. Inside
+   //--- it the order is refused with 10016 - the rule that governs stops, applied to entry.
+   const double min_distance = (double)SymbolInfoInteger(m_symbol, SYMBOL_TRADE_STOPS_LEVEL) * m_point;
+   if(MathAbs(entry - market) < min_distance)
+     {
+      m_last_error = StringFormat(
+                        "Entry %s is inside the broker's stops level (%.0f points) of the market at %s",
+                        DoubleToString(entry, m_digits), min_distance / m_point,
+                        DoubleToString(market, m_digits));
+      return false;
+     }
+
+   ENUM_ORDER_TYPE type;
+   if(is_buy)
+      type = (entry < market) ? ORDER_TYPE_BUY_LIMIT : ORDER_TYPE_BUY_STOP;
+   else
+      type = (entry > market) ? ORDER_TYPE_SELL_LIMIT : ORDER_TYPE_SELL_STOP;
+
+   double sl = sl_price_in;
+   double tp = tp_price_in;
+
+   //--- Clamped against the ENTRY, not the market. The stop belongs to the price this order
+   //--- will fill at; clamping against a market it has not touched would move it somewhere
+   //--- the signal never asked for.
+   ClampStops(is_buy, entry, sl, tp);
+
+   if(!ApplyFilling(0))
+     {
+      m_last_error = "No filling mode accepted by this symbol";
+      return false;
+     }
+
+   //--- Expiry is not optional. An order resting for ever is a trade waiting to open on a
+   //--- setup that stopped existing hours ago.
+   datetime expiry = 0;
+   ENUM_ORDER_TYPE_TIME timing = ORDER_TIME_GTC;
+
+   if(expiry_minutes > 0)
+     {
+      expiry = TimeCurrent() + (expiry_minutes * 60);
+      timing = ORDER_TIME_SPECIFIED;
+     }
+
+   const bool sent = m_trade.OrderOpen(m_symbol, type, lots, 0.0, entry, sl, tp,
+                                       timing, expiry, comment);
+
+   out_retcode = m_trade.ResultRetcode();
+
+   if(sent && (out_retcode == TRADE_RETCODE_DONE || out_retcode == TRADE_RETCODE_PLACED))
+     {
+      out_ticket = m_trade.ResultOrder();
+      return true;
+     }
+
+   m_last_error = GDExplainRetcode(out_retcode);
    return false;
   }
 

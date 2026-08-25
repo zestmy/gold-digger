@@ -190,19 +190,31 @@ class SignalReviewerTest extends TestCase
     }
 
     /**
-     * The trade you would take is not the trade that was posted.
+     * A modest retrace is exactly what a limit order is for.
      */
-    public function test_a_signal_price_has_run_away_from_blocks_without_asking(): void
+    public function test_a_resting_order_is_not_declined_just_for_price_being_away(): void
     {
-        // Entry 2650, stop 2640, so the stop is 10 wide. Price at 2657 has eaten 0.7 of
-        // that in reward while leaving the risk exactly where it was.
+        // Price 0.7 of a stop past the entry: a market fill would be a worse trade, but a
+        // limit resting at 2650 is simply waiting, which is the point of placing one.
         $this->seedBars(2657.0);
+        $this->verdict(true, 'Fine.');
+
+        $this->assertSame(TelegramSignal::REVIEW_APPROVED, (new SignalReviewer)->review($this->signal())['status']);
+    }
+
+    /**
+     * Resting has a limit of its own.
+     */
+    public function test_a_resting_order_price_has_left_far_behind_is_declined(): void
+    {
+        // Four stop distances past the entry. Waiting there is hoping the move reverses.
+        $this->seedBars(2690.0);
         Http::fake();
 
         $result = (new SignalReviewer)->review($this->signal());
 
         $this->assertSame(TelegramSignal::REVIEW_DECLINED, $result['status']);
-        $this->assertStringContainsString('already run', $result['reasoning']);
+        $this->assertStringContainsString('already happened', $result['reasoning']);
         Http::assertNothingSent();
     }
 

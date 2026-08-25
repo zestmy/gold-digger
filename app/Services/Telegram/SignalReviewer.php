@@ -47,11 +47,18 @@ final class SignalReviewer
     public const MAX_AGE_MINUTES = 45;
 
     /**
-     * How far price may drift toward the target before the trade is no longer the one that
-     * was posted. Expressed in stop distances: half the stop eaten means the reward has
-     * shrunk and the risk has not.
+     * How far price may run past the entry before a resting order stops being worth placing.
+     *
+     * Only resting orders can drift meaningfully. An order that fills at market has an
+     * entry within a tenth of its stop distance of the current price - that is what makes
+     * it a market order - so it cannot have drifted half a stop by definition. There was a
+     * separate market threshold here and it was unreachable; the test written to cover it
+     * could not be constructed, which is how the dead branch was found.
+     *
+     * Three stop distances is wide enough for an ordinary retrace and tight enough that an
+     * order is not left waiting on a move that has already finished.
      */
-    public const MAX_DRIFT_OF_STOP = 0.5;
+    public const MAX_DRIFT_OF_STOP = 3.0;
 
     public function __construct(
         private readonly OpenRouter $router = new OpenRouter,
@@ -150,7 +157,7 @@ final class SignalReviewer
                 : 'The economic calendar is unavailable, so the news filter cannot be checked.';
         }
 
-        return $this->driftObjection($signal);
+        return $this->driftObjection($signal, app(SignalPlan::class)->for($signal, $settings));
     }
 
     /**
@@ -161,7 +168,10 @@ final class SignalReviewer
      * was - so the trade you would take is not the trade that was posted, even though every
      * number in the message is still the same.
      */
-    private function driftObjection(TelegramSignal $signal): ?string
+    /**
+     * @param  array<string, mixed>  $plan
+     */
+    private function driftObjection(TelegramSignal $signal, array $plan): ?string
     {
         if ($signal->entry_price === null || $signal->sl_price === null) {
             // A market order has no entry to drift from.
@@ -197,7 +207,7 @@ final class SignalReviewer
 
         if ($movement > self::MAX_DRIFT_OF_STOP * $stopDistance) {
             return sprintf(
-                'Price has already run %.2f of the way to target in stop-distance terms; the reward has shrunk and the risk has not.',
+                'Price is %.1f stop distances past the entry. Resting an order there is waiting for a move that has already happened to reverse.',
                 $movement / $stopDistance,
             );
         }

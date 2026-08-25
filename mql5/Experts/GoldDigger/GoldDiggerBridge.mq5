@@ -32,8 +32,8 @@
 #include <GoldDigger/GDExecutor.mqh>
 
 //--- Must match TradeCommand::WIRE_VERSION on the Laravel side.
-#define GD_WIRE_VERSION   "GDCMD1"
-#define GD_WIRE_COLUMNS   12
+#define GD_WIRE_VERSION   "GDCMD2"
+#define GD_WIRE_COLUMNS   13
 #define GD_EA_VERSION     "1.0.0"
 #define GD_MAX_PENDING    200
 
@@ -73,6 +73,8 @@ input int      ReconcileMinutes = 15;     // Minutes between snapshots
 input int      ReplayHistoryDays = 3;     // On attach, re-report closes from this many days back
 
 input group             "Safety"
+input int      PendingExpiryMinutes = 120;   // Resting orders expire after this (0 = never)
+
 input bool     DryRun        = false;        // Log commands without executing them
 input bool     DemoOnly      = true;         // Refuse to run on a live account
 
@@ -722,6 +724,9 @@ void GDHandleCommand(const string &f[])
    //--- Which rung of the ladder this close is. Column 11 has been on the wire since
    //--- the protocol was written and was never read; trade management is what fills it.
    const string reason  = f[11];
+   //--- Column 13, appended for resting orders. Empty on every command type that
+   //--- existed before it did, which is every market order.
+   const double entry_prc = StringToDouble(f[12]);
 
    if(DryRun)
      {
@@ -800,6 +805,45 @@ void GDHandleCommand(const string &f[])
          GDLog("error", StringFormat("Modify rejected on #%s: %s",
                                      IntegerToString((long)ticket), g_exec.LastError()));
         }
+      return;
+     }
+
+   //--- A resting order at a level the market has not reached. The copier sends this
+   //--- when a signal names an entry away from the current price: filling at market
+   //--- instead would be a different trade to the one that was reviewed.
+   if(type == "open_pending")
+     {
+      if(!g_trading_enabled)
+        {
+         GDReportResult(id, false, 0, 0, 0.0, 0.0, "Trading is disabled; pending entry skipped");
+         return;
+        }
+
+      if(symbol != "" && StringFind(g_exec.Symbol(), symbol) != 0)
+        {
+         GDReportResult(id, false, 0, 0, 0.0, 0.0,
+                        StringFormat("Command names symbol '%s' but this EA is bound to '%s'",
+                                     symbol, g_exec.Symbol()));
+         return;
+        }
+
+      ulong order_ticket = 0;
+      uint  retcode      = 0;
+
+      if(g_exec.OpenPending(dir == "buy", volume, entry_prc, sl_prc, tp_prc,
+                            PendingExpiryMinutes, comment, order_ticket, retcode))
+        {
+         GDReportResult(id, true, retcode, order_ticket, entry_prc, volume, "");
+         GDLog("info", StringFormat("Resting %s order placed at %s, expires in %d minutes",
+                                    dir, DoubleToString(entry_prc, g_exec.Digits()),
+                                    PendingExpiryMinutes));
+        }
+      else
+        {
+         GDReportResult(id, false, retcode, 0, 0.0, 0.0, g_exec.LastError());
+         GDLog("error", StringFormat("Resting order rejected: %s", g_exec.LastError()));
+        }
+
       return;
      }
 

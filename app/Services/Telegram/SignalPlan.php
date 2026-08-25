@@ -43,6 +43,7 @@ final class SignalPlan
      *     entry: float|null,
      *     sl: float|null,
      *     tps: array<int, float>,
+     *     pending: bool,
      *     why: string|null,
      * }
      */
@@ -56,8 +57,11 @@ final class SignalPlan
             'entry' => $signal->entry_price,
             'sl' => $signal->sl_price,
             'tps' => array_map('floatval', $signal->tp_prices ?? []),
+            'pending' => false,
             'why' => null,
         ];
+
+        $provider['pending'] = $this->rests($signal, $provider['entry'], $provider['sl']);
 
         if ($source !== self::SOURCE_STRATEGY) {
             return $provider;
@@ -109,17 +113,47 @@ final class SignalPlan
             }
         }
 
+        $sl = round($entry - ($sign * $stopDistance), 6);
+
         return [
             'ok' => true,
             'source' => self::SOURCE_STRATEGY,
             'entry' => $entry,
-            'sl' => round($entry - ($sign * $stopDistance), 6),
+            'sl' => $sl,
             'tps' => $tps,
+            'pending' => $this->rests($signal, $entry, $sl),
             'why' => sprintf(
                 'Provider entry, this account\'s stop (%.2f x ATR) and ladder.',
                 (float) $strategy->sl_atr_multiplier,
             ),
         ];
+    }
+
+    /**
+     * Should this rest at its entry rather than fill at market?
+     *
+     * Only when the entry is somewhere price is not. If the market is already there, a
+     * resting order and a market order are the same fill and the market order is simpler -
+     * and a limit placed the wrong side of the current price is refused anyway.
+     *
+     * Decided here rather than in the executor because the reviewer needs the same answer:
+     * the drift check means opposite things for the two. Price running away from a market
+     * entry is a missed trade; price running away from a resting one is why you rested it.
+     */
+    private function rests(TelegramSignal $signal, ?float $entry, ?float $sl): bool
+    {
+        if ($entry === null || $sl === null) {
+            return false;
+        }
+
+        $last = Candle::where('symbol', $signal->symbol)->orderByDesc('open_time')->value('close');
+
+        if ($last === null) {
+            return false;
+        }
+
+        // Within a tenth of the stop distance is "here".
+        return abs((float) $last - $entry) > abs($entry - $sl) * 0.1;
     }
 
     private function atr(TelegramSignal $signal, int $period): ?float

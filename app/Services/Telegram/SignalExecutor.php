@@ -91,16 +91,28 @@ final class SignalExecutor
             return $this->blocked($signal, $sizing['why']);
         }
 
+        // A signal naming an entry is asking to be filled there, not wherever the market
+        // happens to be when the order arrives. "Set Sell Limit order di best entry" is an
+        // instruction, and a market order ignores it - which on a zone signal means either
+        // a worse fill than the one that was reviewed, or a decline for drift that would
+        // not have applied to a resting order.
+        $pending = $sizing['pending'];
+
         $command = TradeCommand::enqueue(
             user: $user,
-            type: 'open',
+            type: $pending ? 'open_pending' : 'open',
             account: $heartbeat->brokerAccount,
             payload: [
                 'symbol' => $spec['symbol'],
                 'direction' => $signal->direction,
                 'volume' => $sizing['lots'],
-                'sl_pips' => $sizing['sl_pips'],
-                'tp_pips' => $sizing['tp_pips'],
+                // A resting order carries absolute levels: its stop belongs to its own
+                // entry, not to a market it has not touched yet.
+                'sl_pips' => $pending ? null : $sizing['sl_pips'],
+                'tp_pips' => $pending ? null : $sizing['tp_pips'],
+                'entry_price' => $pending ? $sizing['entry'] : null,
+                'sl_price' => $pending ? $sizing['sl'] : null,
+                'tp_price' => $pending ? $sizing['tp'] : null,
                 'comment' => 'tg-'.$signal->id,
                 // Read back by FillController. Without it the resulting position records
                 // as `bot` and the fund never learns it spent anything.
@@ -109,20 +121,29 @@ final class SignalExecutor
             ],
             // One command per signal, whatever races to create it.
             idempotencyKey: "telegram:{$signal->id}",
-            // A copied entry that sat in the queue is no longer the entry that was copied,
-            // for the same reason the drift check exists.
+            // How long the EA has to place it, not how long the order rests. A copied
+            // instruction that sat unclaimed for ten minutes is no longer the instruction.
             expiresInSeconds: 120,
         );
 
         $signal->update([
             'execution_status' => TelegramSignal::EXEC_QUEUED,
-            'execution_note' => sprintf(
-                'Queued %s lots, stop %s pips (%s levels), risking %s of the fund.',
-                $sizing['lots'],
-                round($sizing['sl_pips'], 1),
-                $sizing['source'],
-                round($sizing['risk'], 2),
-            ),
+            'execution_note' => $pending
+                ? sprintf(
+                    'Queued a resting order for %s lots at %s, stop %s (%s levels), risking %s of the fund.',
+                    $sizing['lots'],
+                    $sizing['entry'],
+                    $sizing['sl'],
+                    $sizing['source'],
+                    round($sizing['risk'], 2),
+                )
+                : sprintf(
+                    'Queued %s lots at market, stop %s pips (%s levels), risking %s of the fund.',
+                    $sizing['lots'],
+                    round($sizing['sl_pips'], 1),
+                    $sizing['source'],
+                    round($sizing['risk'], 2),
+                ),
         ]);
 
         return [
@@ -133,14 +154,45 @@ final class SignalExecutor
     }
 
     /**
+     * Should this rest at the signal's entry rather than fill at market?
+     *
+     * Only when the entry is somewhere price is not. If the market is already at the
+     * entry, a resting order and a market order are the same thing and the market order
+     * is simpler - and a limit placed the wrong side of the current price is rejected by
+     * the broker anyway.
+     *
+     * @param  array<string, mixed>  $sizing
+     */
+    private function pendingOrder(TelegramSignal $signal, array $sizing): bool
+    {
+        if ($sizing['entry'] === null) {
+            return false;
+        }
+
+        $last = \App\Models\Candle::where('symbol', $signal->symbol)
+            ->orderByDesc('open_time')
+            ->value('close');
+
+        if ($last === null) {
+            return false;
+        }
+
+        // Within a tenth of the stop distance is "here". Resting an order a few cents away
+        // just delays the same fill.
+        $tolerance = abs($sizing['entry'] - $sizing['sl']) * 0.1;
+
+        return abs((float) $last - $sizing['entry']) > $tolerance;
+    }
+
+    /**
      * Position size, from the fund and the instrument's own numbers.
      *
      * @param  array<string, mixed>  $spec
-     * @return array{lots: float|null, sl_pips: float, tp_pips: float|null, risk: float, source: string, why: string}
+     * @return array{lots: float|null, entry: float|null, sl: float|null, tp: float|null, sl_pips: float, tp_pips: float|null, risk: float, source: string, why: string}
      */
     private function size(TelegramSignal $signal, BotSettings $settings, array $spec): array
     {
-        $none = fn (string $why) => ['lots' => null, 'sl_pips' => 0.0, 'tp_pips' => null, 'risk' => 0.0, 'source' => '', 'why' => $why];
+        $none = fn (string $why) => ['lots' => null, 'entry' => null, 'sl' => null, 'tp' => null, 'sl_pips' => 0.0, 'tp_pips' => null, 'risk' => 0.0, 'source' => '', 'pending' => false, 'why' => $why];
 
         $pipSize = $spec['pip_size'] ?? null;
         $pipValue = $spec['pip_value_per_lot'] ?? null;
@@ -160,10 +212,20 @@ final class SignalExecutor
         // approved something else would open a trade nobody assessed.
         $plan = app(SignalPlan::class)->for($signal, $settings);
 
-        $reference = $plan['entry'] ?? $plan['sl'];
+        // What the stop is measured from. A signal naming an entry is measured from it; one
+        // at market is measured from the market, because that is where it will fill.
+        //
+        // This used to fall back to the stop itself, which made the distance exactly zero
+        // and meant a market-order signal could never be sized at all. Every fixture
+        // happened to carry an entry price, so it never showed.
+        $reference = $plan['entry'] ?? $this->lastPrice($signal);
 
-        if ($plan['sl'] === null || $reference === null) {
+        if ($plan['sl'] === null) {
             return $none('The signal carries no stop, so it cannot be sized.');
+        }
+
+        if ($reference === null) {
+            return $none("No stored price for {$spec['symbol']}, so a market entry cannot be measured against anything.");
         }
 
         $slPips = abs($reference - $plan['sl']) / $pipSize;
@@ -201,6 +263,12 @@ final class SignalExecutor
 
         return [
             'lots' => round($lots, 2),
+            // Absolute levels alongside the pip distances, so a resting order can carry
+            // the levels its own entry implies.
+            'entry' => $plan['entry'],
+            'sl' => $plan['sl'],
+            'tp' => $finalTarget,
+            'pending' => $plan['pending'],
             'sl_pips' => $slPips,
             // The final rung, matching what the strategy path sends: an order stopped out
             // at TP1 would close the whole position at a level meant to take part of it.
@@ -209,6 +277,15 @@ final class SignalExecutor
             'source' => $plan['source'],
             'why' => '',
         ];
+    }
+
+    private function lastPrice(TelegramSignal $signal): ?float
+    {
+        $close = \App\Models\Candle::where('symbol', $signal->symbol)
+            ->orderByDesc('open_time')
+            ->value('close');
+
+        return $close === null ? null : (float) $close;
     }
 
     /**
