@@ -422,6 +422,12 @@ async def cmd_run() -> None:
 
         await asyncio.sleep(5)
 
+    # Say so on every start, not only after a sign-in this process performed. A session
+    # created some other way - copied from another machine, or predating the dashboard
+    # knowing about accounts - would otherwise leave the page offering a phone number for
+    # an account that is perfectly signed in.
+    await report("active", me=await tg.get_me())
+
     print("Authorised.")
 
     async def refresh() -> None:
