@@ -10,3 +10,32 @@
 [x-cloak] {
     display: none !important;
 }
+
+/*
+ * The minimised sidebar.
+ *
+ * Driven by a data attribute and plain CSS rather than by binding Tailwind classes.
+ * Binding them put Alpine in charge of the class attribute of an element whose visibility
+ * depends on a static `hidden`, and a Livewire DOM morph could reapply the bound value on
+ * its own - which showed the desktop sidebar on a phone, underneath the open drawer, as a
+ * duplicate logo.
+ *
+ * Only above the lg breakpoint: below it the sidebar is a drawer covering the screen, and
+ * there is no width to reclaim.
+ */
+@media (min-width: 1024px) {
+    [data-nav="min"] .gd-sidebar {
+        width: 5rem;
+    }
+
+    [data-nav="min"] .gd-main {
+        padding-left: 5rem;
+    }
+
+    /* Tighter gutters, or a 1.5rem icon inside 1.5rem of padding either side has
+       nowhere to sit in a 5rem column. */
+    [data-nav="min"] .gd-sidebar > div {
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+    }
+}

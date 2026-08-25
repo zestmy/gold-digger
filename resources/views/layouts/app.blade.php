@@ -28,7 +28,8 @@
                      this.collapsed = ! this.collapsed;
                      localStorage.setItem('gd-nav-collapsed', this.collapsed ? '1' : '0');
                  }
-             }">
+             }"
+             x-bind:data-nav="collapsed ? 'min' : 'full'">
                 <!-- Off-canvas menu for mobile -->
                 <div x-show="sidebarOpen" class="relative z-50 lg:hidden" role="dialog" aria-modal="true">
                     <div x-show="sidebarOpen"
@@ -72,10 +73,13 @@
                 </div>
 
                 <!-- Static sidebar for desktop -->
-                <div class="hidden lg:fixed lg:inset-y-0 lg:z-50 lg:flex lg:flex-col"
-                     x-bind:class="collapsed ? 'lg:w-20' : 'lg:w-72'">
-                    <div class="relative flex grow flex-col gap-y-5 overflow-y-auto overflow-x-hidden border-r border-gray-800 bg-gray-900 pb-4"
-                         x-bind:class="collapsed ? 'px-3' : 'px-6'">
+                {{-- Width comes from a data attribute and CSS rather than x-bind:class.
+                     Binding a class here meant Alpine owned the class attribute of an
+                     element whose visibility depends on a static `hidden`, and a Livewire
+                     DOM morph could reapply the bound value alone - leaving the desktop
+                     sidebar visible on a phone, underneath the drawer, as a second logo. --}}
+                <div class="gd-sidebar hidden lg:fixed lg:inset-y-0 lg:z-50 lg:flex lg:w-72 lg:flex-col">
+                    <div class="relative flex grow flex-col gap-y-5 overflow-y-auto overflow-x-hidden border-r border-gray-800 bg-gray-900 px-6 pb-4">
                         @include('layouts.partials.sidebar-content')
 
                         {{-- At the foot rather than beside the logo: it is used rarely, and
@@ -94,7 +98,7 @@
                 </div>
 
                 <!-- Main content area -->
-                <div x-bind:class="collapsed ? 'lg:pl-20' : 'lg:pl-72'">
+                <div class="gd-main lg:pl-72">
                     <!-- Top bar with mobile menu button -->
                     <div class="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b border-gray-800 bg-gray-900 px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8">
                         <button type="button" class="-m-2.5 p-2.5 text-gray-400 lg:hidden" @click="sidebarOpen = true">

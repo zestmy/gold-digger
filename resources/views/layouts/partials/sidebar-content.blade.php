@@ -91,7 +91,11 @@
      x-data="{
          /* Sections opened by hand. Closed is the default, so this list is what somebody
             has deliberately expanded rather than what they have hidden. */
-         opened: JSON.parse(localStorage.getItem('gd-nav-open') || '['Overview']'),
+         /* 'null' rather than a quoted array literal: a JSON string containing
+            quotes cannot live inside this attribute without escaping that the
+            template mangles, and a broken x-data expression takes the whole nav
+            down silently - no toggle, no sections, nothing to click. */
+         opened: JSON.parse(localStorage.getItem('gd-nav-open') || 'null') || ['Overview'],
          toggle(name) {
              this.opened = this.opened.includes(name)
                  ? this.opened.filter(n => n !== name)
