@@ -35,6 +35,10 @@ class BotSettings extends Model
         'news_filter_enabled',
         'news_blackout_before_minutes',
         'news_blackout_after_minutes',
+        'ai_trading_enabled',
+        'ai_capital_cap',
+        'ai_risk_percentage',
+        'ai_max_concurrent_trades',
         'capture_screenshots',
     ];
 
@@ -55,6 +59,12 @@ class BotSettings extends Model
             // integers rather than the strings a raw column read would give it.
             'news_blackout_before_minutes' => 'integer',
             'news_blackout_after_minutes' => 'integer',
+
+            // The AI fund. `ai_capital_cap` stays nullable rather than cast to a float:
+            // absent means nobody has decided how much this may lose, which is a different
+            // statement from zero and must not collapse into one.
+            'ai_trading_enabled' => 'boolean',
+            'ai_max_concurrent_trades' => 'integer',
 
             // Decimals - Laravel casts these to strings for precision
             'risk_percentage' => 'decimal:2',

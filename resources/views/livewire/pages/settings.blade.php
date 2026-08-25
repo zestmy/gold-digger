@@ -184,6 +184,97 @@
             </div>
         </div>
 
+        <!-- AI Trading Fund -->
+        <div class="rounded-lg border border-amber-500/20 bg-gray-800 p-6">
+            <h3 class="text-lg font-semibold text-white">AI Trading Fund</h3>
+
+            {{-- Stated plainly and first. AI-initiated trading is the one thing here that
+                 cannot be backtested, so the cap is not a convenience - it is what replaces
+                 the guarantee everything else in this system offers. --}}
+            <p class="mt-1 text-sm text-gray-400">
+                Capital the AI may trade with, behaving like a separate sub-account.
+            </p>
+            <p class="mt-1 text-xs text-gray-500">
+                Positions are sized from what remains of the fund, not from your account balance.
+                Losses deplete it, and at zero the AI stops without touching the rest of the account.
+                Unlike every other setting here, AI decisions cannot be backtested &mdash; this cap is
+                what bounds being wrong.
+            </p>
+
+            {{-- What is actually left, next to the box that sets it. --}}
+            @if($fund['configured'])
+                <div class="mt-4 rounded-md bg-gray-900 p-4">
+                    <div class="flex flex-wrap items-baseline gap-x-6 gap-y-2">
+                        <div>
+                            <p class="text-xs uppercase tracking-wide text-gray-500">Remaining</p>
+                            <p class="font-mono text-lg {{ $fund['exhausted'] ? 'text-red-400' : 'text-gray-100' }}">
+                                {{ number_format($fund['remaining'], 2) }}
+                                <span class="text-xs text-gray-500">of {{ number_format($fund['cap'], 2) }}</span>
+                            </p>
+                        </div>
+                        <div>
+                            <p class="text-xs uppercase tracking-wide text-gray-500">Realised</p>
+                            <p class="font-mono text-lg {{ $fund['realised'] >= 0 ? 'text-green-400' : 'text-red-400' }}">
+                                {{ $fund['realised'] >= 0 ? '+' : '' }}{{ number_format($fund['realised'], 2) }}
+                            </p>
+                        </div>
+                        <div>
+                            <p class="text-xs uppercase tracking-wide text-gray-500">Risk per trade</p>
+                            <p class="font-mono text-lg text-gray-100">{{ number_format($fund['risk_per_trade'], 2) }}</p>
+                        </div>
+                        <div>
+                            <p class="text-xs uppercase tracking-wide text-gray-500">Open</p>
+                            <p class="font-mono text-lg text-gray-100">{{ $fund['open_trades'] }} / {{ $fund['max_concurrent'] }}</p>
+                        </div>
+                    </div>
+
+                    @if($fund['blocked_reason'])
+                        <p class="mt-3 border-t border-gray-800 pt-3 text-xs {{ $fund['exhausted'] ? 'text-red-400' : 'text-gray-500' }}">
+                            {{ app(\App\Services\Ai\AiFund::class)->explain($fund['blocked_reason']) }}
+                        </p>
+                    @endif
+                </div>
+            @endif
+
+            <div class="mt-4 flex items-start space-x-3">
+                <input type="checkbox" id="ai_trading_enabled" wire:model="ai_trading_enabled"
+                       class="mt-1 h-4 w-4 rounded border-gray-600 bg-gray-700 text-yellow-500 focus:ring-yellow-500 focus:ring-offset-gray-800">
+                <div>
+                    <label for="ai_trading_enabled" class="cursor-pointer text-sm font-medium text-gray-300">Enable AI trading</label>
+                    <p class="text-xs text-gray-500">
+                        The kill switch, session window, news blackout and daily loss limit all still apply.
+                        A funded AI is permission to consider a trade, not to take one.
+                    </p>
+                </div>
+            </div>
+
+            <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <div>
+                    <label for="ai_capital_cap" class="block text-sm font-medium text-gray-300">Fund cap</label>
+                    <input type="number" step="0.01" min="0" id="ai_capital_cap" wire:model="ai_capital_cap"
+                           placeholder="not set"
+                           class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm">
+                    <p class="mt-1 text-xs text-gray-500">Leave empty and nothing runs.</p>
+                    @error('ai_capital_cap') <p class="mt-1 text-xs text-red-400">{{ $message }}</p> @enderror
+                </div>
+
+                <div>
+                    <label for="ai_risk_percentage" class="block text-sm font-medium text-gray-300">Risk per trade (% of fund)</label>
+                    <input type="number" step="0.1" min="0.1" max="100" id="ai_risk_percentage" wire:model="ai_risk_percentage"
+                           class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm">
+                    <p class="mt-1 text-xs text-gray-500">Of what remains, so a losing run shrinks its own stake.</p>
+                    @error('ai_risk_percentage') <p class="mt-1 text-xs text-red-400">{{ $message }}</p> @enderror
+                </div>
+
+                <div>
+                    <label for="ai_max_concurrent_trades" class="block text-sm font-medium text-gray-300">Max open AI trades</label>
+                    <input type="number" min="1" max="10" id="ai_max_concurrent_trades" wire:model="ai_max_concurrent_trades"
+                           class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm">
+                    @error('ai_max_concurrent_trades') <p class="mt-1 text-xs text-red-400">{{ $message }}</p> @enderror
+                </div>
+            </div>
+        </div>
+
         <!-- Screenshot Settings -->
         <div class="rounded-lg bg-gray-800 p-6">
             <h3 class="mb-4 text-lg font-semibold text-white">Screenshot Settings</h3>
