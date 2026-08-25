@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\BotToken;
 use App\Models\Signal;
 use App\Models\Strategy;
+use App\Models\TelegramSignal;
 use App\Models\Trade;
 use App\Models\TradeCommand;
 use App\Models\TradePartial;
@@ -105,6 +106,13 @@ class FillController extends Controller
                 'strategy_id' => $strategyId,
                 'broker_account_id' => $brokerAccountId,
                 'magic_number' => $data['magic'] ?? null,
+                // Where this position came from, carried on the command that asked for it.
+                // Defaults to 'bot' so nothing that predates AI trading changes meaning -
+                // and it has to be right, because AiFund decides what the AI has left to
+                // lose by summing exactly this column.
+                'origin' => in_array($payload['origin'] ?? 'bot', ['bot', 'ai'], true)
+                    ? ($payload['origin'] ?? 'bot')
+                    : 'bot',
                 'symbol' => $data['symbol'],
                 'direction' => $data['direction'],
                 'initial_lot_size' => $data['volume'],
@@ -135,6 +143,15 @@ class FillController extends Controller
             Signal::where('id', $payload['signal_id'])->update([
                 'was_executed' => true,
                 'resulting_trade_id' => $trade->id,
+            ]);
+        }
+
+        // Same idea for a copied signal: the broker confirming a fill is the first moment
+        // it has actually been traded, so that is where the row stops saying `queued`.
+        if (isset($payload['telegram_signal_id'])) {
+            TelegramSignal::where('id', $payload['telegram_signal_id'])->update([
+                'execution_status' => TelegramSignal::EXEC_EXECUTED,
+                'trade_id' => $trade->id,
             ]);
         }
 
