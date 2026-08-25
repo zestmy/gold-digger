@@ -69,6 +69,15 @@ export default function priceChart() {
                 borderDownColor: '#ef4444',
                 wickUpColor: '#22c55e',
                 wickDownColor: '#ef4444',
+                // The last-price line is drawn by default but its value label is easy to
+                // lose among the scale's own gridline labels. Both on, explicitly: a
+                // chart whose current price you have to estimate off the axis is not
+                // answering the question you opened it to ask.
+                priceLineVisible: true,
+                lastValueVisible: true,
+                priceLineWidth: 1,
+                priceLineStyle: LineStyle.Dashed,
+                priceLineColor: '#eab308',
             });
 
             this.repaint();

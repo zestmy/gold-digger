@@ -2,12 +2,33 @@
      Livewire properties, so a poll that changes nothing repaints nothing. --}}
 <div class="rounded-lg bg-gray-800 p-6" wire:poll.30s="load">
     <div class="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 class="text-sm font-medium text-gray-400">
-            Price
-            @if($symbol)
-                <span class="ml-1 font-mono text-xs text-gray-500">{{ $symbol }}</span>
+        <div class="flex items-baseline gap-x-3">
+            <h3 class="text-sm font-medium text-gray-400">
+                Price
+                @if($symbol)
+                    <span class="ml-1 font-mono text-xs text-gray-500">{{ $symbol }}</span>
+                @endif
+            </h3>
+
+            {{-- The number itself, not just a line at it. Reading a price off the axis is
+                 guesswork at this scale, and the axis label alone competes with the
+                 gridline labels around it. --}}
+            @if($lastPrice !== null)
+                <span class="font-mono text-lg font-semibold text-gray-100">{{ number_format($lastPrice, 2) }}</span>
+
+                @if($changePct !== null)
+                    <span class="font-mono text-xs {{ $changePct >= 0 ? 'text-green-400' : 'text-red-400' }}">
+                        {{ $changePct >= 0 ? '+' : '' }}{{ number_format($changePct, 2) }}%
+                    </span>
+                @endif
+
+                @if($lastBarAt)
+                    {{-- Says how stale it is. During the broker's daily break the last bar
+                         can be an hour old, and a price with no age reads as live. --}}
+                    <span class="text-xs text-gray-500">{{ $lastBarAt }}</span>
+                @endif
             @endif
-        </h3>
+        </div>
 
         <div class="flex items-center gap-x-1">
             @foreach($timeframes as $tf)

@@ -31,6 +31,7 @@ class OptimiseStrategy extends Command
                             {--folds=4 : Walk-forward folds}
                             {--min-trades= : Results below this are not ranked}
                             {--account= : Broker account whose candles to read}
+                            {--symbol= : Series to search. Defaults to the resolved symbol on the heartbeat}
                             {--from= : Earliest bar}
                             {--to= : Latest bar}
                             {--balance=10000 : Starting balance}
@@ -82,7 +83,9 @@ class OptimiseStrategy extends Command
 
         $heartbeat = BotHeartbeat::where('user_id', $strategy->user_id)->orderByDesc('last_seen_at')->first();
         $accountId = $this->option('account') !== null ? (int) $this->option('account') : $heartbeat?->broker_account_id;
-        $symbol = $heartbeat?->resolved_symbol ?: $strategy->symbol;
+        // Overridable for the same reason strategy:improve needs it: the newest heartbeat
+        // does not always describe the series holding the history you mean to search.
+        $symbol = $this->option('symbol') ?: ($heartbeat?->resolved_symbol ?: $strategy->symbol);
 
         $entry = $this->candles($accountId, $symbol, $strategy->timeframe_entry);
         $trend = $this->candles($accountId, $symbol, $strategy->timeframe_trend);

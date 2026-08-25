@@ -52,6 +52,15 @@ class PriceChartCard extends Component
     /** @var array<int, array<string, mixed>> */
     public array $markers = [];
 
+    /** Last close of the series, shown in the header so the number is legible without
+     *  reading it off the axis. */
+    public ?float $lastPrice = null;
+
+    /** Change across the loaded window, which is what the visible chart actually spans. */
+    public ?float $changePct = null;
+
+    public ?string $lastBarAt = null;
+
     public function mount(): void
     {
         $strategy = Strategy::where('user_id', Auth::id())->orderByDesc('is_active')->orderBy('id')->first();
@@ -105,6 +114,21 @@ class PriceChartCard extends Component
         ], $bars);
 
         $this->hasData = $this->candles !== [];
+
+        if ($this->hasData) {
+            $first = $this->candles[0];
+            $last = $this->candles[count($this->candles) - 1];
+
+            $this->lastPrice = $last['close'];
+            $this->changePct = $first['open'] > 0.0
+                ? round((($last['close'] - $first['open']) / $first['open']) * 100, 2)
+                : null;
+            $this->lastBarAt = $bars[count($bars) - 1]->open_time->diffForHumans();
+        } else {
+            $this->lastPrice = null;
+            $this->changePct = null;
+            $this->lastBarAt = null;
+        }
 
         $this->buildOverlays($userId);
     }
