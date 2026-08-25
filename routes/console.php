@@ -52,3 +52,27 @@ Schedule::command('news:fetch')->hourly()->withoutOverlapping();
 // two concurrent polls would have one of them advancing the offset past messages the other
 // is still storing.
 Schedule::command('telegram:poll')->everyMinute()->withoutOverlapping();
+
+// The rest of the copier, unattended.
+//
+// Three separate commands rather than one, because they fail differently and a failure in
+// a later stage must not cost an earlier one. A message that arrived is worth keeping
+// whether or not the model was reachable; an approval is worth keeping whether or not the
+// broker was.
+//
+// Review runs a minute behind capture in effect rather than by configuration - poll writes
+// the row, and the next tick finds it awaiting review. Signals go stale at 45 minutes, so
+// there is a wide margin before a scheduler hiccup costs anything.
+Schedule::command('telegram:review')->everyMinute()->withoutOverlapping();
+
+// The step that places real orders without anyone present.
+//
+// Every gate is re-checked inside the executor when this runs - an approval from twenty
+// minutes ago is not permission - and the AI fund cap bounds what any run of this can
+// lose. What makes it safe to schedule is not this line; it is that the executor refuses
+// to size beyond the fund, refuses a stale signal, and refuses one whose stop the market
+// has already passed.
+//
+// Unlike the dashboard's Execute button, this announces what it opened. An autonomous
+// copier that trades silently is indistinguishable from one that has stopped.
+Schedule::command('telegram:execute')->everyMinute()->withoutOverlapping();

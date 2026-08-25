@@ -95,6 +95,42 @@ final class AlertNotifier
     }
 
     /**
+     * Announce something that happened, as opposed to something that is wrong.
+     *
+     * The rest of this class carries incidents: they fire, they repeat while still true,
+     * and they resolve. An order placed while nobody was watching is none of those - it
+     * is a fact, it never clears, and modelling it as an incident would leave a row
+     * firing for ever or teach the channel that green messages can be ignored.
+     *
+     * So this delivers and logs, and keeps no state. It exists because an autonomous
+     * copier that trades silently is indistinguishable from one that is broken, and the
+     * difference should not require opening the dashboard to discover.
+     *
+     * @param  array<string, mixed>  $context
+     */
+    public function announce(string $title, string $body, string $icon = 'ℹ️', array $context = []): bool
+    {
+        // Logged first and unconditionally: the record is the point, and it has to survive
+        // Telegram being unreachable exactly like an incident does.
+        BotLog::create([
+            'level' => 'info',
+            'source' => 'copier',
+            'message' => $title,
+            'context' => $context,
+        ]);
+
+        if (! $this->configured()) {
+            return false;
+        }
+
+        return $this->deliver(
+            $icon.' *'.$this->escape($title).'*'.'
+
+'.$this->escape($body)
+        );
+    }
+
+    /**
      * POST to Telegram. Returns whether it was accepted.
      */
     private function deliver(string $markdown): bool
