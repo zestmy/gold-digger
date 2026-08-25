@@ -44,3 +44,11 @@ Schedule::command('bot:monitor')->everyMinute()->withoutOverlapping();
 // entry as `news_data_stale` rather than trade unprotected. That is the intended
 // direction, and it is the one thing in this file whose absence changes trading.
 Schedule::command('news:fetch')->hourly()->withoutOverlapping();
+
+// Telegram signal capture. Every minute, because a copied signal is worth acting on within
+// the bar it was posted on and not the hour.
+//
+// withoutOverlapping matters more here than elsewhere: getUpdates confirms as it reads, so
+// two concurrent polls would have one of them advancing the offset past messages the other
+// is still storing.
+Schedule::command('telegram:poll')->everyMinute()->withoutOverlapping();
