@@ -4,6 +4,7 @@ namespace App\Services\News;
 
 use App\Models\BotSettings;
 use App\Models\EconomicEvent;
+use App\Services\Instruments\InstrumentProfile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 
@@ -141,16 +142,10 @@ final class NewsBlackout
      */
     public function currenciesFor(string $symbol): array
     {
-        $clean = strtoupper(preg_replace('/[^A-Za-z]/', '', $symbol) ?? '');
-
-        if (strlen($clean) < 6) {
-            return [];
-        }
-
-        // Only the first six characters are the pair; anything after is a suffix.
-        return array_values(array_unique([
-            substr($clean, 0, 3),
-            substr($clean, 3, 3),
-        ]));
+        // Delegated to InstrumentProfile because reading a pair off a six-letter name only
+        // works for FX and metals. US30 has no second leg, so the old rule returned no
+        // currencies and an index never blacked out - through the US calendar, which is
+        // the one thing that moves it hardest.
+        return app(InstrumentProfile::class)->for($symbol)['currencies'];
     }
 }
