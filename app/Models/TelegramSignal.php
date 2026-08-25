@@ -47,6 +47,15 @@ class TelegramSignal extends Model
     public const KIND_FOLLOW_UP = 'follow_up';
 
     /**
+     * A trade this system decided on by itself, copying nobody.
+     *
+     * Kept in the same table as copied signals because it goes through the same executor
+     * and the same gates, and because "what did we trade and why" should be one list
+     * rather than two that have to be reconciled.
+     */
+    public const KIND_AUTONOMOUS = 'autonomous';
+
+    /**
      * An added entry the copier opened itself, on an instruction to layer.
      *
      * Not a message the channel posted, which is why it is its own kind: counting it in

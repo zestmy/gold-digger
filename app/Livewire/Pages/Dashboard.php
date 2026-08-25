@@ -17,7 +17,7 @@ use Livewire\Component;
  * - Daily equity chart placeholder
  */
 #[Layout('layouts.app')]
-#[Title('Dashboard - Gold Digger')]
+#[Title('Dashboard - FXSignalPro')]
 class Dashboard extends Component
 {
     public function render()

@@ -39,7 +39,7 @@ use Livewire\Component;
  * entirely, which is worse than showing one honestly.
  */
 #[Layout('layouts.app')]
-#[Title('Signal Channels - Gold Digger')]
+#[Title('Signal Channels - FXSignalPro')]
 class SignalChannels extends Component
 {
     /** Below this, results are described rather than ranked. */

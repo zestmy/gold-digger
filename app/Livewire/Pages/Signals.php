@@ -28,7 +28,7 @@ use Livewire\WithPagination;
  * signal will ever be generated and every other explanation on this page is a red herring.
  */
 #[Layout('layouts.app')]
-#[Title('Signals - Gold Digger')]
+#[Title('Signals - FXSignalPro')]
 class Signals extends Component
 {
     use WithPagination;

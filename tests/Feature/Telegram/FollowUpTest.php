@@ -89,7 +89,18 @@ class FollowUpTest extends TestCase
             ]);
         }
 
-        Http::fake(['api.telegram.org/*' => Http::response(['ok' => true], 200)]);
+        Http::fake([
+            'api.telegram.org/*' => Http::response(['ok' => true], 200),
+            // A layer is a new position and goes through the full review, which is the
+            // intended behaviour: staleness, session, news and fund are all re-checked
+            // before a second entry on the same idea.
+            'openrouter.ai/*' => Http::response([
+                'model' => 'test-model',
+                'choices' => [['message' => ['content' => json_encode([
+                    'approve' => true, 'confidence' => 80, 'reasoning' => 'Coherent.',
+                ])]]],
+            ], 200),
+        ]);
     }
 
     // =====================================================================
@@ -287,6 +298,95 @@ class FollowUpTest extends TestCase
     }
 
     // =====================================================================
+    // LAYERING
+    // =====================================================================
+
+    /**
+     * An added entry is a position, and gets a position's scrutiny.
+     */
+    public function test_an_added_entry_opens_a_second_position_sized_from_the_fund(): void
+    {
+        $followUp = $this->followUp(TelegramSignal::FOLLOW_ADD);
+
+        $result = (new FollowUpExecutor)->execute($followUp);
+
+        $this->assertTrue($result['ok'], $result['note']);
+
+        // 5% of the 200 fund is 10, over the parent's 5.00 stop (50 pips at 10 a pip):
+        // 10 / 500 = 0.02 lots. The same arithmetic a first entry gets.
+        $command = TradeCommand::whereIn('type', ['open', 'open_pending'])->firstOrFail();
+
+        $this->assertEqualsWithDelta(0.02, $command->payload['volume'], 1e-9);
+    }
+
+    /**
+     * The layer inherits the original's stop rather than inventing one.
+     */
+    public function test_an_added_entry_carries_the_original_stop(): void
+    {
+        (new FollowUpExecutor)->execute($this->followUp(TelegramSignal::FOLLOW_ADD));
+
+        $layer = TelegramSignal::where('kind', TelegramSignal::KIND_LAYER)->firstOrFail();
+
+        $this->assertEqualsWithDelta(2645.0, $layer->sl_price, 1e-9);
+        $this->assertSame('buy', $layer->direction);
+        $this->assertSame('XAUUSD', $layer->symbol);
+    }
+
+    public function test_a_signal_with_no_stop_cannot_be_layered(): void
+    {
+        $followUp = $this->followUp(TelegramSignal::FOLLOW_ADD);
+        $followUp->parent->update(['sl_price' => null]);
+
+        $result = (new FollowUpExecutor)->execute($followUp->fresh());
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('no stop', $result['note']);
+        $this->assertSame(0, TradeCommand::count());
+    }
+
+    /**
+     * Layers enter the same idea and stop out together, so more of them is one larger
+     * loss rather than more chances.
+     */
+    public function test_layering_stops_at_the_limit(): void
+    {
+        $first = $this->followUp(TelegramSignal::FOLLOW_ADD);
+        (new FollowUpExecutor)->execute($first);
+
+        $second = $this->siblingFollowUp($first, TelegramSignal::FOLLOW_ADD);
+        (new FollowUpExecutor)->execute($second);
+
+        $third = $this->siblingFollowUp($first, TelegramSignal::FOLLOW_ADD);
+        $result = (new FollowUpExecutor)->execute($third);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('limit', $result['note']);
+        $this->assertSame(2, TelegramSignal::where('kind', TelegramSignal::KIND_LAYER)->count());
+    }
+
+    /**
+     * The property that rules out the failure which empties accounts: averaging into a
+     * loser until the eventual stop is unsurvivable.
+     */
+    public function test_layers_share_the_fund_rather_than_multiplying_the_first_position(): void
+    {
+        $first = $this->followUp(TelegramSignal::FOLLOW_ADD);
+        (new FollowUpExecutor)->execute($first);
+
+        $second = $this->siblingFollowUp($first, TelegramSignal::FOLLOW_ADD);
+        (new FollowUpExecutor)->execute($second);
+
+        $risked = TelegramSignal::where('kind', TelegramSignal::KIND_LAYER)->get()
+            ->sum(fn ($layer) => 0.02 * 50 * 10);
+
+        // Two layers at 10 each against a 200 cap. Each is sized from the fund at its own
+        // stop distance, so N layers risk N shares of a pot fixed in advance.
+        $this->assertEqualsWithDelta(20.0, $risked, 0.01);
+        $this->assertLessThan(200.0, $risked);
+    }
+
+    // =====================================================================
     // THE RECORD OF WHAT IT DID
     // =====================================================================
 
@@ -327,6 +427,26 @@ class FollowUpTest extends TestCase
     // =====================================================================
     // HELPERS
     // =====================================================================
+
+    /**
+     * Another instruction on the same parent, as a provider posting twice would produce.
+     */
+    private function siblingFollowUp(TelegramSignal $sibling, string $action): TelegramSignal
+    {
+        return TelegramSignal::create([
+            'user_id' => $this->user->id, 'source' => TelegramChannel::SOURCE_ACCOUNT,
+            'kind' => TelegramSignal::KIND_FOLLOW_UP,
+            'external_id' => 'tg:5001:'.random_int(1000, 999999),
+            'chat_id' => '5001',
+            'reply_to_message_id' => '100', 'parent_signal_id' => $sibling->parent_signal_id,
+            'telegram_channel_id' => $sibling->telegram_channel_id, 'chat_title' => 'FTC 2026',
+            'raw_text' => 'Add here', 'posted_at' => now(),
+            'parse_status' => TelegramSignal::PARSE_OK,
+            'review_status' => TelegramSignal::REVIEW_SKIPPED,
+            'follow_up_action' => $action,
+            'execution_status' => TelegramSignal::EXEC_NONE,
+        ]);
+    }
 
     private function followUp(
         string $action,

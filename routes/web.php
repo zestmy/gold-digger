@@ -23,7 +23,7 @@ use Illuminate\Support\Facades\Route;
 | Web Routes
 |--------------------------------------------------------------------------
 |
-| Gold Digger Trading Bot Dashboard Routes
+| FXSignalPro Trading Bot Dashboard Routes
 |
 | All dashboard routes are protected by auth middleware.
 | Guest routes (login, register) are in auth.php.

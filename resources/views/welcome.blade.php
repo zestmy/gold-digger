@@ -3,8 +3,8 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Gold Digger - Automated Gold Trading Bot</title>
-    <meta name="description" content="Professional automated gold (XAUUSD) scalping bot with advanced risk management and real-time analytics.">
+    <title>FXSignalPro - AI-Powered Signal Copying &amp; Trade Synchronization</title>
+    <meta name="description" content="Copy Telegram trading signals into MetaTrader with AI review, per-channel risk controls and a capped fund.">
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.bunny.net">
@@ -24,7 +24,7 @@
                             <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
                         </svg>
                     </div>
-                    <span class="text-xl font-bold text-white">Gold Digger</span>
+                    <span class="text-xl font-bold text-white">FXSignalPro</span>
                 </div>
 
                 <!-- Auth Links -->
@@ -62,13 +62,14 @@
 
             <!-- Headline -->
             <h1 class="text-4xl sm:text-6xl lg:text-7xl font-bold text-white mb-6">
-                Trade Gold Like a
-                <span class="text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-yellow-600">Pro</span>
+                Copy Signals
+                <span class="text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-yellow-600">Without Copying Mistakes</span>
             </h1>
 
             <p class="text-xl text-gray-400 max-w-2xl mx-auto mb-10">
-                Professional automated gold (XAUUSD) scalping bot with advanced risk management,
-                multi-timeframe analysis, and real-time performance tracking.
+                Telegram signals read, reviewed against your own market data, and executed in your
+                MetaTrader terminal &mdash; sized from a fund you cap, with per-channel results so you
+                can see which providers are actually worth following.
             </p>
 
             <!-- CTA Buttons -->
@@ -122,7 +123,7 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="text-center mb-16">
                 <h2 class="text-3xl sm:text-4xl font-bold text-white mb-4">Powerful Trading Features</h2>
-                <p class="text-gray-400 max-w-2xl mx-auto">Everything you need to trade gold professionally with automated precision.</p>
+                <p class="text-gray-400 max-w-2xl mx-auto">Signal capture, AI review, risk-based sizing and position management &mdash; on forex, metals, indices and crypto.</p>
             </div>
 
             <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
@@ -201,9 +202,9 @@
             <h2 class="text-3xl sm:text-4xl font-bold text-white mb-6">Ready to Start Trading?</h2>
             <p class="text-xl text-gray-400 mb-10">
                 @if(Route::has('register'))
-                    Join Gold Digger today and take control of your gold trading with automated precision.
+                    Join FXSignalPro and put every signal through the same checks before it reaches your account.
                 @else
-                    Sign in to take control of your gold trading with automated precision.
+                    Sign in to see what each of your channels has actually been worth.
                 @endif
             </p>
             @guest
@@ -227,10 +228,10 @@
                             <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
                         </svg>
                     </div>
-                    <span class="text-lg font-semibold text-white">Gold Digger</span>
+                    <span class="text-lg font-semibold text-white">FXSignalPro</span>
                 </div>
                 <p class="text-gray-500 text-sm">
-                    &copy; {{ date('Y') }} Gold Digger. Personal trading bot dashboard.
+                    &copy; {{ date('Y') }} FXSignalPro. Personal trading bot dashboard.
                 </p>
             </div>
         </div>

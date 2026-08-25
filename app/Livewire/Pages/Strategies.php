@@ -10,7 +10,7 @@ use Livewire\Attributes\Validate;
 use Livewire\Component;
 
 #[Layout('layouts.app')]
-#[Title('Strategies - Gold Digger')]
+#[Title('Strategies - FXSignalPro')]
 class Strategies extends Component
 {
     public bool $showModal = false;

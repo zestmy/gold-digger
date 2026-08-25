@@ -53,7 +53,7 @@ return [
     */
     'referer' => env('OPENROUTER_REFERER', env('APP_URL', 'https://fx.affandy.com')),
 
-    'title' => env('OPENROUTER_TITLE', 'Gold Digger'),
+    'title' => env('OPENROUTER_TITLE', 'FXSignalPro'),
 
     'timeout' => (int) env('OPENROUTER_TIMEOUT', 90),
 

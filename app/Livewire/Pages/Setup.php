@@ -37,7 +37,7 @@ use Livewire\Component;
  * is real and runs the other way: you supply the terminal.
  */
 #[Layout('layouts.app')]
-#[Title('Setup - Gold Digger')]
+#[Title('Setup - FXSignalPro')]
 class Setup extends Component
 {
     #[Url]

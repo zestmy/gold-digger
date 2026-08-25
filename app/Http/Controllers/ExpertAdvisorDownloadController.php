@@ -90,7 +90,7 @@ class ExpertAdvisorDownloadController extends Controller
     private function readme(string $url, string $version): string
     {
         return <<<TXT
-        Gold Digger Expert Advisor ({$version})
+        FXSignalPro Expert Advisor ({$version})
         =========================================
 
         This copy is already pointed at {$url}.

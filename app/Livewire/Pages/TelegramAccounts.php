@@ -33,7 +33,7 @@ use Livewire\Component;
  * how the dashboard tells which collector a message came from without being told.
  */
 #[Layout('layouts.app')]
-#[Title('Telegram Accounts - Gold Digger')]
+#[Title('Telegram Accounts - FXSignalPro')]
 class TelegramAccounts extends Component
 {
     #[Validate('required|string|max:60')]

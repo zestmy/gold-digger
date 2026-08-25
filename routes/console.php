@@ -95,3 +95,21 @@ Schedule::command('telegram:follow-up')->everyMinute()->withoutOverlapping();
 //
 // Nothing here can widen a stop or add to a position; see PositionManager.
 Schedule::command('copier:protect')->everyMinute()->withoutOverlapping();
+
+// Commitments of Traders. Saturdays, because positions are counted on a Tuesday and
+// published the following Friday afternoon - running it more often re-fetches the same
+// rows all week.
+//
+// Deliberately not a gate on anything. It describes where positioning was three days
+// before it became readable, so it is context for a person and for an AI brief, never a
+// check an entry has to pass.
+Schedule::command('cot:fetch')->weeklyOn(6, '03:00')->withoutOverlapping();
+
+// The system's own opinion, as distinct from a copied one.
+//
+// Every fifteen minutes rather than on each closed bar: a decision costs a model call per
+// instrument, and one taken every five minutes against the same slowly-changing picture is
+// mostly the same decision paid for repeatedly.
+//
+// Off unless ai_autonomous is set, and bounded by the same fund the copier spends.
+Schedule::command('ai:decide')->everyFifteenMinutes()->withoutOverlapping();

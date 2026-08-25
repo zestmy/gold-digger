@@ -11,7 +11,7 @@ use Livewire\Attributes\Validate;
 use Livewire\Component;
 
 #[Layout('layouts.app')]
-#[Title('Settings - Gold Digger')]
+#[Title('Settings - FXSignalPro')]
 class Settings extends Component
 {
     #[Validate('boolean')]

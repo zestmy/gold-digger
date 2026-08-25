@@ -56,7 +56,7 @@
             <path d="M16 6L24 14" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round"/>
             <path d="M22 12L28 6M24 14L30 8" stroke="#6B7280" stroke-width="2" stroke-linecap="round"/>
         </svg>
-        <span class="text-xl font-bold text-white">Gold <span class="text-yellow-400">Digger</span></span>
+        <span class="text-xl font-bold text-white">FX<span class="text-yellow-400">SignalPro</span></span>
     </a>
 </div>
 

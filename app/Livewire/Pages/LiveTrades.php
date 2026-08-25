@@ -27,7 +27,7 @@ use Livewire\Component;
  * position keeps showing until the terminal confirms.
  */
 #[Layout('layouts.app')]
-#[Title('Live Trades - Gold Digger')]
+#[Title('Live Trades - FXSignalPro')]
 class LiveTrades extends Component
 {
     public ?int $closingTradeId = null;

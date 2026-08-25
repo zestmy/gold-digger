@@ -30,7 +30,7 @@ use Livewire\Component;
  * why.
  */
 #[Layout('layouts.app')]
-#[Title('Strategy Improver - Gold Digger')]
+#[Title('Strategy Improver - FXSignalPro')]
 class StrategyImprover extends Component
 {
     #[Validate('required|integer')]

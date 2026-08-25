@@ -12,7 +12,7 @@ use Livewire\Component;
 use Livewire\WithPagination;
 
 #[Layout('layouts.app')]
-#[Title('Trade History - Gold Digger')]
+#[Title('Trade History - FXSignalPro')]
 class TradeHistory extends Component
 {
     use WithPagination;

@@ -39,7 +39,7 @@ use Livewire\WithPagination;
  * gate is re-checked when you do - an approval from twenty minutes ago is not permission.
  */
 #[Layout('layouts.app')]
-#[Title('Signal Copier - Gold Digger')]
+#[Title('Signal Copier - FXSignalPro')]
 class SignalCopier extends Component
 {
     use WithPagination;
