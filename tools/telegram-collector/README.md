@@ -87,6 +87,13 @@ ExecStart=/opt/gold-digger-collector/.venv/bin/python collector.py run
 Restart=always
 RestartSec=10
 
+# The session file is an account credential. Nothing here needs the rest of the machine.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/gold-digger-collector
+
 [Install]
 WantedBy=multi-user.target
 ```
@@ -100,6 +107,8 @@ journalctl -u gold-digger-collector -f
 
 - `chmod 600 gold-digger.session` and keep it off shared or synced storage.
 - Anyone with that file can read your Telegram and post as you. It is a password.
+- Run the collector as its own unprivileged user, not as the web application's. The two
+  have no reason to be able to read each other's secrets.
 - Revoke it from Telegram itself: **Settings → Devices**, end the session named after this
   client.
 - Revoking the *dashboard* token stops the collector without touching your Telegram
