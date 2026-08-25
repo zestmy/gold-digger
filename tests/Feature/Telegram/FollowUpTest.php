@@ -285,6 +285,44 @@ class FollowUpTest extends TestCase
     }
 
     // =====================================================================
+    // THE RECORD OF WHAT IT DID
+    // =====================================================================
+
+    /**
+     * Without this the only trace of an autonomous partial close is a Telegram message
+     * that scrolled away.
+     */
+    public function test_the_copier_page_shows_the_instruction_thread_under_its_signal(): void
+    {
+        $followUp = $this->followUp(
+            TelegramSignal::FOLLOW_PARTIAL,
+            fraction: 0.5,
+            trade: ['initial_lot_size' => 0.10, 'remaining_lot_size' => 0.10],
+        );
+
+        (new FollowUpExecutor)->execute($followUp);
+
+        \Livewire\Livewire::actingAs($this->user)
+            ->test(\App\Livewire\Pages\SignalCopier::class)
+            ->assertSee('Instructions since')
+            ->assertSee('Secure half')
+            ->assertSee('secure partial');
+    }
+
+    /**
+     * A reply is not a signal that failed to parse.
+     */
+    public function test_replies_are_not_listed_as_signals_in_their_own_right(): void
+    {
+        $this->followUp(TelegramSignal::FOLLOW_PARTIAL, fraction: 0.5);
+
+        \Livewire\Livewire::actingAs($this->user)
+            ->test(\App\Livewire\Pages\SignalCopier::class)
+            // One signal listed, not two rows.
+            ->assertViewHas('signals', fn ($signals) => $signals->total() === 1);
+    }
+
+    // =====================================================================
     // HELPERS
     // =====================================================================
 

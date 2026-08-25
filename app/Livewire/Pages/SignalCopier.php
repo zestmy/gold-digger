@@ -120,7 +120,11 @@ class SignalCopier extends Component
 
     public function render()
     {
-        $base = TelegramSignal::where('user_id', Auth::id());
+        // Signals only. A reply belongs under the position it manages, not beside it in a
+        // flat list where "secure half" reads as a signal that failed to parse - and a
+        // layer is not a message anybody posted.
+        $base = TelegramSignal::where('user_id', Auth::id())
+            ->where('kind', TelegramSignal::KIND_SIGNAL);
 
         $counts = [
             'total' => (clone $base)->count(),
@@ -143,7 +147,8 @@ class SignalCopier extends Component
         $settings = BotSettings::where('user_id', Auth::id())->first();
 
         return view('livewire.pages.signal-copier', [
-            'signals' => $query->orderByDesc('id')->paginate(15),
+            'signals' => $query->with(['followUps' => fn ($q) => $q->orderBy('id')])
+                ->orderByDesc('id')->paginate(15),
             'counts' => $counts,
             // Of the ones actually judged. Including unreviewed messages in the denominator
             // would flatter the rate by counting chatter as a decline.

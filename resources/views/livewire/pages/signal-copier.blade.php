@@ -174,6 +174,63 @@
                     </p>
                 @endif
 
+                <!-- Stage 5: what the provider said afterwards -->
+                {{-- The instruction thread. Without this the only record of an autonomous
+                     partial close is a Telegram message that scrolled away, and "what did
+                     the copier do to this position" is a reconstruction. --}}
+                @if($signal->followUps->isNotEmpty())
+                    <div class="mt-3 border-t border-gray-700 pt-3">
+                        <p class="text-xs uppercase tracking-wide text-gray-500">
+                            Instructions since ({{ $signal->followUps->count() }})
+                        </p>
+
+                        <ol class="mt-2 space-y-2 border-l border-gray-700 pl-3">
+                            @foreach($signal->followUps as $reply)
+                                @php
+                                    $acted = $reply->execution_status === \App\Models\TelegramSignal::EXEC_QUEUED;
+                                    $nothing = $reply->follow_up_action === \App\Models\TelegramSignal::FOLLOW_NONE;
+                                @endphp
+                                <li class="text-xs">
+                                    <div class="flex flex-wrap items-baseline gap-x-2">
+                                        <span class="text-gray-500">{{ $reply->posted_at?->diffForHumans() }}</span>
+
+                                        @if($reply->follow_up_action === null)
+                                            <span class="rounded bg-gray-700 px-1.5 py-0.5 text-gray-400">not yet read</span>
+                                        @elseif($nothing)
+                                            <span class="rounded bg-gray-700 px-1.5 py-0.5 text-gray-500">no instruction</span>
+                                        @else
+                                            <span class="rounded px-1.5 py-0.5 font-medium {{ $acted ? 'bg-blue-400/10 text-blue-400' : 'bg-gray-700 text-gray-400' }}">
+                                                {{ str_replace('_', ' ', $reply->follow_up_action) }}
+                                                @if($reply->follow_up_fraction) {{ round($reply->follow_up_fraction * 100) }}% @endif
+                                                @if($reply->follow_up_price) @ {{ rtrim(rtrim(number_format($reply->follow_up_price, 5, '.', ''), '0'), '.') }} @endif
+                                            </span>
+                                        @endif
+
+                                        @if($reply->review_confidence !== null)
+                                            <span class="text-gray-600">{{ $reply->review_confidence }}%</span>
+                                        @endif
+                                    </div>
+
+                                    <p class="mt-1 whitespace-pre-line font-mono text-gray-300">{{ \Illuminate\Support\Str::limit(trim($reply->raw_text), 220) }}</p>
+
+                                    {{-- Why it was read that way, and what came of it. A refusal is
+                                         the interesting case: it is where a provider asked for
+                                         something this copier will not do. --}}
+                                    @if($reply->review_reasoning && ! $nothing)
+                                        <p class="mt-1 text-gray-500">{{ $reply->review_reasoning }}</p>
+                                    @endif
+
+                                    @if($reply->execution_note && ! $nothing)
+                                        <p class="mt-1 {{ $acted ? 'text-gray-400' : 'text-amber-400/80' }}">
+                                            {{ $acted ? '' : 'Refused: ' }}{{ $reply->execution_note }}
+                                        </p>
+                                    @endif
+                                </li>
+                            @endforeach
+                        </ol>
+                    </div>
+                @endif
+
                 <!-- Actions -->
                 @if($signal->parse_status === \App\Models\TelegramSignal::PARSE_OK)
                     <div class="mt-3 flex flex-wrap items-center gap-x-3 border-t border-gray-700 pt-3">
