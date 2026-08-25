@@ -168,6 +168,9 @@ final class SignalIngest
 
         $user = $this->traderFor($channel, $message['chat_id']);
 
+        $replyTo = $message['reply_to_message_id'] ?? null;
+        $parent = $this->parentFor($message['source'], $message['chat_id'], $replyTo);
+
         $attributes = [
             'source' => $message['source'],
             'chat_id' => $message['chat_id'],
@@ -175,6 +178,8 @@ final class SignalIngest
             'chat_title' => $message['chat_title'] ?? null,
             'raw_text' => mb_substr($message['text'], 0, 4000),
             'posted_at' => $message['posted_at'] ?? null,
+            'reply_to_message_id' => $replyTo,
+            'parent_signal_id' => $parent?->id,
         ];
 
         // Not enabled. Recorded so what is arriving stays visible, but it can never be
@@ -194,6 +199,27 @@ final class SignalIngest
             );
 
             return ['ignored' => true, 'parsed' => false, 'signal' => $signal];
+        }
+
+        // A reply to a signal we captured is an instruction about that position, not a
+        // new trade. Sending it to the signal parser produces what it produced before this
+        // existed - an unparsed row - while the provider has told everyone to take half
+        // off. Interpretation happens later, with the parent's numbers in hand.
+        if ($parent !== null) {
+            $signal = TelegramSignal::updateOrCreate(
+                ['external_id' => $message['external_id']],
+                $attributes + [
+                    'user_id' => $user->id,
+                    'kind' => TelegramSignal::KIND_FOLLOW_UP,
+                    // It parsed in the sense that matters: we know what it is and what it
+                    // is about. Whether it says anything actionable is the interpreter's
+                    // question, not the parser's.
+                    'parse_status' => TelegramSignal::PARSE_OK,
+                    'review_status' => TelegramSignal::REVIEW_SKIPPED,
+                ],
+            );
+
+            return ['ignored' => false, 'parsed' => true, 'signal' => $signal];
         }
 
         $parsed = $this->parser->parse($message['text']);
@@ -218,6 +244,26 @@ final class SignalIngest
         );
 
         return ['ignored' => false, 'parsed' => $parsed['ok'], 'signal' => $signal];
+    }
+
+    /**
+     * The captured signal a reply is about, if there is one.
+     *
+     * Message ids are only unique within a chat, so the parent is looked up by the same
+     * composite identity the message itself carries. A reply to something posted before
+     * the collector was running finds nothing, and is recorded as a follow-up with no
+     * parent - visible, and unactionable, which is the honest outcome.
+     */
+    private function parentFor(string $source, string $chatId, ?string $replyToId): ?TelegramSignal
+    {
+        if ($replyToId === null || $replyToId === '' || $chatId === '') {
+            return null;
+        }
+
+        return TelegramSignal::where('source', $source)
+            ->where('chat_id', $chatId)
+            ->where('external_id', "tg:{$chatId}:{$replyToId}")
+            ->first();
     }
 
     /**

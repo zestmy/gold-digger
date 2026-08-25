@@ -143,6 +143,25 @@ def chat_id_of(entity) -> str:
     return str(entity.id)
 
 
+def reply_target(message) -> int | None:
+    """
+    The message id this one replies to, across Telethon's shapes.
+
+    Newer Telethon exposes `message.reply_to.reply_to_msg_id`; the flat
+    `message.reply_to_msg_id` remains as a shortcut and is None for a top-level post. A
+    reply inside a forum topic also carries a thread id, which is deliberately not used -
+    that points at the topic's root, not at the signal being managed.
+    """
+    reply = getattr(message, "reply_to", None)
+
+    if reply is not None and getattr(reply, "reply_to_msg_id", None):
+        return int(reply.reply_to_msg_id)
+
+    flat = getattr(message, "reply_to_msg_id", None)
+
+    return int(flat) if flat else None
+
+
 def title_of(entity) -> str | None:
     if isinstance(entity, (Channel, Chat)):
         return entity.title
@@ -211,6 +230,10 @@ async def forward(tg: TelegramClient, state: dict, chat_id: str, messages) -> in
                 "chat_title": title_of(entity),
                 "username": getattr(entity, "username", None),
                 "date": int(message.date.timestamp()) if message.date else None,
+                # What this is a reply to, which is the whole of what makes "secure half"
+                # interpretable. Without it the dashboard sees an instruction with no
+                # subject and can only record it.
+                "reply_to_message_id": reply_target(message),
             }
         )
 

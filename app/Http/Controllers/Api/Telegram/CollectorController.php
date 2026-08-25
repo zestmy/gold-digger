@@ -121,6 +121,7 @@ class CollectorController extends Controller
             'messages.*.chat_title' => ['nullable', 'string', 'max:255'],
             'messages.*.username' => ['nullable', 'string', 'max:64'],
             'messages.*.date' => ['nullable', 'integer'],
+            'messages.*.reply_to_message_id' => ['nullable', 'integer'],
         ]);
 
         $stored = 0;
@@ -138,6 +139,10 @@ class CollectorController extends Controller
                 'text' => $message['text'],
                 'posted_at' => isset($message['date'])
                     ? Carbon::createFromTimestamp((int) $message['date'])
+                    : null,
+                // What makes a management instruction attributable to a position.
+                'reply_to_message_id' => isset($message['reply_to_message_id'])
+                    ? (string) $message['reply_to_message_id']
                     : null,
             ]);
 

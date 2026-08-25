@@ -76,3 +76,13 @@ Schedule::command('telegram:review')->everyMinute()->withoutOverlapping();
 // Unlike the dashboard's Execute button, this announces what it opened. An autonomous
 // copier that trades silently is indistinguishable from one that has stopped.
 Schedule::command('telegram:execute')->everyMinute()->withoutOverlapping();
+
+// Replies telling the copier what to do with a position it already holds.
+//
+// Every minute, and interpretation and execution in one pass rather than two: unlike a
+// signal, a management instruction has a short useful life and no review stage between
+// reading it and acting. "Secure half" is worth acting on within the minute it was posted.
+//
+// Nothing here can widen a stop or exceed the fund - see FollowUpExecutor. The schedule
+// entry is not what makes that true.
+Schedule::command('telegram:follow-up')->everyMinute()->withoutOverlapping();
