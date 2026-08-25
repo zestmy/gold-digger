@@ -57,6 +57,12 @@ final class Backtester
      * @param  array<int, Candle>  $entryCandles  Oldest-first
      * @param  array<int, Candle>  $trendCandles  Oldest-first
      */
+    /** How far into the trend series the walk has reached. See trendUpTo(). */
+    private int $trendCursor = 0;
+
+    /** @var array<int, int> Trend bar open times as epochs, so the hot loop compares integers. */
+    private array $trendTimestamps = [];
+
     public function run(
         Strategy $strategy,
         array $entryCandles,
@@ -77,6 +83,11 @@ final class Backtester
 
             return $report;
         }
+
+        // Reset per run: SweepRunner reuses one Backtester across every combination, and
+        // a cursor left where the previous run finished would silently start the next one
+        // with the whole trend series already consumed.
+        $this->primeTrend($trendCandles);
 
         $balance = $market->startingBalance;
         $report->openEquity($balance, $entryCandles[$warmup]->open_time);
@@ -489,20 +500,48 @@ final class Backtester
      * @param  array<int, Candle>  $trendCandles
      * @return array<int, Candle>
      */
+    /**
+     * Trend bars closed at or before $at, capped to the evaluator's lookback.
+     *
+     * Called once per entry bar, and entry bars are walked in increasing time order - so
+     * the answer only ever moves forward.
+     *
+     * This used to rescan the trend series from the beginning on every call, comparing
+     * Carbon objects and rebuilding the result array each time. Over 14,000 entry bars
+     * against 1,200 H1 bars that is roughly seventeen million object comparisons and
+     * 14,000 discarded arrays, which was most of what a parameter sweep spent its time
+     * doing - and it is why sweeping four values over ten weeks took longer than the
+     * walk-forward it was meant to inform.
+     *
+     * A forward-only cursor makes it O(n + m). Integer timestamps rather than Carbon
+     * comparisons for the same reason: identical answer, entirely different cost.
+     *
+     * @param  array<int, Candle>  $trendCandles
+     * @return array<int, Candle>
+     */
     private function trendUpTo(array $trendCandles, $at): array
     {
-        $usable = [];
+        $limit = $at->getTimestamp();
+        $count = count($trendCandles);
 
-        foreach ($trendCandles as $candle) {
-            if ($candle->open_time->greaterThan($at)) {
-                break;
-            }
-
-            $usable[] = $candle;
+        while ($this->trendCursor < $count && $this->trendTimestamps[$this->trendCursor] <= $limit) {
+            $this->trendCursor++;
         }
 
-        return count($usable) > StrategyEvaluator::LOOKBACK_BARS
-            ? array_slice($usable, -StrategyEvaluator::LOOKBACK_BARS)
-            : $usable;
+        return $this->trendCursor > StrategyEvaluator::LOOKBACK_BARS
+            ? array_slice($trendCandles, $this->trendCursor - StrategyEvaluator::LOOKBACK_BARS, StrategyEvaluator::LOOKBACK_BARS)
+            : array_slice($trendCandles, 0, $this->trendCursor);
+    }
+
+    /**
+     * @param  array<int, Candle>  $trendCandles
+     */
+    private function primeTrend(array $trendCandles): void
+    {
+        $this->trendCursor = 0;
+        $this->trendTimestamps = array_map(
+            static fn (Candle $c) => $c->open_time->getTimestamp(),
+            $trendCandles,
+        );
     }
 }

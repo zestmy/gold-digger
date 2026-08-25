@@ -106,7 +106,9 @@ class OptimiseStrategy extends Command
         $settings = BotSettings::where('user_id', $strategy->user_id)->first();
 
         $this->newLine();
-        $this->line("<options=bold>{$strategy->name}</> on {$symbol} &middot; ".count($entry).' bars');
+        // A literal ·, not the HTML entity. This is a terminal, and `&middot;` printed as
+        // four characters of markup in every sweep anyone has ever run.
+        $this->line("<options=bold>{$strategy->name}</> on {$symbol} · ".count($entry).' bars');
         $this->line('  searching '.count($combinations).' combination(s) over: '.implode(', ', array_keys($grid->axes())));
         $this->newLine();
 
