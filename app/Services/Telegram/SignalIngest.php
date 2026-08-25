@@ -186,6 +186,12 @@ final class SignalIngest
 
         $user = $this->traderFor($channel, $message['chat_id']);
 
+        // Reading a screenshot costs a model call and can be confidently wrong, so a
+        // channel that posts charts as commentary can have it switched off.
+        if ($channel !== null && $channel->read_images === false) {
+            unset($message['image']);
+        }
+
         if ($existing !== null) {
             return $this->editOf($existing, $message, $channel);
         }

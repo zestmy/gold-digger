@@ -158,6 +158,106 @@
                     </p>
                 @endif
 
+                <!-- Per-channel overrides -->
+                @if($id)
+                    <div class="mt-4 border-t border-gray-700 pt-3">
+                        <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <button type="button" wire:click="edit({{ $id }})"
+                                    class="text-xs text-yellow-500 hover:text-yellow-400">
+                                {{ $editing === $id ? 'Editing settings' : 'Settings for this channel' }} &rarr;
+                            </button>
+
+                            {{-- Which values are this channel's own, so "5% because I chose it"
+                                 and "5% because the account says so" do not look identical. --}}
+                            @php($policy = $row['channel']->policy($defaults))
+                            @foreach($policy['overridden'] as $field)
+                                <span class="rounded bg-yellow-400/10 px-1.5 py-0.5 text-xs text-yellow-500">
+                                    {{ str_replace('_', ' ', $field) }}
+                                </span>
+                            @endforeach
+                            @if($row['channel']->symbols_allow)
+                                <span class="rounded bg-yellow-400/10 px-1.5 py-0.5 text-xs text-yellow-500">
+                                    only {{ implode(', ', $row['channel']->symbols_allow) }}
+                                </span>
+                            @endif
+                        </div>
+
+                        @if($editing === $id)
+                            <div class="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-3">
+                                <div>
+                                    <label class="block text-xs text-gray-500">Risk %</label>
+                                    <input type="number" step="0.01" wire:model="form.risk_percentage"
+                                           placeholder="{{ $defaults?->ai_risk_percentage ?? '—' }} (account)"
+                                           class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-xs text-white focus:border-yellow-500 focus:ring-yellow-500">
+                                    @error('form.risk_percentage') <p class="mt-1 text-xs text-red-400">{{ $message }}</p> @enderror
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs text-gray-500">Levels</label>
+                                    <select wire:model="form.copier_levels"
+                                            class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-xs text-white focus:border-yellow-500 focus:ring-yellow-500">
+                                        <option value="">{{ $defaults?->copier_levels ?? 'provider' }} (account)</option>
+                                        <option value="provider">Provider's own</option>
+                                        <option value="strategy">This account's</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs text-gray-500">Trades / day</label>
+                                    <input type="number" step="1" wire:model="form.max_trades_per_day"
+                                           placeholder="{{ $defaults?->ai_max_trades_per_day ?? 'no limit' }} (account)"
+                                           class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-xs text-white focus:border-yellow-500 focus:ring-yellow-500">
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs text-gray-500">Min confluence</label>
+                                    <input type="number" step="0.5" wire:model="form.min_confluence"
+                                           placeholder="3 (default)"
+                                           class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-xs text-white focus:border-yellow-500 focus:ring-yellow-500">
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs text-gray-500">Only these symbols</label>
+                                    <input type="text" wire:model="form.symbols_allow" placeholder="XAUUSD, EURUSD"
+                                           class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-xs text-white focus:border-yellow-500 focus:ring-yellow-500">
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs text-gray-500">Never these</label>
+                                    <input type="text" wire:model="form.symbols_deny" placeholder="US30"
+                                           class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-xs text-white focus:border-yellow-500 focus:ring-yellow-500">
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs text-gray-500">Read screenshots</label>
+                                    <select wire:model="form.read_images"
+                                            class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-xs text-white focus:border-yellow-500 focus:ring-yellow-500">
+                                        <option value="">Yes (default)</option>
+                                        <option value="1">Yes</option>
+                                        <option value="0">No</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <p class="mt-2 text-xs text-gray-500">
+                                Blank means follow the account. An override is not a copy &mdash; lowering risk on the
+                                Settings page still lowers it everywhere that has not deliberately said otherwise.
+                            </p>
+
+                            <div class="mt-3 flex gap-2">
+                                <button type="button" wire:click="savePolicy"
+                                        class="rounded-md bg-yellow-500 px-3 py-1.5 text-xs font-medium text-gray-900 hover:bg-yellow-400">
+                                    Save
+                                </button>
+                                <button type="button" wire:click="$set('editing', null)"
+                                        class="rounded-md px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200">
+                                    Cancel
+                                </button>
+                            </div>
+                        @endif
+                    </div>
+                @endif
+
                 <!-- Why signals get turned down -->
                 @if($row['declined'] + ($row['messages'] - $row['parsed']) > 0)
                     <div class="mt-4 border-t border-gray-700 pt-3">

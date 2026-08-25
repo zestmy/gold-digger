@@ -128,6 +128,15 @@ final class SignalReviewer
         // How fast, as distinct from how much. The fund cap alone lets a provider having
         // a bad day exhaust a month's budget between breakfast and lunch while every
         // individual trade sizes correctly.
+        $channel = $signal->channel;
+
+        // Instruments this provider may trade for. A channel that is good at gold and
+        // careless with indices is a common shape, and switching the whole channel off
+        // over its indices loses the gold too.
+        if ($channel !== null && ! $channel->allowsSymbol($signal->symbol)) {
+            return "{$signal->symbol} is not an instrument this channel is allowed to trade.";
+        }
+
         $allowance = app(SignalQuality::class)->dailyAllowance($settings, $signal->user_id);
 
         if ($allowance['reached']) {

@@ -238,6 +238,16 @@ final class SignalExecutor
         $state = $this->fund->state($settings, $signal->user_id);
         $risk = $state['risk_per_trade'];
 
+        // A channel may risk less - or more - than the account's default. Taken as a
+        // percentage of what the fund has left, exactly as the account's own figure is, so
+        // an override changes the share and not the thing it is a share of: the cap still
+        // bounds the total however many channels are running.
+        $channelRisk = $signal->channel?->risk_percentage;
+
+        if ($channelRisk !== null && $channelRisk > 0.0) {
+            $risk = round($state['remaining'] * $channelRisk / 100, 2);
+        }
+
         if ($risk <= 0.0) {
             return $none('The fund has nothing left to risk on this trade.');
         }

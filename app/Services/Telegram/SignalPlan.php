@@ -51,7 +51,12 @@ final class SignalPlan
      */
     public function for(TelegramSignal $signal, ?BotSettings $settings): array
     {
-        $source = $settings?->copier_levels ?? self::SOURCE_PROVIDER;
+        // The channel's own choice first. Whether to trust a provider's stops is a
+        // judgement about that provider, so it belongs beside them rather than as one
+        // setting covering everybody.
+        $source = $signal->channel?->policy($settings)['copier_levels']
+            ?? $settings?->copier_levels
+            ?? self::SOURCE_PROVIDER;
 
         $provider = [
             'ok' => true,

@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Pages;
 
+use App\Models\BotSettings;
 use App\Models\TelegramChannel;
 use App\Services\Telegram\ChannelPerformance;
 use Illuminate\Support\Carbon;
@@ -61,6 +62,12 @@ class SignalChannels extends Component
 
     public ?int $expanded = null;
 
+    /** The channel whose settings are open for editing, if any. */
+    public ?int $editing = null;
+
+    /** @var array<string, mixed> */
+    public array $form = [];
+
     /**
      * The only place `is_enabled` is written outside a migration.
      */
@@ -82,6 +89,81 @@ class SignalChannels extends Component
                 : "{$channel->label()} will be recorded but not traded.",
             type: $channel->is_enabled ? 'success' : 'info',
         );
+    }
+
+    /**
+     * Open one channel's overrides.
+     *
+     * Blank fields mean inherit, and the placeholders show what would be inherited - so
+     * the difference between "5% because I chose it" and "5% because the account says so"
+     * stays visible rather than collapsing into the same-looking input.
+     */
+    public function edit(int $id): void
+    {
+        $channel = TelegramChannel::where('user_id', Auth::id())->find($id);
+
+        if ($channel === null) {
+            return;
+        }
+
+        $this->editing = $id;
+        $this->form = [
+            'risk_percentage' => $channel->risk_percentage === null ? '' : (string) $channel->risk_percentage,
+            'copier_levels' => $channel->copier_levels ?? '',
+            'max_trades_per_day' => $channel->max_trades_per_day === null ? '' : (string) $channel->max_trades_per_day,
+            'min_confluence' => $channel->min_confluence === null ? '' : (string) $channel->min_confluence,
+            'symbols_allow' => implode(', ', (array) ($channel->symbols_allow ?? [])),
+            'symbols_deny' => implode(', ', (array) ($channel->symbols_deny ?? [])),
+            'read_images' => $channel->read_images === null ? '' : ($channel->read_images ? '1' : '0'),
+        ];
+    }
+
+    public function savePolicy(): void
+    {
+        $channel = TelegramChannel::where('user_id', Auth::id())->find($this->editing);
+
+        if ($channel === null) {
+            return;
+        }
+
+        $this->validate([
+            'form.risk_percentage' => ['nullable', 'numeric', 'min:0.01', 'max:100'],
+            'form.copier_levels' => ['nullable', 'in:provider,strategy'],
+            'form.max_trades_per_day' => ['nullable', 'integer', 'min:0', 'max:50'],
+            'form.min_confluence' => ['nullable', 'numeric', 'min:0', 'max:10'],
+        ]);
+
+        $channel->update([
+            'risk_percentage' => $this->blank('risk_percentage') ? null : (float) $this->form['risk_percentage'],
+            'copier_levels' => $this->blank('copier_levels') ? null : $this->form['copier_levels'],
+            'max_trades_per_day' => $this->blank('max_trades_per_day') ? null : (int) $this->form['max_trades_per_day'],
+            'min_confluence' => $this->blank('min_confluence') ? null : (float) $this->form['min_confluence'],
+            'symbols_allow' => $this->symbols('symbols_allow'),
+            'symbols_deny' => $this->symbols('symbols_deny'),
+            'read_images' => $this->blank('read_images') ? null : $this->form['read_images'] === '1',
+        ]);
+
+        $this->editing = null;
+
+        $this->dispatch('notify', message: "{$channel->label()} updated.", type: 'success');
+    }
+
+    private function blank(string $field): bool
+    {
+        return trim((string) ($this->form[$field] ?? '')) === '';
+    }
+
+    /**
+     * @return array<int, string>|null
+     */
+    private function symbols(string $field): ?array
+    {
+        $raw = array_filter(array_map(
+            fn (string $s) => strtoupper(trim($s)),
+            explode(',', (string) ($this->form[$field] ?? '')),
+        ));
+
+        return $raw === [] ? null : array_values($raw);
     }
 
     public function expand(?int $channelId): void
@@ -134,6 +216,8 @@ class SignalChannels extends Component
                 ? []
                 : $performance->declineReasons((int) Auth::id(), $this->expanded),
             'meaningful' => self::MEANINGFUL_TRADES,
+            // What a blank field would inherit, shown as placeholder text.
+            'defaults' => BotSettings::where('user_id', Auth::id())->first(),
         ]);
     }
 }
