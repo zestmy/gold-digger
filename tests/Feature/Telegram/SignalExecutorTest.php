@@ -187,6 +187,47 @@ class SignalExecutorTest extends TestCase
         $this->assertSame(TelegramSignal::EXEC_BLOCKED, $signal->fresh()->execution_status);
     }
 
+    /**
+     * The trap a small cap sets, in the configuration actually deployed.
+     *
+     * A fund cap is a loss budget, but the risk percentage taken from it has to survive
+     * being divided by a stop distance and landing on the broker's volume grid. Gold at
+     * 0.01 lots costs about 0.10 a pip, so a 2.00 budget buys a 20-pip stop - narrower
+     * than gold trades - and every signal is refused for sizing while looking like a
+     * strict reviewer.
+     *
+     * Both directions are asserted here because the failure is silent: nothing errors, the
+     * copier simply never trades, and the channel analytics show a block rate that invites
+     * exactly the wrong diagnosis.
+     */
+    public function test_a_two_hundred_fund_at_one_percent_cannot_fund_a_gold_stop(): void
+    {
+        $this->settings->update(['ai_capital_cap' => 200.00, 'ai_risk_percentage' => 1.00]);
+
+        // 1% of 200 is 2.00. A 5.00 stop is 50 pips at 0.10, costing 500 a lot, so
+        // 2.00 / 500 = 0.004 lots - below the 0.01 minimum, refused rather than rounded up.
+        $result = (new SignalExecutor)->execute($this->signal(['sl_price' => 2645.0]));
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('minimum', $result['note']);
+        $this->assertSame(0, TradeCommand::count());
+    }
+
+    public function test_a_two_hundred_fund_at_five_percent_funds_a_gold_stop(): void
+    {
+        $this->settings->update(['ai_capital_cap' => 200.00, 'ai_risk_percentage' => 5.00]);
+
+        $result = (new SignalExecutor)->execute($this->signal(['sl_price' => 2645.0]));
+
+        $this->assertTrue($result['ok'], $result['note']);
+
+        // 5% of 200 is 10.00, over a 50-pip stop at 10 a pip per lot: 10 / 500 = 0.02 lots.
+        $command = TradeCommand::firstOrFail();
+
+        $this->assertEqualsWithDelta(0.02, $command->payload['volume'], 1e-9);
+        $this->assertEqualsWithDelta(50.0, $command->payload['sl_pips'], 0.01);
+    }
+
     public function test_it_refuses_to_size_without_a_pip_value(): void
     {
         SymbolSpec::where('symbol', 'XAUUSD')->update(['pip_value_per_lot' => null]);
