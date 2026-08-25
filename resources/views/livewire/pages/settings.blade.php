@@ -259,6 +259,20 @@
                 </div>
 
                 <div>
+                    <label for="ai_max_trades_per_day" class="block text-sm font-medium text-gray-300">Trades per day</label>
+                    <input type="number" step="1" min="0" id="ai_max_trades_per_day" wire:model="ai_max_trades_per_day"
+                           placeholder="no limit"
+                           class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm">
+                    {{-- The cap bounds how much can be lost; this bounds how fast. A provider
+                         having a bad day can otherwise spend a month's budget before lunch
+                         while every individual trade sizes correctly. --}}
+                    <p class="mt-1 text-xs text-gray-500">
+                        Copied positions only. Blank means no ceiling.
+                    </p>
+                    @error('ai_max_trades_per_day') <p class="mt-1 text-xs text-red-400">{{ $message }}</p> @enderror
+                </div>
+
+                <div>
                     <label for="ai_risk_percentage" class="block text-sm font-medium text-gray-300">Risk per trade (% of fund)</label>
                     <input type="number" step="0.1" min="0.1" max="100" id="ai_risk_percentage" wire:model="ai_risk_percentage"
                            class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm">

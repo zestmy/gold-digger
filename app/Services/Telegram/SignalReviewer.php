@@ -4,11 +4,14 @@ namespace App\Services\Telegram;
 
 use App\Models\BotSettings;
 use App\Models\Candle;
+use App\Models\Strategy;
 use App\Models\TelegramSignal;
 use App\Services\Ai\AiFund;
 use App\Services\Ai\OpenRouter;
+use App\Services\Indicators\Indicators;
 use App\Services\Instruments\InstrumentProfile;
 use App\Services\News\NewsBlackout;
+use App\Services\Strategy\SignalQuality;
 use App\Services\Strategy\TradingSession;
 use Illuminate\Support\Carbon;
 
@@ -122,6 +125,19 @@ final class SignalReviewer
             return 'The kill switch is off, so nothing may be opened.';
         }
 
+        // How fast, as distinct from how much. The fund cap alone lets a provider having
+        // a bad day exhaust a month's budget between breakfast and lunch while every
+        // individual trade sizes correctly.
+        $allowance = app(SignalQuality::class)->dailyAllowance($settings, $signal->user_id);
+
+        if ($allowance['reached']) {
+            return sprintf(
+                'This account has already opened %d of %d copied positions today.',
+                $allowance['taken'],
+                $allowance['allowed'],
+            );
+        }
+
         if (! $this->fund->canOpen($settings, $signal->user_id)) {
             $reason = $this->fund->state($settings, $signal->user_id)['blocked_reason'];
 
@@ -177,7 +193,6 @@ final class SignalReviewer
             // A market order has no entry to drift from.
             return null;
         }
-
 
         $last = Candle::where('symbol', $signal->symbol)
             ->orderByDesc('open_time')
@@ -279,6 +294,21 @@ final class SignalReviewer
         $tps = $plan['tps'];
         $firstTarget = $tps[0] ?? null;
 
+        // Measured here rather than left to the model. A confidence percentage a writer
+        // chose looks like a measurement and is an opinion with a decimal point, and it
+        // ends up deciding money - so the model is handed the count and told what it is.
+        $strategy = Strategy::where('user_id', $signal->user_id)->where('is_active', true)->first()
+            ?? Strategy::where('user_id', $signal->user_id)->first();
+
+        $quality = $strategy === null ? null : app(SignalQuality::class)->assess(
+            $strategy,
+            $settings?->broker_account_id,
+            (string) $signal->symbol,
+            (string) $signal->direction,
+            $signal->entry_price,
+            $signal->entry_zone_high,
+        );
+
         $lines = [
             $plan['source'] === SignalPlan::SOURCE_STRATEGY
                 ? "THE TRADE, using the provider's entry with this account's stop and ladder"
@@ -347,10 +377,10 @@ final class SignalReviewer
         $highs = Candle::highs($bars);
         $lows = Candle::lows($bars);
 
-        $fast = \App\Services\Indicators\Indicators::last(\App\Services\Indicators\Indicators::ema($closes, 20));
-        $slow = \App\Services\Indicators\Indicators::last(\App\Services\Indicators\Indicators::ema($closes, 50));
-        $atr = \App\Services\Indicators\Indicators::last(\App\Services\Indicators\Indicators::atr($highs, $lows, $closes, 14));
-        $adx = \App\Services\Indicators\Indicators::last(\App\Services\Indicators\Indicators::adx($highs, $lows, $closes, 14)['adx']);
+        $fast = Indicators::last(Indicators::ema($closes, 20));
+        $slow = Indicators::last(Indicators::ema($closes, 50));
+        $atr = Indicators::last(Indicators::atr($highs, $lows, $closes, 14));
+        $adx = Indicators::last(Indicators::adx($highs, $lows, $closes, 14)['adx']);
 
         $trend = ($fast === null || $slow === null || $fast === $slow)
             ? 'flat'

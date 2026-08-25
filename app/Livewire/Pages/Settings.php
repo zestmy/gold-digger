@@ -2,7 +2,8 @@
 
 namespace App\Livewire\Pages;
 
-use App\Models\BotSettings;
+use App\Models\Strategy;
+use App\Services\Ai\AiFund;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -55,6 +56,10 @@ class Settings extends Component
     #[Validate('required|numeric|min:0.1|max:100')]
     public string $ai_risk_percentage = '1.00';
 
+    /** How fast, as distinct from how much. Null means no ceiling. */
+    #[Validate('nullable|integer|min:0|max:50')]
+    public ?string $ai_max_trades_per_day = null;
+
     #[Validate('required|integer|min:1|max:10')]
     public int $ai_max_concurrent_trades = 1;
 
@@ -90,6 +95,8 @@ class Settings extends Component
             $this->ai_trading_enabled = (bool) ($settings->ai_trading_enabled ?? false);
             $this->ai_capital_cap = $settings->ai_capital_cap === null ? null : (string) $settings->ai_capital_cap;
             $this->ai_risk_percentage = (string) ($settings->ai_risk_percentage ?? '1.00');
+            $this->ai_max_trades_per_day = $settings->ai_max_trades_per_day === null
+                ? null : (string) $settings->ai_max_trades_per_day;
             $this->ai_max_concurrent_trades = (int) ($settings->ai_max_concurrent_trades ?? 1);
             $this->copier_levels = (string) ($settings->copier_levels ?? 'provider');
             $this->capture_screenshots = $settings->capture_screenshots ?? true;
@@ -119,6 +126,9 @@ class Settings extends Component
                 ? null
                 : (float) $this->ai_capital_cap,
             'ai_risk_percentage' => $this->ai_risk_percentage,
+            'ai_max_trades_per_day' => ($this->ai_max_trades_per_day === null || $this->ai_max_trades_per_day === '')
+                ? null
+                : (int) $this->ai_max_trades_per_day,
             'ai_max_concurrent_trades' => $this->ai_max_concurrent_trades,
             'copier_levels' => $this->copier_levels,
             'capture_screenshots' => $this->capture_screenshots,
@@ -129,7 +139,7 @@ class Settings extends Component
 
     public function toggleBot(): void
     {
-        $this->is_active = !$this->is_active;
+        $this->is_active = ! $this->is_active;
         $this->save();
     }
 
@@ -141,13 +151,13 @@ class Settings extends Component
             // number typed next to "$47.20 remaining of $200" is a decision.
             // The account's actual stop rule, so the choice above is made against a real
             // number rather than the phrase "ATR-based".
-            'strategyStop' => ($m = \App\Models\Strategy::where('user_id', \Illuminate\Support\Facades\Auth::id())
+            'strategyStop' => ($m = Strategy::where('user_id', Auth::id())
                 ->orderByDesc('is_active')->value('sl_atr_multiplier'))
                     ? rtrim(rtrim((string) $m, '0'), '.').' x ATR'
                     : null,
-            'fund' => app(\App\Services\Ai\AiFund::class)->state(
-                \Illuminate\Support\Facades\Auth::user()?->botSettings,
-                (int) \Illuminate\Support\Facades\Auth::id(),
+            'fund' => app(AiFund::class)->state(
+                Auth::user()?->botSettings,
+                (int) Auth::id(),
             ),
         ]);
     }

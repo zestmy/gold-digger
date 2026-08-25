@@ -39,6 +39,7 @@ class BotSettings extends Model
         'ai_capital_cap',
         'ai_risk_percentage',
         'ai_max_concurrent_trades',
+        'ai_max_trades_per_day',
         'copier_levels',
         'capture_screenshots',
     ];
@@ -66,6 +67,7 @@ class BotSettings extends Model
             // statement from zero and must not collapse into one.
             'ai_trading_enabled' => 'boolean',
             'ai_max_concurrent_trades' => 'integer',
+            'ai_max_trades_per_day' => 'integer',
 
             // Decimals - Laravel casts these to strings for precision
             'risk_percentage' => 'decimal:2',
