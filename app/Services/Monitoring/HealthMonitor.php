@@ -10,6 +10,7 @@ use App\Models\Strategy;
 use App\Models\Trade;
 use App\Models\TradePartial;
 use App\Models\User;
+use App\Services\Instruments\InstrumentProfile;
 use App\Services\Strategy\TradingSession;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -255,7 +256,13 @@ final class HealthMonitor
         // Gated on the account's own sessions rather than a hardcoded break window,
         // because break times vary by broker and this is the question that actually
         // matters: if no allowed session is open, a missing bar changes nothing.
-        if (! (new TradingSession)->isOpen($settings->allowed_sessions, Carbon::now('UTC'))) {
+        // What follows depends on what is being traded. Both suppressions below are
+        // correct for gold and wrong for crypto, which never closes - so a silent weekend
+        // outage on BTCUSD would be exactly the invisible fault this check exists for.
+        $profile = app(InstrumentProfile::class)->for($strategy->symbol);
+
+        if ($profile['session_gated']
+            && ! (new TradingSession)->isOpen($settings->allowed_sessions, Carbon::now('UTC'))) {
             return null;
         }
 
@@ -263,7 +270,7 @@ final class HealthMonitor
         // which TradingSession reads as "always allowed" - correct for trading, wrong as
         // evidence the market is open. FX is shut from Friday close to Sunday open, and
         // no configuration makes a missing Saturday bar interesting.
-        if (Carbon::now('UTC')->isWeekend()) {
+        if (! $profile['trades_weekend'] && Carbon::now('UTC')->isWeekend()) {
             return null;
         }
 

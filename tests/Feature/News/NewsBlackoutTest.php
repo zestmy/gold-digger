@@ -147,9 +147,13 @@ class NewsBlackoutTest extends TestCase
 
     public function test_currencies_are_read_off_the_symbol_including_broker_suffixes(): void
     {
-        $this->assertSame(['XAU', 'USD'], $this->blackout->currenciesFor('XAUUSD'));
-        $this->assertSame(['XAU', 'USD'], $this->blackout->currenciesFor('XAUUSDm'));
-        $this->assertSame(['XAU', 'USD'], $this->blackout->currenciesFor('XAUUSD.a'));
+        // XAU is no longer returned alongside USD. The metal has no economic calendar, so
+        // querying for it was always querying for nothing - the result set is identical
+        // and the intent is now legible. InstrumentProfile owns this since the same
+        // question has to be answerable for indices, which have no pair to read at all.
+        $this->assertSame(['USD'], $this->blackout->currenciesFor('XAUUSD'));
+        $this->assertSame(['USD'], $this->blackout->currenciesFor('XAUUSDm'));
+        $this->assertSame(['USD'], $this->blackout->currenciesFor('XAUUSD.a'));
         $this->assertSame(['EUR', 'USD'], $this->blackout->currenciesFor('EURUSD'));
         $this->assertSame([], $this->blackout->currenciesFor('GOLD'));
     }
