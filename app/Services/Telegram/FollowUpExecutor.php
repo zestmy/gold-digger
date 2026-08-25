@@ -246,7 +246,7 @@ final class FollowUpExecutor
         $synthetic = new TelegramSignal($followUp->only([
             'user_id', 'source', 'chat_id', 'telegram_channel_id', 'chat_title',
         ]) + [
-            'kind' => TelegramSignal::KIND_SIGNAL,
+            'kind' => TelegramSignal::KIND_LAYER,
             'external_id' => "layer:{$followUp->id}",
             'raw_text' => $followUp->raw_text,
             'posted_at' => $followUp->posted_at,

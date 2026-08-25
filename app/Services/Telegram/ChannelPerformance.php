@@ -74,6 +74,9 @@ final class ChannelPerformance
     {
         return TelegramSignal::where('user_id', $userId)
             ->when($channelId, fn ($q) => $q->where('telegram_channel_id', $channelId))
+            // Replies are never declined for signal reasons, and a layer is not a message
+            // anybody wrote. Neither belongs in a list of why signals were turned down.
+            ->where('kind', TelegramSignal::KIND_SIGNAL)
             ->where(function ($q) {
                 $q->where('review_status', TelegramSignal::REVIEW_DECLINED)
                     ->orWhereIn('execution_status', [TelegramSignal::EXEC_BLOCKED, TelegramSignal::EXEC_FAILED])
@@ -97,12 +100,23 @@ final class ChannelPerformance
     {
         $first = $signals->first();
 
-        $parsed = $signals->where('parse_status', TelegramSignal::PARSE_OK);
-        $declined = $signals->where('review_status', TelegramSignal::REVIEW_DECLINED);
-        $approved = $signals->where('review_status', TelegramSignal::REVIEW_APPROVED);
-        $executed = $signals->where('execution_status', TelegramSignal::EXEC_EXECUTED);
+        // Three kinds of row live here and only one of them is a signal the channel
+        // posted. Replies are posts but not signal attempts; layers are neither - the
+        // copier opened those itself. Counting all three together would credit a chatty
+        // provider with a parse rate it never earned.
+        $posts = $signals->where('kind', '!=', TelegramSignal::KIND_LAYER);
+        $attempts = $signals->where('kind', TelegramSignal::KIND_SIGNAL);
+        $replies = $signals->where('kind', TelegramSignal::KIND_FOLLOW_UP);
 
-        $trades = $signals->pluck('trade')->filter();
+        $parsed = $attempts->where('parse_status', TelegramSignal::PARSE_OK);
+        $declined = $attempts->where('review_status', TelegramSignal::REVIEW_DECLINED);
+        $approved = $attempts->where('review_status', TelegramSignal::REVIEW_APPROVED);
+        $executed = $attempts->where('execution_status', TelegramSignal::EXEC_EXECUTED);
+
+        // Deduplicated by id, because a follow-up points at the position it manages - the
+        // same one its parent points at. Without this a signal with two replies counts its
+        // trade three times, and every figure below it triples.
+        $trades = $signals->pluck('trade')->filter()->unique('id')->values();
 
         // The model owns which statuses are still live; asking it means a new status
         // cannot start silently counting as a finished trade.
@@ -127,9 +141,11 @@ final class ChannelPerformance
             'enabled' => (bool) $first?->channel?->is_enabled,
 
             // ---- funnel ----
-            'messages' => $signals->count(),
+            'messages' => $posts->count(),
+            'signals' => $attempts->count(),
+            'follow_ups' => $replies->count(),
             'parsed' => $parsed->count(),
-            'parse_rate' => $this->rate($parsed->count(), $signals->count()),
+            'parse_rate' => $this->rate($parsed->count(), $attempts->count()),
             'approved' => $approved->count(),
             'declined' => $declined->count(),
             'decline_rate' => $this->rate($declined->count(), $approved->count() + $declined->count()),

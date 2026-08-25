@@ -76,7 +76,12 @@
                         <p class="mt-1 text-lg font-semibold {{ ($row['parse_rate'] ?? 100) < 50 ? 'text-amber-400' : 'text-gray-100' }}">
                             {{ $row['parse_rate'] === null ? '—' : $row['parse_rate'].'%' }}
                         </p>
-                        <p class="text-xs text-gray-600">{{ $row['parsed'] }} of {{ $row['messages'] }}</p>
+                        <p class="text-xs text-gray-600">
+                            {{ $row['parsed'] }} of {{ $row['signals'] }}
+                            @if($row['follow_ups'] > 0)
+                                &middot; {{ $row['follow_ups'] }} {{ Str::plural('reply', $row['follow_ups']) }}
+                            @endif
+                        </p>
                     </div>
                     <div>
                         <p class="text-xs text-gray-500">Declined</p>

@@ -156,6 +156,72 @@ class ChannelPerformanceTest extends TestCase
     }
 
     // =====================================================================
+    // FOLLOW-UPS MUST NOT BE COUNTED AS TRADES
+    // =====================================================================
+
+    /**
+     * A reply points at the position it manages - the same one its parent points at.
+     *
+     * This is the defect that makes the whole page lie rather than merely mislead: a
+     * signal with two replies counted its trade three times, so net P&L, win count and
+     * expectancy all tripled on exactly the channels that manage their trades best.
+     */
+    public function test_a_managed_trade_is_counted_once_not_once_per_reply(): void
+    {
+        $channel = $this->channel('Fira');
+        $parent = $this->signal($channel, net: 100.0);
+
+        // "Secure half", then "SL to BE". Both reference the same position.
+        $this->reply($channel, $parent);
+        $this->reply($channel, $parent);
+
+        $row = $this->performance->forUser($this->user->id)->first();
+
+        $this->assertSame(1, $row['closed'], 'one position, however many instructions about it');
+        $this->assertSame(1, $row['wins']);
+        $this->assertSame(100.0, $row['net_money']);
+    }
+
+    /**
+     * A reply is a post, but it was never an attempt at a signal.
+     */
+    public function test_replies_do_not_dilute_the_parse_rate(): void
+    {
+        $channel = $this->channel('Fira');
+        $parent = $this->signal($channel, net: 50.0);
+
+        $this->reply($channel, $parent);
+        $this->reply($channel, $parent);
+
+        $row = $this->performance->forUser($this->user->id)->first();
+
+        $this->assertSame(3, $row['messages'], 'the channel did post three times');
+        $this->assertSame(1, $row['signals']);
+        $this->assertSame(2, $row['follow_ups']);
+        // One signal, one parse. Not one in three.
+        $this->assertSame(100.0, $row['parse_rate']);
+    }
+
+    /**
+     * The copier opened it, not the provider.
+     */
+    public function test_a_layer_is_not_counted_as_a_message_the_channel_posted(): void
+    {
+        $channel = $this->channel('Fira');
+        $this->signal($channel, net: 50.0);
+
+        $this->rawSignal($channel, [
+            'kind' => TelegramSignal::KIND_LAYER,
+            'external_id' => 'layer:1',
+        ]);
+
+        $row = $this->performance->forUser($this->user->id)->first();
+
+        $this->assertSame(1, $row['messages']);
+        $this->assertSame(100.0, $row['parse_rate']);
+    }
+
+    // =====================================================================
     // R
     // =====================================================================
 
@@ -299,6 +365,23 @@ class ChannelPerformanceTest extends TestCase
             'trade_id' => $trade?->id,
             'execution_status' => $trade ? TelegramSignal::EXEC_EXECUTED : TelegramSignal::EXEC_NONE,
             'review_status' => TelegramSignal::REVIEW_APPROVED,
+        ]);
+    }
+
+    /**
+     * A management instruction on an existing position, pointing at its parent's trade.
+     */
+    private function reply(TelegramChannel $channel, TelegramSignal $parent): TelegramSignal
+    {
+        return $this->rawSignal($channel, [
+            'kind' => TelegramSignal::KIND_FOLLOW_UP,
+            'parent_signal_id' => $parent->id,
+            'reply_to_message_id' => '1',
+            'review_status' => TelegramSignal::REVIEW_SKIPPED,
+            'follow_up_action' => TelegramSignal::FOLLOW_PARTIAL,
+            'execution_status' => TelegramSignal::EXEC_QUEUED,
+            // The point of the test: the same trade its parent references.
+            'trade_id' => $parent->trade_id,
         ]);
     }
 

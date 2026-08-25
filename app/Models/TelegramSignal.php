@@ -46,6 +46,15 @@ class TelegramSignal extends Model
     /** A reply telling you what to do with a position already open. */
     public const KIND_FOLLOW_UP = 'follow_up';
 
+    /**
+     * An added entry the copier opened itself, on an instruction to layer.
+     *
+     * Not a message the channel posted, which is why it is its own kind: counting it in
+     * the channel's message total would credit the provider with a post they never made,
+     * and its parse rate with a parse that never happened.
+     */
+    public const KIND_LAYER = 'layer';
+
     // ---- follow-up actions ----------------------------------------------
     // A closed set on purpose. The model turns a sentence into one of these and nothing
     // downstream ever reads prose, so a provider writing something novel produces an
