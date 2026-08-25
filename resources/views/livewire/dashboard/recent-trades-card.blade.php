@@ -37,7 +37,7 @@
                         @foreach($trades as $trade)
                             <tr>
                                 <td class="whitespace-nowrap py-3 pl-0 pr-3 text-sm text-gray-400">
-                                    {{ $trade->opened_at?->format('H:i') ?? '-' }}
+                                    <x-local-time :value="$trade->opened_at" format="H:i" empty="-" />
                                 </td>
                                 <td class="whitespace-nowrap px-3 py-3 text-sm font-medium text-white">
                                     {{ $trade->symbol }}

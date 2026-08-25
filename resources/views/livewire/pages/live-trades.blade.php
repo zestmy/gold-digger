@@ -162,7 +162,7 @@
                                     @endif
                                 </td>
                                 <td class="whitespace-nowrap px-4 py-3 text-sm text-gray-300">
-                                    {{ $trade->opened_at?->format('M d, H:i') }}
+                                    <x-local-time :value="$trade->opened_at" format="M d, H:i" />
                                     <span class="block text-xs text-gray-500">{{ $trade->opened_at?->diffForHumans() }}</span>
                                 </td>
                                 <td class="whitespace-nowrap px-4 py-3 text-sm text-right font-medium {{ ($trade->gross_pnl_money ?? 0) >= 0 ? 'text-green-400' : 'text-red-400' }}">

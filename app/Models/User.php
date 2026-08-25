@@ -34,6 +34,7 @@ class User extends Authenticatable implements FilamentUser
     protected $fillable = [
         'name',
         'email',
+        'timezone',
         'password',
     ];
 
@@ -128,5 +129,26 @@ class User extends Authenticatable implements FilamentUser
     public function dailySummaries(): HasMany
     {
         return $this->hasMany(DailySummary::class);
+    }
+
+    /**
+     * The zone this person's screen should read in.
+     *
+     * Falls back to the application's own, which is UTC - so an unset preference renders
+     * exactly what the database holds, and nothing has to special-case null downstream.
+     */
+    public function zone(): string
+    {
+        return $this->timezone ?: (string) config('app.timezone', 'UTC');
+    }
+
+    /**
+     * Has this person actually chosen, as opposed to never having looked?
+     *
+     * Worth distinguishing: only one of those two wants to be asked.
+     */
+    public function hasChosenZone(): bool
+    {
+        return filled($this->timezone);
     }
 }

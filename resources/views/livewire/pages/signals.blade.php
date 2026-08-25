@@ -119,7 +119,7 @@
                             @php $features = $signal->features ?? []; @endphp
                             <tr class="hover:bg-gray-700/50 transition-colors">
                                 <td class="whitespace-nowrap px-4 py-3 text-sm text-gray-300">
-                                    {{ $signal->generated_at?->format('M d, H:i') }}
+                                    <x-local-time :value="$signal->generated_at" format="M d, H:i" />
                                     <span class="block text-xs text-gray-500">
                                         {{ $signal->symbol }} {{ $signal->timeframe }}
                                     </span>

@@ -159,7 +159,7 @@
 
                                     <!-- Timestamp -->
                                     <span class="text-xs text-gray-500">
-                                        {{ $log->created_at->format('M d, H:i:s') }}
+                                        <x-local-time :value="$log->created_at" format="M d, H:i:s" />
                                     </span>
 
                                     <!-- Related Trade Link -->

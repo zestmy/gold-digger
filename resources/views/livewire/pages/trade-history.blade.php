@@ -118,8 +118,8 @@
                         @foreach($trades as $trade)
                             <tr class="hover:bg-gray-700/50 transition-colors">
                                 <td class="whitespace-nowrap px-4 py-3 text-sm text-gray-300">
-                                    {{ $trade->closed_at?->format('M d, Y') }}<br>
-                                    <span class="text-xs text-gray-500">{{ $trade->closed_at?->format('H:i') }}</span>
+                                    <x-local-time :value="$trade->closed_at" format="M d, Y" /><br>
+                                    <span class="text-xs text-gray-500"><x-local-time :value="$trade->closed_at" format="H:i" /></span>
                                 </td>
                                 <td class="whitespace-nowrap px-4 py-3 text-sm font-medium text-white">
                                     {{ $trade->symbol }}
@@ -217,11 +217,11 @@
                         <div class="space-y-3">
                             <div class="flex justify-between">
                                 <span class="text-gray-400">Opened</span>
-                                <span class="text-white">{{ $viewingTrade->opened_at?->format('M d, Y H:i') }}</span>
+                                <span class="text-white"><x-local-time :value="$viewingTrade->opened_at" format="M d, Y H:i" /></span>
                             </div>
                             <div class="flex justify-between">
                                 <span class="text-gray-400">Closed</span>
-                                <span class="text-white">{{ $viewingTrade->closed_at?->format('M d, Y H:i') }}</span>
+                                <span class="text-white"><x-local-time :value="$viewingTrade->closed_at" format="M d, Y H:i" /></span>
                             </div>
                             <div class="flex justify-between">
                                 <span class="text-gray-400">Closure Reason</span>
