@@ -83,7 +83,10 @@ Type=simple
 User=collector
 WorkingDirectory=/opt/gold-digger-collector
 EnvironmentFile=/opt/gold-digger-collector/.env
-ExecStart=/opt/gold-digger-collector/.venv/bin/python collector.py run
+# -u, because Python block-buffers stdout when it is not a terminal - without it the
+# service log stays empty for hours and a working collector looks like a hung one.
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/gold-digger-collector/.venv/bin/python -u collector.py run
 Restart=always
 RestartSec=10
 
@@ -105,7 +108,8 @@ journalctl -u gold-digger-collector -f
 
 ## Keeping the session safe
 
-- `chmod 600 gold-digger.session` and keep it off shared or synced storage.
+- `chmod 600 gold-digger.session` and `chmod 700` its directory. Telethon creates the
+  session world-readable, so this is a step, not a reassurance.
 - Anyone with that file can read your Telegram and post as you. It is a password.
 - Run the collector as its own unprivileged user, not as the web application's. The two
   have no reason to be able to read each other's secrets.
