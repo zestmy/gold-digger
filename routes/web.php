@@ -8,6 +8,7 @@ use App\Livewire\Pages\LiveTrades;
 use App\Livewire\Pages\Settings;
 use App\Livewire\Pages\Signals;
 use App\Livewire\Pages\Strategies;
+use App\Livewire\Pages\SignalCopier;
 use App\Livewire\Pages\StrategyImprover;
 use App\Livewire\Pages\TradeHistory;
 use Illuminate\Support\Facades\Route;
@@ -47,6 +48,7 @@ Route::middleware(['auth'])->group(function () {
 
     // Every decision the strategy layer made, including the refusals.
     Route::get('/signals', Signals::class)->name('signals');
+    Route::get('/signals/copier', SignalCopier::class)->name('signals.copier');
 
     // Configuration
     Route::get('/strategies', Strategies::class)->name('strategies');
