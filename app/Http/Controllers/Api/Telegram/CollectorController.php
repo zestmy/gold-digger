@@ -1,0 +1,160 @@
+<?php
+
+namespace App\Http\Controllers\Api\Telegram;
+
+use App\Http\Controllers\Controller;
+use App\Models\TelegramChannel;
+use App\Models\User;
+use App\Services\Telegram\SignalIngest;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+
+/**
+ * The contract with an account-authenticated Telegram collector.
+ *
+ * ## Why the collector is not part of this application
+ *
+ * Reading somebody else's channel requires MTProto, logged in as a real Telegram account.
+ * That login produces a session file which is a full account credential - it can read
+ * every chat the account has and post as them - and it is created by an interactive flow
+ * (phone number, code, second factor) that no web request can perform.
+ *
+ * Holding that on the web server would mean a dashboard compromise is a Telegram account
+ * takeover, which is a far worse outcome than the one this feature is worth. So the
+ * collector is a separate program, running wherever the operator chooses, holding the
+ * session there and posting messages in over the same bearer-token API the terminal uses.
+ * The dashboard never sees the account credential and cannot leak it.
+ *
+ * This mirrors how the Expert Advisor already works, deliberately: an outside process
+ * that observes something this application cannot reach, authenticated by a revocable
+ * token, feeding a source-agnostic pipeline.
+ *
+ * ## Registering a channel grants it nothing
+ *
+ * A collector reports every dialog the account can see so the operator can choose from a
+ * real list rather than hunting for numeric ids. None of them arrive enabled. Joining a
+ * channel to read it must not be the same gesture as trading it, so the switch lives in
+ * the dashboard and is never flipped by anything arriving over this endpoint.
+ */
+class CollectorController extends Controller
+{
+    /** One post carries a batch; this bounds what a single request can cost. */
+    private const MAX_MESSAGES = 200;
+
+    /**
+     * What to watch.
+     *
+     * The collector reads far more than it forwards - the account is in chats that have
+     * nothing to do with trading - so it asks what is enabled and filters at its end. That
+     * keeps unrelated private conversations from being posted to a web server at all,
+     * which is a meaningfully better default than storing them and marking them ignored.
+     */
+    public function index(Request $request): JsonResponse
+    {
+        $user = $this->user($request);
+
+        $channels = TelegramChannel::where('source', TelegramChannel::SOURCE_ACCOUNT)
+            ->orderBy('id')
+            ->get();
+
+        return response()->json([
+            'watch' => $channels->where('is_enabled', true)
+                ->where('user_id', $user->id)
+                ->pluck('chat_id')
+                ->values(),
+            'known' => $channels->map(fn (TelegramChannel $c) => [
+                'chat_id' => $c->chat_id,
+                'title' => $c->title,
+                'enabled' => $c->is_enabled,
+            ])->values(),
+        ]);
+    }
+
+    /**
+     * Report the dialogs this account can see, so they can be chosen from a list.
+     */
+    public function announce(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'channels' => ['required', 'array', 'max:500'],
+            'channels.*.chat_id' => ['required', 'string', 'max:64'],
+            'channels.*.title' => ['nullable', 'string', 'max:255'],
+            'channels.*.username' => ['nullable', 'string', 'max:64'],
+        ]);
+
+        $user = $this->user($request);
+        $registered = 0;
+
+        foreach ($data['channels'] as $channel) {
+            // register() never widens permission: an existing row keeps its switch and its
+            // owner, and only the descriptive fields are refreshed.
+            TelegramChannel::register(
+                TelegramChannel::SOURCE_ACCOUNT,
+                $channel['chat_id'],
+                $channel['title'] ?? null,
+                $channel['username'] ?? null,
+                $user->id,
+            );
+
+            $registered++;
+        }
+
+        return response()->json(['registered' => $registered]);
+    }
+
+    /**
+     * Take a batch of messages.
+     *
+     * Idempotent on `external_id`: the collector may resend anything it is unsure landed,
+     * and a resent message updates its row rather than becoming a second signal. That is
+     * what lets the collector's own checkpoint be advanced only after a successful post
+     * without risking a duplicate trade on a retry.
+     */
+    public function store(Request $request, SignalIngest $ingest): JsonResponse
+    {
+        $data = $request->validate([
+            'messages' => ['required', 'array', 'max:'.self::MAX_MESSAGES],
+            'messages.*.chat_id' => ['required', 'string', 'max:64'],
+            'messages.*.message_id' => ['required', 'integer'],
+            'messages.*.text' => ['required', 'string'],
+            'messages.*.chat_title' => ['nullable', 'string', 'max:255'],
+            'messages.*.username' => ['nullable', 'string', 'max:64'],
+            'messages.*.date' => ['nullable', 'integer'],
+        ]);
+
+        $stored = 0;
+        $parsed = 0;
+        $ignored = 0;
+
+        foreach ($data['messages'] as $message) {
+            $result = $ingest->record([
+                'source' => TelegramChannel::SOURCE_ACCOUNT,
+                // Chat plus message id, because message ids are only unique within a chat.
+                'external_id' => "tg:{$message['chat_id']}:{$message['message_id']}",
+                'chat_id' => (string) $message['chat_id'],
+                'chat_title' => $message['chat_title'] ?? null,
+                'username' => $message['username'] ?? null,
+                'text' => $message['text'],
+                'posted_at' => isset($message['date'])
+                    ? Carbon::createFromTimestamp((int) $message['date'])
+                    : null,
+            ]);
+
+            $stored++;
+            $parsed += $result['parsed'] ? 1 : 0;
+            $ignored += $result['ignored'] ? 1 : 0;
+        }
+
+        return response()->json([
+            'stored' => $stored,
+            'parsed' => $parsed,
+            'ignored' => $ignored,
+        ]);
+    }
+
+    private function user(Request $request): User
+    {
+        return $request->attributes->get('bot_user');
+    }
+}

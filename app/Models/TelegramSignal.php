@@ -40,7 +40,8 @@ class TelegramSignal extends Model
     public const EXEC_FAILED = 'failed';
 
     protected $fillable = [
-        'user_id', 'source', 'external_id', 'chat_title', 'chat_id', 'raw_text', 'posted_at',
+        'user_id', 'source', 'external_id', 'chat_title', 'chat_id', 'telegram_channel_id',
+        'raw_text', 'posted_at',
         'parse_status', 'parse_error', 'symbol', 'direction', 'entry_price', 'entry_zone_high',
         'sl_price', 'tp_prices',
         'review_status', 'review_reasoning', 'review_confidence', 'review_model', 'reviewed_at',
@@ -68,6 +69,11 @@ class TelegramSignal extends Model
     public function trade(): BelongsTo
     {
         return $this->belongsTo(Trade::class);
+    }
+
+    public function channel(): BelongsTo
+    {
+        return $this->belongsTo(TelegramChannel::class, 'telegram_channel_id');
     }
 
     public function scopeAwaitingReview(Builder $query): Builder

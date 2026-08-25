@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\Bot\FillController;
 use App\Http\Controllers\Api\Bot\HeartbeatController;
 use App\Http\Controllers\Api\Bot\LogController;
 use App\Http\Controllers\Api\Bot\PositionController;
+use App\Http\Controllers\Api\Telegram\CollectorController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -45,4 +46,29 @@ Route::prefix('v1/bot')->middleware('bot.auth')->group(function () {
 
     // Push executor logs into bot_logs so /logs shows them.
     Route::post('logs', [LogController::class, 'store'])->name('api.bot.logs.store');
+});
+
+/*
+|--------------------------------------------------------------------------
+| Telegram Collector Routes
+|--------------------------------------------------------------------------
+|
+| The same bearer-token contract, for a different outside process: a client
+| logged in as a real Telegram account, which is the only way to read a channel
+| this application was never added to.
+|
+| It lives outside the app on purpose - an MTProto session file is a full account
+| credential - so this is the whole of its surface. See tools/telegram-collector/.
+|
+*/
+
+Route::prefix('v1/telegram')->middleware('bot.auth')->group(function () {
+    // What to forward. The account sees far more than the copier should be shown.
+    Route::get('channels', [CollectorController::class, 'index'])->name('api.telegram.channels.index');
+
+    // What the account can see, so channels can be picked from a list rather than by id.
+    Route::post('channels', [CollectorController::class, 'announce'])->name('api.telegram.channels.announce');
+
+    // Messages. Idempotent on chat + message id, so a retry cannot become a second trade.
+    Route::post('messages', [CollectorController::class, 'store'])->name('api.telegram.messages.store');
 });

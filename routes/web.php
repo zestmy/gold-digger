@@ -1,16 +1,18 @@
 <?php
 
+use App\Http\Controllers\ExpertAdvisorDownloadController;
 use App\Livewire\Pages\Analytics;
 use App\Livewire\Pages\BotLogs;
 use App\Livewire\Pages\BrokerAccounts;
 use App\Livewire\Pages\Dashboard;
 use App\Livewire\Pages\LiveTrades;
 use App\Livewire\Pages\Settings;
+use App\Livewire\Pages\SignalChannels;
+use App\Livewire\Pages\SignalCopier;
 use App\Livewire\Pages\Signals;
 use App\Livewire\Pages\Strategies;
-use App\Livewire\Pages\TerminalSetup;
-use App\Livewire\Pages\SignalCopier;
 use App\Livewire\Pages\StrategyImprover;
+use App\Livewire\Pages\TerminalSetup;
 use App\Livewire\Pages\TradeHistory;
 use Illuminate\Support\Facades\Route;
 
@@ -50,6 +52,9 @@ Route::middleware(['auth'])->group(function () {
     // Every decision the strategy layer made, including the refusals.
     Route::get('/signals', Signals::class)->name('signals');
     Route::get('/signals/copier', SignalCopier::class)->name('signals.copier');
+    // Which providers are on, and what each has been worth. Same page, because they are
+    // the same decision.
+    Route::get('/signals/channels', SignalChannels::class)->name('signals.channels');
 
     // Configuration
     Route::get('/strategies', Strategies::class)->name('strategies');
@@ -57,7 +62,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/broker-accounts', BrokerAccounts::class)->name('broker-accounts');
     Route::get('/terminal', TerminalSetup::class)->name('terminal');
     // Behind auth: the archive is built per request with this dashboard's URL in it.
-    Route::get('/terminal/download', \App\Http\Controllers\ExpertAdvisorDownloadController::class)->name('terminal.download');
+    Route::get('/terminal/download', ExpertAdvisorDownloadController::class)->name('terminal.download');
 
     // Analytics & Monitoring
     Route::get('/analytics', Analytics::class)->name('analytics');

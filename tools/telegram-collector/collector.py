@@ -1,0 +1,324 @@
+#!/usr/bin/env python3
+"""
+Gold Digger Telegram collector.
+
+Reads signal channels with a real Telegram account and posts what it sees to the
+dashboard.
+
+Why this is a separate program
+------------------------------
+A Telegram *bot* can only see chats it has been added to. Provider channels do not add
+your bot, so the Bot API cannot read them - no setting changes that, it is what the Bot
+API is. Reading them means MTProto, logged in as a user account.
+
+That login produces a session file which is a full account credential: it can read every
+chat the account has and post as them. Keeping it on the dashboard's web server would
+make a website compromise into a Telegram account takeover, so it stays here, wherever
+you choose to run this, and the dashboard only ever receives message text over a
+revocable bearer token.
+
+This is the same shape as the MetaTrader Expert Advisor: an outside process that observes
+something the dashboard cannot reach, authenticated by a token, feeding the same
+pipeline.
+
+What it does not do
+-------------------
+It does not join channels, send messages, or read anything the dashboard has not been
+told to watch. The watch list comes from the dashboard and is filtered here, so chats you
+have not enabled are never posted to a web server at all.
+
+Usage
+-----
+    python collector.py login       # once, interactively - phone, code, 2FA
+    python collector.py announce    # tell the dashboard what this account can see
+    python collector.py run         # watch enabled channels and forward them
+
+Configuration is by environment variable; see .env.example.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import sys
+from pathlib import Path
+
+import requests
+from telethon import TelegramClient, events
+from telethon.tl.types import Channel, Chat, User
+
+HERE = Path(__file__).resolve().parent
+STATE_PATH = Path(os.environ.get("GD_STATE_FILE", HERE / "state.json"))
+SESSION = os.environ.get("GD_SESSION_FILE", str(HERE / "gold-digger"))
+
+API_ID = os.environ.get("TG_API_ID", "")
+API_HASH = os.environ.get("TG_API_HASH", "")
+BASE_URL = os.environ.get("GD_BASE_URL", "").rstrip("/")
+TOKEN = os.environ.get("GD_TOKEN", "")
+
+# How often to re-read the watch list, so enabling a channel in the dashboard takes
+# effect without a restart.
+REFRESH_SECONDS = int(os.environ.get("GD_REFRESH_SECONDS", "60"))
+
+# Messages older than this are not back-filled on a first run. A signal from last month
+# is not a trade, and forwarding a channel's entire history would fill the pipeline with
+# things that can only ever be declined.
+BACKFILL_LIMIT = int(os.environ.get("GD_BACKFILL_LIMIT", "20"))
+
+
+def require_config() -> None:
+    missing = [
+        name
+        for name, value in (
+            ("TG_API_ID", API_ID),
+            ("TG_API_HASH", API_HASH),
+            ("GD_BASE_URL", BASE_URL),
+            ("GD_TOKEN", TOKEN),
+        )
+        if not value
+    ]
+
+    if missing:
+        sys.exit(
+            "Missing configuration: "
+            + ", ".join(missing)
+            + "\nCopy .env.example to .env and fill it in, then source it."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Dashboard API
+# ---------------------------------------------------------------------------
+
+
+def api(method: str, path: str, payload: dict | None = None) -> dict:
+    response = requests.request(
+        method,
+        f"{BASE_URL}/api/v1/telegram/{path}",
+        json=payload,
+        headers={
+            "Authorization": f"Bearer {TOKEN}",
+            "Accept": "application/json",
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+
+    return response.json()
+
+
+def load_state() -> dict:
+    if STATE_PATH.exists():
+        try:
+            return json.loads(STATE_PATH.read_text())
+        except json.JSONDecodeError:
+            pass
+
+    return {"seen": {}}
+
+
+def save_state(state: dict) -> None:
+    STATE_PATH.write_text(json.dumps(state, indent=2))
+
+
+# ---------------------------------------------------------------------------
+# Telegram
+# ---------------------------------------------------------------------------
+
+
+def client() -> TelegramClient:
+    return TelegramClient(SESSION, int(API_ID), API_HASH)
+
+
+def chat_id_of(entity) -> str:
+    """
+    The id the dashboard stores.
+
+    Telethon exposes a channel's raw id; Bot API style prefixes supergroups with -100.
+    We store Telethon's own form consistently so the two never have to be reconciled -
+    the dashboard treats the id as an opaque string, and the pair (source, chat_id) is
+    what makes it unique.
+    """
+    return str(entity.id)
+
+
+def title_of(entity) -> str | None:
+    if isinstance(entity, (Channel, Chat)):
+        return entity.title
+
+    if isinstance(entity, User):
+        return " ".join(filter(None, [entity.first_name, entity.last_name])) or None
+
+    return None
+
+
+async def cmd_login() -> None:
+    """Interactive, once. Telethon prompts for phone, code, and 2FA password."""
+    async with client() as tg:
+        me = await tg.get_me()
+        print(f"Signed in as {me.first_name} (@{me.username}).")
+        print(f"Session stored at {SESSION}.session - treat it as a password.")
+
+
+async def cmd_announce() -> None:
+    """Report every dialog this account can see, so channels can be picked from a list."""
+    async with client() as tg:
+        channels = []
+
+        async for dialog in tg.iter_dialogs():
+            entity = dialog.entity
+
+            # Only broadcast channels and groups. Private conversations with people are
+            # not signal sources and there is no reason to name them to a web server.
+            if not isinstance(entity, (Channel, Chat)):
+                continue
+
+            channels.append(
+                {
+                    "chat_id": chat_id_of(entity),
+                    "title": title_of(entity),
+                    "username": getattr(entity, "username", None),
+                }
+            )
+
+        if not channels:
+            print("This account is not in any channels or groups.")
+            return
+
+        result = api("POST", "channels", {"channels": channels})
+        print(f"Reported {result['registered']} channels.")
+        print("Enable the ones you want in the dashboard: Signals -> Channels.")
+
+
+async def forward(tg: TelegramClient, state: dict, chat_id: str, messages) -> int:
+    """Post a batch and advance the checkpoint only if it landed."""
+    batch = []
+
+    for message in messages:
+        text = message.message or ""
+
+        if not text.strip():
+            continue
+
+        entity = await message.get_chat()
+
+        batch.append(
+            {
+                "chat_id": chat_id,
+                "message_id": message.id,
+                "text": text[:4000],
+                "chat_title": title_of(entity),
+                "username": getattr(entity, "username", None),
+                "date": int(message.date.timestamp()) if message.date else None,
+            }
+        )
+
+    if not batch:
+        return 0
+
+    result = api("POST", "messages", {"messages": batch})
+
+    # Only now. The dashboard is idempotent on chat + message id, so a message posted
+    # twice is harmless; one never posted because the checkpoint moved first is lost.
+    state["seen"][chat_id] = max(m["message_id"] for m in batch)
+    save_state(state)
+
+    print(f"[{chat_id}] forwarded {result['stored']}, parsed {result['parsed']}")
+
+    return result["stored"]
+
+
+async def catch_up(tg: TelegramClient, state: dict, watch: list[str]) -> None:
+    """Fetch what arrived while this was not running."""
+    for chat_id in watch:
+        try:
+            entity = await tg.get_entity(int(chat_id))
+        except (ValueError, TypeError) as error:
+            print(f"[{chat_id}] cannot resolve: {error}")
+            continue
+
+        last = state["seen"].get(chat_id)
+
+        messages = [
+            message
+            async for message in tg.iter_messages(
+                entity,
+                limit=BACKFILL_LIMIT,
+                min_id=last or 0,
+            )
+        ]
+
+        if messages:
+            await forward(tg, state, chat_id, reversed(messages))
+
+
+async def cmd_run() -> None:
+    state = load_state()
+    watch: set[str] = set()
+
+    tg = client()
+    await tg.start()
+
+    if not await tg.is_user_authorized():
+        sys.exit("Not signed in. Run: python collector.py login")
+
+    async def refresh() -> None:
+        """Re-read the watch list, so the dashboard's switch takes effect while running."""
+        nonlocal watch
+
+        while True:
+            try:
+                current = set(api("GET", "channels")["watch"])
+
+                if current != watch:
+                    added = current - watch
+                    watch = current
+                    print(f"Watching {len(watch)} channel(s).")
+
+                    if added:
+                        await catch_up(tg, state, sorted(added))
+            except requests.RequestException as error:
+                print(f"Could not reach the dashboard: {error}")
+
+            await asyncio.sleep(REFRESH_SECONDS)
+
+    @tg.on(events.NewMessage())
+    async def on_message(event) -> None:
+        chat_id = str(event.chat_id).removeprefix("-100").lstrip("-")
+
+        # Filtered here rather than at the dashboard: chats you have not enabled are
+        # never posted to a web server at all.
+        if chat_id not in watch:
+            return
+
+        try:
+            await forward(tg, state, chat_id, [event.message])
+        except requests.RequestException as error:
+            # Deliberately not advancing the checkpoint; catch_up re-sends it.
+            print(f"[{chat_id}] post failed, will retry on next catch-up: {error}")
+
+    print("Collector running. Ctrl-C to stop.")
+
+    await asyncio.gather(refresh(), tg.run_until_disconnected())
+
+
+COMMANDS = {"login": cmd_login, "announce": cmd_announce, "run": cmd_run}
+
+
+def main() -> None:
+    command = sys.argv[1] if len(sys.argv) > 1 else "run"
+
+    if command not in COMMANDS:
+        sys.exit(f"Unknown command '{command}'. One of: {', '.join(COMMANDS)}")
+
+    require_config()
+
+    try:
+        asyncio.run(COMMANDS[command]())
+    except KeyboardInterrupt:
+        print("\nStopped.")
+
+
+if __name__ == "__main__":
+    main()
