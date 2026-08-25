@@ -7,6 +7,7 @@ use App\Livewire\Pages\BrokerAccounts;
 use App\Livewire\Pages\Dashboard;
 use App\Livewire\Pages\LiveTrades;
 use App\Livewire\Pages\Settings;
+use App\Livewire\Pages\Setup;
 use App\Livewire\Pages\SignalChannels;
 use App\Livewire\Pages\SignalCopier;
 use App\Livewire\Pages\Signals;
@@ -60,6 +61,9 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/strategies', Strategies::class)->name('strategies');
     Route::get('/strategies/improve', StrategyImprover::class)->name('strategies.improve');
     Route::get('/broker-accounts', BrokerAccounts::class)->name('broker-accounts');
+    // The four things that must be true before a copied signal becomes a position, with
+    // each one's state read from the system rather than remembered.
+    Route::get('/setup', Setup::class)->name('setup');
     Route::get('/terminal', TerminalSetup::class)->name('terminal');
     // Behind auth: the archive is built per request with this dashboard's URL in it.
     Route::get('/terminal/download', ExpertAdvisorDownloadController::class)->name('terminal.download');

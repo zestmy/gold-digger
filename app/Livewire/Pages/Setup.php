@@ -1,0 +1,146 @@
+<?php
+
+namespace App\Livewire\Pages;
+
+use App\Models\BotHeartbeat;
+use App\Models\BotSettings;
+use App\Models\TelegramChannel;
+use Illuminate\Support\Facades\Auth;
+use Livewire\Attributes\Layout;
+use Livewire\Attributes\Title;
+use Livewire\Attributes\Url;
+use Livewire\Component;
+
+/**
+ * Setup
+ *
+ * The four things that have to be true before a copied signal can become a position,
+ * in the order they have to become true, with the state of each read from the system
+ * rather than from a checkbox somebody ticked.
+ *
+ * ## Why the steps are derived, not stored
+ *
+ * A wizard that remembers how far you got is lying the moment anything changes underneath
+ * it - a revoked token, a channel switched off, a terminal that stopped beating. Each step
+ * here asks the question it is about, every render. Going back is therefore not a
+ * navigation feature; it is what the page does by itself when something breaks.
+ *
+ * ## Where this deliberately differs from the copiers it resembles
+ *
+ * The hosted services ask for your broker password at this point, because their cloud logs
+ * into your account as you. That is the only way to trade MT5 without something running
+ * beside the terminal, and it means a company holds a credential that can trade your
+ * account.
+ *
+ * Step three here asks for nothing of the kind. A token this dashboard issued goes into an
+ * Expert Advisor you run, and it can be revoked from the page that issued it. The trade-off
+ * is real and runs the other way: you supply the terminal.
+ */
+#[Layout('layouts.app')]
+#[Title('Setup - Gold Digger')]
+class Setup extends Component
+{
+    #[Url]
+    public ?int $step = null;
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function steps(): array
+    {
+        $userId = (int) Auth::id();
+
+        $channels = TelegramChannel::where('user_id', $userId);
+        $enabled = (clone $channels)->where('is_enabled', true)->count();
+        $known = $channels->count();
+
+        $heartbeat = BotHeartbeat::where('user_id', $userId)->orderByDesc('last_seen_at')->first();
+        $settings = BotSettings::where('user_id', $userId)->first();
+
+        $capSet = $settings !== null
+            && $settings->ai_trading_enabled
+            && $settings->ai_capital_cap !== null
+            && (float) $settings->ai_capital_cap > 0;
+
+        return [
+            [
+                'title' => 'Signal source',
+                'done' => $known > 0,
+                'detail' => $known > 0
+                    ? "{$known} channels visible to the collector."
+                    : 'No collector has reported in yet.',
+                'blurb' => 'A Telegram bot can only read chats it was added to, and providers do not add your bot. '
+                    .'Reading their channel needs a collector signed in as your own account - which stays on a machine you '
+                    .'choose, because that session can read every chat you have.',
+                'action' => 'Collector setup',
+                'route' => 'terminal',
+            ],
+            [
+                'title' => 'Channels',
+                'done' => $enabled > 0,
+                'detail' => $enabled > 0
+                    ? "{$enabled} enabled of {$known}."
+                    : ($known > 0 ? 'None enabled yet.' : 'Nothing to choose from yet.'),
+                'blurb' => 'Everything the collector can see is listed, and none of it is armed. Joining a channel to read '
+                    .'it must not be the same act as trading it, so enabling is a separate, deliberate click.',
+                'action' => 'Choose channels',
+                'route' => 'signals.channels',
+            ],
+            [
+                'title' => 'Terminal',
+                'done' => $heartbeat !== null && $heartbeat->isOnline(),
+                'detail' => match (true) {
+                    $heartbeat === null => 'No terminal has ever connected.',
+                    ! $heartbeat->isOnline() => 'Last seen '.$heartbeat->last_seen_at?->diffForHumans().'.',
+                    ! $heartbeat->algo_trading_enabled => 'Online, but Algo Trading is off - every order would be refused.',
+                    default => 'Online, carrying '.($heartbeat->resolved_symbol ?? 'an instrument').'.',
+                },
+                'blurb' => 'This is where the hosted copiers ask for your broker password, because their cloud logs in as '
+                    .'you. This asks for nothing of the kind: a token this dashboard issued goes into an Expert Advisor you '
+                    .'run, and you can revoke it here. The cost is that you supply the terminal.',
+                'action' => 'Connect a terminal',
+                'route' => 'terminal',
+            ],
+            [
+                'title' => 'Risk',
+                'done' => $capSet,
+                'detail' => $capSet
+                    ? sprintf(
+                        '%s fund at %s%% - %s a trade%s.',
+                        number_format((float) $settings->ai_capital_cap, 2),
+                        rtrim(rtrim((string) $settings->ai_risk_percentage, '0'), '.'),
+                        number_format((float) $settings->ai_capital_cap * (float) $settings->ai_risk_percentage / 100, 2),
+                        $settings->ai_max_trades_per_day ? ", max {$settings->ai_max_trades_per_day} a day" : '',
+                    )
+                    : 'No fund cap set, so nothing can be sized.',
+                'blurb' => 'The cap bounds how much can ever be lost; the daily limit bounds how fast. Positions are sized '
+                    .'from the fund rather than the account balance, and an order that will not fit is refused rather than '
+                    .'rounded up.',
+                'action' => 'Set the fund',
+                'route' => 'settings',
+            ],
+        ];
+    }
+
+    public function render()
+    {
+        $steps = $this->steps();
+
+        // The first thing that is not true yet. Not where you left off - a wizard that
+        // remembers its own progress is wrong the moment a token is revoked.
+        $current = null;
+
+        foreach ($steps as $index => $step) {
+            if (! $step['done']) {
+                $current = $index;
+                break;
+            }
+        }
+
+        return view('livewire.pages.setup', [
+            'steps' => $steps,
+            'current' => $this->step !== null && isset($steps[$this->step]) ? $this->step : $current,
+            'ready' => $current === null,
+        ]);
+    }
+}

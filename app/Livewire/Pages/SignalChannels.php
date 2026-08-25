@@ -47,6 +47,18 @@ class SignalChannels extends Component
     #[Url]
     public string $window = 'all';
 
+    /**
+     * A collector reports every channel its account has ever joined, which for a real
+     * account is well over a hundred. A list that long with no filter is not a list of
+     * choices, it is a haystack - and the one you want is the one you cannot find.
+     */
+    #[Url]
+    public string $search = '';
+
+    /** Hide the ones that have never posted anything, which is most of them. */
+    #[Url]
+    public bool $onlyActive = false;
+
     public ?int $expanded = null;
 
     /**
@@ -88,14 +100,36 @@ class SignalChannels extends Component
 
         $rows = $performance->forUser((int) Auth::id(), $since);
 
+        if ($this->search !== '') {
+            $needle = mb_strtolower($this->search);
+
+            $rows = $rows->filter(
+                fn (array $row) => str_contains(mb_strtolower((string) $row['label']), $needle)
+                    || str_contains(mb_strtolower((string) $row['channel']?->username), $needle)
+                    || str_contains((string) $row['channel']?->chat_id, $needle),
+            )->values();
+        }
+
         return view('livewire.pages.signal-channels', [
             'rows' => $rows,
             // Registered but silent: a channel enabled weeks ago that has posted nothing
             // is a different problem from one posting signals nobody takes.
-            'idle' => TelegramChannel::where('user_id', Auth::id())
+            'idle' => $this->onlyActive ? collect() : TelegramChannel::where('user_id', Auth::id())
                 ->whereDoesntHave('signals')
+                ->when($this->search !== '', fn ($q) => $q->where(function ($q) {
+                    $q->where('title', 'like', '%'.$this->search.'%')
+                        ->orWhere('username', 'like', '%'.$this->search.'%')
+                        ->orWhere('chat_id', 'like', '%'.$this->search.'%');
+                }))
+                // Enabled ones first: a channel you have armed is the one you most need to
+                // be able to find again.
+                ->orderByDesc('is_enabled')
                 ->orderByDesc('last_message_at')
+                ->limit($this->search === '' ? 25 : 100)
                 ->get(),
+            'idleTotal' => TelegramChannel::where('user_id', Auth::id())
+                ->whereDoesntHave('signals')
+                ->count(),
             'reasons' => $this->expanded === null
                 ? []
                 : $performance->declineReasons((int) Auth::id(), $this->expanded),
