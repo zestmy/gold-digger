@@ -161,4 +161,112 @@ class SignalParserTest extends TestCase
             $this->assertFalse($this->parser->parse($chatter)['ok'], "Parsed chatter: {$chatter}");
         }
     }
+
+    // =====================================================================
+    // A REAL PROVIDER MESSAGE
+    // =====================================================================
+
+    /**
+     * Captured verbatim from a live desk, and it broke the parser in two ways at once.
+     */
+    public function test_it_parses_a_real_provider_signal(): void
+    {
+        $result = $this->parser->parse(<<<'MSG'
+        FIRA SMART DESK
+        AI-Powered Trading Signal
+
+        📊 MACRO OUTLOOK: B (BEARISH)
+        ⚪ FA | 🔴 Pred | ⚪ Sent
+        💡 Macro sederhana — berhati-hati
+
+        📈 ANALISIS TEKNIKAL
+        🔴 XAU/USD | SELL | M30
+        Confidence: 84%
+
+        Entry: 4633.96 - 4637.96
+        💡 Set Sell Limit order di best entry
+
+        Targets:
+        TP1: 4626.46
+        TP2: 4618.96
+        TP3: 4611.46
+
+        Stop Loss: 4642.96
+        R:R Ratio: 1:3.8
+
+        📊 MTF Check:
+        SELL M30 ✅
+        SELL H1 ✅
+        BUY H4 ⚠️
+        🟡 Penjajaran separa
+
+        TAYOR (Trade At Your Own Risk)
+        MSG);
+
+        $this->assertTrue($result['ok'], $result['error'] ?? '');
+        $this->assertSame('XAUUSD', $result['symbol']);
+        $this->assertSame('sell', $result['direction']);
+        $this->assertSame(4642.96, $result['sl_price']);
+        $this->assertSame([4626.46, 4618.96, 4611.46], $result['tp_prices']);
+    }
+
+    /**
+     * The slash split the pair, and 'XAU' alone classifies as a metal - so this would have
+     * traded a symbol that does not exist.
+     */
+    public function test_a_slash_separated_pair_is_one_instrument(): void
+    {
+        $this->assertSame('XAUUSD', $this->parser->parse("XAU/USD SELL
+SL 4642
+TP 4620")['symbol']);
+        $this->assertSame('EURUSD', $this->parser->parse("EUR/USD BUY
+SL 1.08
+TP 1.09")['symbol']);
+    }
+
+    /**
+     * A confluence section being honest about a disagreement must not refuse the signal.
+     */
+    public function test_a_multi_timeframe_checklist_does_not_make_the_direction_ambiguous(): void
+    {
+        $result = $this->parser->parse(<<<'MSG'
+        XAUUSD | SELL | M30
+        Stop Loss: 4642.96
+        TP1: 4626.46
+        MTF Check:
+        SELL M30
+        SELL H1
+        BUY H4
+        MSG);
+
+        $this->assertTrue($result['ok'], $result['error'] ?? '');
+        $this->assertSame('sell', $result['direction'], 'The direction beside the instrument is the instruction.');
+    }
+
+    /**
+     * A limit order fills at the better price, and taking the wrong end of the zone
+     * misstates the trade badly enough to flip the verdict.
+     */
+    public function test_the_entry_zone_end_depends_on_the_direction(): void
+    {
+        // Sell: fills at the high end. Risk 5.00 against 11.50 reward, not 9.00 against 7.50.
+        $sell = $this->parser->parse("XAUUSD SELL
+Entry: 4633.96 - 4637.96
+Stop Loss: 4642.96
+TP1: 4626.46");
+
+        $this->assertSame(4637.96, $sell['entry_price']);
+        $this->assertSame(4633.96, $sell['entry_zone_high']);
+
+        $risk = abs($sell['entry_price'] - $sell['sl_price']);
+        $reward = abs($sell['tp_prices'][0] - $sell['entry_price']);
+        $this->assertEqualsWithDelta(2.30, $reward / $risk, 0.01, 'The wrong end reports 0.83:1 and gets declined.');
+
+        // Buy: fills at the low end.
+        $buy = $this->parser->parse("XAUUSD BUY
+Entry: 2650 - 2654
+Stop Loss: 2640
+TP1: 2680");
+        $this->assertSame(2650.0, $buy['entry_price']);
+    }
 }

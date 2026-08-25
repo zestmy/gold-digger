@@ -43,7 +43,7 @@ final class SignalParser
      *     symbol: string|null,
      *     direction: string|null,
      *     entry_price: float|null,
-     *     entry_zone_high: float|null,
+     *     entry_zone_high: float|null,  The far side of an entry zone, whichever end that is
      *     sl_price: float|null,
      *     tp_prices: array<int, float>,
      * }
@@ -58,7 +58,7 @@ final class SignalParser
             return $this->fail('No instrument found in the message.');
         }
 
-        $direction = $this->direction($text);
+        $direction = $this->direction($text, $symbol);
 
         if ($direction === null) {
             return $this->fail('No direction found, or both buy and sell appear.');
@@ -72,7 +72,7 @@ final class SignalParser
         }
 
         $tps = $this->takeProfits($text);
-        [$entry, $zoneHigh] = $this->entry($text);
+        [$entry, $zoneHigh] = $this->entry($text, $direction);
 
         // A stop on the wrong side of entry means the message was misread, not that the
         // provider meant it. Executing this would place the stop as a target.
@@ -114,6 +114,11 @@ final class SignalParser
         // Providers separate labels from values with anything at all.
         $text = str_replace(['：', '➡', '→', '|', '•'], ' : ', $text);
 
+        // XAU/USD, EUR/USD -> XAUUSD, EURUSD. Only three-by-three, so 'S/L' and 'R:R' are
+        // untouched. Without this the slash splits the pair and 'XAU' alone classifies as
+        // a metal, which would have traded a symbol that does not exist.
+        $text = preg_replace('/\b([A-Z]{3})\s*\/\s*([A-Z]{3})\b/', '$1$2', $text) ?? $text;
+
         return preg_replace('/[ \t]+/', ' ', $text) ?? $text;
     }
 
@@ -141,13 +146,40 @@ final class SignalParser
         return null;
     }
 
-    private function direction(string $text): ?string
+    private function direction(string $text, string $symbol): ?string
+    {
+        // The direction stated beside the instrument wins.
+        //
+        // Providers increasingly append a multi-timeframe checklist - "SELL M30, SELL H1,
+        // BUY H4" - which mentions both words about a signal that is not remotely
+        // ambiguous. Reading the whole message refuses those, and refusing a clear signal
+        // because its own confluence section is honest about a disagreement is the wrong
+        // answer for the right reason.
+        //
+        // The headline line is the instruction; everything after it is commentary.
+        foreach (explode("\n", $text) as $line) {
+            if (! str_contains($line, $symbol)) {
+                continue;
+            }
+
+            $lineDirection = $this->unambiguousDirection($line);
+
+            if ($lineDirection !== null) {
+                return $lineDirection;
+            }
+        }
+
+        // No direction beside the symbol, so fall back to the whole message - where both,
+        // or neither, is still genuinely ambiguous. "BUY above 2650, SELL below" is a
+        // plan, and picking one of them invents an instruction.
+        return $this->unambiguousDirection($text);
+    }
+
+    private function unambiguousDirection(string $text): ?string
     {
         $buy = $this->mentions($text, self::BUY_WORDS);
         $sell = $this->mentions($text, self::SELL_WORDS);
 
-        // Both, or neither, is ambiguous. "BUY above 2650, SELL below" is a plan, not a
-        // signal, and picking one of them is inventing an instruction.
         if ($buy === $sell) {
             return null;
         }
@@ -172,15 +204,23 @@ final class SignalParser
     /**
      * @return array{0: float|null, 1: float|null} entry, and the far side of a zone
      */
-    private function entry(string $text): array
+    private function entry(string $text, ?string $direction): array
     {
-        // A zone: "ENTRY 2650 - 2652". Both sides are kept; the far side is what decides
-        // whether price has already run past the signal.
+        // A zone: "ENTRY 4633.96 - 4637.96". Which end is the entry depends on the
+        // direction, because a limit order fills at the better price: a buy limit buys the
+        // low end, a sell limit sells the high end.
+        //
+        // Taking the wrong end is not a rounding error. On the sample this was written
+        // against - sell, zone 4633.96-4637.96, stop 4642.96, first target 4626.46 - the
+        // low end reports risk 9.00 against reward 7.50, a 0.83:1 trade the reviewer would
+        // decline. The high end reports 5.00 against 11.50, which is 2.30:1. Same message,
+        // opposite verdict.
         if (preg_match('/\b(?:ENTRY|ENTER|BUY|SELL|@)\D{0,12}?([0-9]+(?:\.[0-9]+)?)\s*[-–]\s*([0-9]+(?:\.[0-9]+)?)/', $text, $m) === 1) {
-            $a = (float) $m[1];
-            $b = (float) $m[2];
+            $low = min((float) $m[1], (float) $m[2]);
+            $high = max((float) $m[1], (float) $m[2]);
 
-            return [min($a, $b), max($a, $b)];
+            // The other end is kept so the far side of the zone is still knowable.
+            return $direction === 'sell' ? [$high, $low] : [$low, $high];
         }
 
         $entry = $this->firstNumberAfter($text, ['ENTRY PRICE', 'ENTRY', 'ENTER', 'PRICE', '@']);
