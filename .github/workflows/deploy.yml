@@ -129,6 +129,12 @@ jobs:
             # rather than taking them unprotected in the meantime.
             php artisan news:fetch || true
 
+            # Workers hold code in memory for the life of the process, so one started
+            # before a deploy keeps running the old classes until it recycles. This tells
+            # them to finish the current job and exit; systemd restarts them on the new
+            # code. Harmless when no worker is running.
+            php artisan queue:restart || true
+
             chown -R www-data:www-data /var/www/gold-digger
 
             # Derived, not hardcoded. This said php8.3-fpm while scripts/server-setup.sh

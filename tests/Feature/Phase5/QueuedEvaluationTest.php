@@ -363,15 +363,56 @@ class QueuedEvaluationTest extends TestCase
     }
 
     /**
-     * With evaluation inline there is no worker to be missing, and an alert about one would be
-     * noise on every installation that never turned the switch on.
+     * A stale job is a stale job, whatever it was going to do.
+     *
+     * This used to assert silence when evaluation is inline, on the reasoning that there
+     * was then no worker to be missing. That stopped being true when the Improver page
+     * began queueing runs: with the old gate a dead worker left improvement runs at
+     * `queued` for ever with nothing saying why - the same silent failure this check
+     * exists to prevent, just relocated.
+     *
+     * It warns rather than pages, because nothing that trades depends on it. Levelling a
+     * stuck backtest the same as a stalled entry is how a critical alert stops meaning
+     * anything.
      */
-    public function test_no_stall_is_reported_when_evaluation_is_inline(): void
+    public function test_a_stalled_queue_warns_even_when_evaluation_is_inline(): void
     {
         config()->set('queue.default', 'database');
         config()->set('trading.queue_evaluation', false);
 
         $this->stubJob(3600);
+
+        app(HealthMonitor::class)->sweep();
+
+        $alert = Alert::where('key', 'queue_stalled')->first();
+
+        $this->assertNotNull($alert);
+        $this->assertSame('warning', $alert->level);
+        $this->assertStringContainsString('improvement', $alert->body);
+    }
+
+    /**
+     * With evaluation queued it is a trading fault, and reads as one.
+     */
+    public function test_a_stalled_queue_is_critical_when_it_carries_trading_decisions(): void
+    {
+        config()->set('queue.default', 'database');
+        config()->set('trading.queue_evaluation', true);
+
+        $this->stubJob(3600);
+
+        app(HealthMonitor::class)->sweep();
+
+        $this->assertSame('critical', Alert::where('key', 'queue_stalled')->first()?->level);
+    }
+
+    /**
+     * An installation that queues nothing has no jobs, so this cannot be noise.
+     */
+    public function test_an_idle_queue_with_no_jobs_reports_nothing(): void
+    {
+        config()->set('queue.default', 'database');
+        config()->set('trading.queue_evaluation', false);
 
         app(HealthMonitor::class)->sweep();
 

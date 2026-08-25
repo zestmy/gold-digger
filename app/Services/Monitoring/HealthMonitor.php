@@ -353,10 +353,6 @@ final class HealthMonitor
      */
     private function queueStalled(): ?array
     {
-        if (! config('trading.queue_evaluation')) {
-            return null;
-        }
-
         // The database queue driver is the one this deployment configures. Anything else
         // keeps its backlog somewhere this cannot see, so it is not claimed to be healthy -
         // it is simply not checked.
@@ -364,8 +360,17 @@ final class HealthMonitor
             return null;
         }
 
+        // Every queue, not just the strategy one, and regardless of whether queued
+        // evaluation is switched on.
+        //
+        // This used to fire only with `trading.queue_evaluation` enabled, because that was
+        // the only thing that needed a worker. The Improver page now dispatches to the
+        // default queue too - so with the old gate, a dead worker meant improvement runs
+        // sat at `queued` for ever with nothing saying why, which is precisely the silent
+        // failure this check was written to prevent, just relocated.
+        //
+        // A stale job is a stale job whatever it was going to do.
         $oldest = DB::table('jobs')
-            ->where('queue', config('trading.queue', 'strategy'))
             ->whereNull('reserved_at')
             ->min('available_at');
 
@@ -380,19 +385,30 @@ final class HealthMonitor
             return null;
         }
 
-        $depth = DB::table('jobs')->where('queue', config('trading.queue', 'strategy'))->count();
+        $depth = DB::table('jobs')->count();
+
+        // Critical only when the queue is carrying trading decisions. Otherwise the
+        // backlog is a stuck backtest or a stuck report - worth knowing about, not worth
+        // waking anybody up for, and levelling it the same way is how a critical alert
+        // stops meaning anything.
+        $carriesTrading = (bool) config('trading.queue_evaluation');
 
         return [
             'key' => 'queue_stalled',
-            'level' => 'critical',
-            'title' => 'Strategy evaluation is queued and nothing is running it',
+            'level' => $carriesTrading ? 'critical' : 'warning',
+            'title' => $carriesTrading
+                ? 'Strategy evaluation is queued and nothing is running it'
+                : 'Queued work is not being processed',
             'body' => sprintf(
-                '%d job(s) waiting, the oldest for %d minutes. Bars are arriving and being stored, '
-                .'but no strategy is being evaluated - so no entries and no position management. '
-                .'Start a worker: php artisan queue:work --queue=%s',
+                '%d job(s) waiting, the oldest for %d minutes. %sStart a worker: '
+                .'systemctl start gold-digger-worker (or php artisan queue:work)',
                 $depth,
                 (int) round($waitingFor / 60),
-                config('trading.queue', 'strategy'),
+                $carriesTrading
+                    ? 'Bars are arriving and being stored, but no strategy is being evaluated - '
+                      .'so no entries and no position management. '
+                    : 'Nothing that trades depends on this, but anything queued from the dashboard '
+                      .'- a strategy improvement run, for instance - will never finish. ',
             ),
             'context' => ['depth' => $depth, 'oldest_wait_seconds' => $waitingFor],
         ];

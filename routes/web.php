@@ -8,6 +8,7 @@ use App\Livewire\Pages\LiveTrades;
 use App\Livewire\Pages\Settings;
 use App\Livewire\Pages\Signals;
 use App\Livewire\Pages\Strategies;
+use App\Livewire\Pages\StrategyImprover;
 use App\Livewire\Pages\TradeHistory;
 use Illuminate\Support\Facades\Route;
 
@@ -49,6 +50,7 @@ Route::middleware(['auth'])->group(function () {
 
     // Configuration
     Route::get('/strategies', Strategies::class)->name('strategies');
+    Route::get('/strategies/improve', StrategyImprover::class)->name('strategies.improve');
     Route::get('/broker-accounts', BrokerAccounts::class)->name('broker-accounts');
 
     // Analytics & Monitoring
