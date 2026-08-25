@@ -109,7 +109,7 @@ class SignalParserTest extends TestCase
     public function test_a_message_naming_both_directions_is_refused(): void
     {
         // "BUY above, SELL below" is a plan, not a signal. Picking one invents an order.
-        $result = $this->parser->parse("XAUUSD: BUY above 2655, SELL below 2645. SL 2650");
+        $result = $this->parser->parse('XAUUSD: BUY above 2655, SELL below 2645. SL 2650');
 
         $this->assertFalse($result['ok']);
         $this->assertStringContainsString('direction', strtolower($result['error']));
@@ -117,12 +117,12 @@ class SignalParserTest extends TestCase
 
     public function test_a_message_with_no_direction_is_refused(): void
     {
-        $this->assertFalse($this->parser->parse("XAUUSD looking interesting here, SL 2645")['ok']);
+        $this->assertFalse($this->parser->parse('XAUUSD looking interesting here, SL 2645')['ok']);
     }
 
     public function test_a_message_with_no_instrument_is_refused(): void
     {
-        $this->assertFalse($this->parser->parse("BUY NOW! SL 2645 TP 2660")['ok']);
+        $this->assertFalse($this->parser->parse('BUY NOW! SL 2645 TP 2660')['ok']);
     }
 
     /**
@@ -216,12 +216,12 @@ class SignalParserTest extends TestCase
      */
     public function test_a_slash_separated_pair_is_one_instrument(): void
     {
-        $this->assertSame('XAUUSD', $this->parser->parse("XAU/USD SELL
+        $this->assertSame('XAUUSD', $this->parser->parse('XAU/USD SELL
 SL 4642
-TP 4620")['symbol']);
-        $this->assertSame('EURUSD', $this->parser->parse("EUR/USD BUY
+TP 4620')['symbol']);
+        $this->assertSame('EURUSD', $this->parser->parse('EUR/USD BUY
 SL 1.08
-TP 1.09")['symbol']);
+TP 1.09')['symbol']);
     }
 
     /**
@@ -250,10 +250,10 @@ TP 1.09")['symbol']);
     public function test_the_entry_zone_end_depends_on_the_direction(): void
     {
         // Sell: fills at the high end. Risk 5.00 against 11.50 reward, not 9.00 against 7.50.
-        $sell = $this->parser->parse("XAUUSD SELL
+        $sell = $this->parser->parse('XAUUSD SELL
 Entry: 4633.96 - 4637.96
 Stop Loss: 4642.96
-TP1: 4626.46");
+TP1: 4626.46');
 
         $this->assertSame(4637.96, $sell['entry_price']);
         $this->assertSame(4633.96, $sell['entry_zone_high']);
@@ -263,10 +263,10 @@ TP1: 4626.46");
         $this->assertEqualsWithDelta(2.30, $reward / $risk, 0.01, 'The wrong end reports 0.83:1 and gets declined.');
 
         // Buy: fills at the low end.
-        $buy = $this->parser->parse("XAUUSD BUY
+        $buy = $this->parser->parse('XAUUSD BUY
 Entry: 2650 - 2654
 Stop Loss: 2640
-TP1: 2680");
+TP1: 2680');
         $this->assertSame(2650.0, $buy['entry_price']);
     }
 }

@@ -2,9 +2,11 @@
 
 namespace App\Services\Telegram;
 
+use App\Models\BotHeartbeat;
 use App\Models\BotSettings;
 use App\Models\Candle;
 use App\Models\Strategy;
+use App\Models\SymbolSpec;
 use App\Models\TelegramSignal;
 use App\Services\Indicators\Indicators;
 
@@ -183,14 +185,14 @@ final class SignalPlan
      */
     private function pipSize(TelegramSignal $signal): ?float
     {
-        $spec = \App\Models\SymbolSpec::where('symbol', $signal->symbol)->first()
-            ?? \App\Models\SymbolSpec::where('base_symbol', $signal->symbol)->first();
+        $spec = SymbolSpec::where('symbol', $signal->symbol)->first()
+            ?? SymbolSpec::where('base_symbol', $signal->symbol)->first();
 
         if ($spec?->pip_size !== null) {
             return (float) $spec->pip_size;
         }
 
-        $heartbeat = \App\Models\BotHeartbeat::where('user_id', $signal->user_id)
+        $heartbeat = BotHeartbeat::where('user_id', $signal->user_id)
             ->orderByDesc('last_seen_at')
             ->first();
 

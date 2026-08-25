@@ -117,11 +117,20 @@ class CollectorController extends Controller
             'messages' => ['required', 'array', 'max:'.self::MAX_MESSAGES],
             'messages.*.chat_id' => ['required', 'string', 'max:64'],
             'messages.*.message_id' => ['required', 'integer'],
-            'messages.*.text' => ['required', 'string'],
+            // A screenshot with no caption is the common case, so the text may be empty -
+            // but one of text or image has to be present or there is nothing to record.
+            // Nullable as well as present: Laravel's ConvertEmptyStringsToNull middleware
+            // turns an absent caption into null before validation sees it, and a screenshot
+            // with no caption is the common case rather than the odd one.
+            'messages.*.text' => ['present', 'nullable', 'string'],
             'messages.*.chat_title' => ['nullable', 'string', 'max:255'],
             'messages.*.username' => ['nullable', 'string', 'max:64'],
             'messages.*.date' => ['nullable', 'integer'],
             'messages.*.reply_to_message_id' => ['nullable', 'integer'],
+            // Base64, inline. A picture that only has to travel one hop should not be
+            // published to a URL to be read.
+            'messages.*.image' => ['nullable', 'string', 'max:8000000'],
+            'messages.*.image_mime' => ['nullable', 'string', 'max:40'],
         ]);
 
         $stored = 0;
@@ -136,7 +145,7 @@ class CollectorController extends Controller
                 'chat_id' => (string) $message['chat_id'],
                 'chat_title' => $message['chat_title'] ?? null,
                 'username' => $message['username'] ?? null,
-                'text' => $message['text'],
+                'text' => (string) ($message['text'] ?? ''),
                 'posted_at' => isset($message['date'])
                     ? Carbon::createFromTimestamp((int) $message['date'])
                     : null,
@@ -144,6 +153,10 @@ class CollectorController extends Controller
                 'reply_to_message_id' => isset($message['reply_to_message_id'])
                     ? (string) $message['reply_to_message_id']
                     : null,
+                'image' => isset($message['image'])
+                    ? (base64_decode((string) $message['image'], true) ?: null)
+                    : null,
+                'image_mime' => $message['image_mime'] ?? 'image/jpeg',
             ]);
 
             $stored++;

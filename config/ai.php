@@ -39,6 +39,12 @@ return [
     | in wasted backtest time, so it defaults to the same capable model rather than a
     | cheaper one.
     */
+    /*
+    | Reading a signal off a screenshot. A separate key because transcription and
+    | judgement are different jobs and the cheaper model is often better at the first.
+    */
+    'vision_model' => env('OPENROUTER_VISION_MODEL', 'anthropic/claude-sonnet-4.5'),
+
     'proposer_model' => env('OPENROUTER_PROPOSER_MODEL', 'anthropic/claude-sonnet-4.5'),
 
     /*

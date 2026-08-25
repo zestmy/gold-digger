@@ -5,6 +5,7 @@ namespace App\Services\Telegram;
 use App\Models\TelegramChannel;
 use App\Models\TelegramSignal;
 use App\Models\User;
+use App\Services\Monitoring\AlertNotifier;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -82,7 +83,11 @@ final class SignalIngest
                     'limit' => 100,
                     // Only what could carry a signal. Ignoring the rest server-side keeps
                     // the confirmation semantics simple.
-                    'allowed_updates' => json_encode(['message', 'channel_post']),
+                    // Edits included: a provider correcting an entry is not a new message
+                    // and arrives only on these update types.
+                    'allowed_updates' => json_encode([
+                        'message', 'channel_post', 'edited_message', 'edited_channel_post',
+                    ]),
                 ]));
         } catch (Throwable $e) {
             return $this->failure('Telegram fetch failed: '.$e->getMessage());
@@ -107,7 +112,11 @@ final class SignalIngest
             $updateId = (int) ($update['update_id'] ?? 0);
             $highest = max($highest, $updateId);
 
-            $message = $update['message'] ?? $update['channel_post'] ?? null;
+            $message = $update['message']
+                ?? $update['channel_post']
+                ?? $update['edited_message']
+                ?? $update['edited_channel_post']
+                ?? null;
             $text = $message['text'] ?? $message['caption'] ?? null;
 
             if (! is_array($message) || ! is_string($text) || trim($text) === '') {
@@ -116,7 +125,12 @@ final class SignalIngest
 
             $result = $this->record([
                 'source' => TelegramChannel::SOURCE_BOT,
-                'external_id' => "bot:{$updateId}",
+                // Keyed on the message rather than the update, because an edit arrives as
+                // a new update id for a message we already hold. Keying on the update
+                // would turn every correction into a second signal.
+                'external_id' => isset($message['message_id'])
+                    ? "bot:{$message['chat']['id']}:{$message['message_id']}"
+                    : "bot:{$updateId}",
                 'chat_id' => (string) ($message['chat']['id'] ?? ''),
                 'chat_title' => $message['chat']['title']
                     ?? (trim(($message['chat']['first_name'] ?? '').' '.($message['chat']['last_name'] ?? '')) ?: null),
@@ -156,6 +170,10 @@ final class SignalIngest
     {
         $operator = (int) User::orderBy('id')->value('id');
 
+        // Already seen? Then this is either a retry or an edit, and they need different
+        // answers - see editOf().
+        $existing = TelegramSignal::where('external_id', $message['external_id'])->first();
+
         $channel = $message['chat_id'] === ''
             ? null
             : TelegramChannel::register(
@@ -167,6 +185,10 @@ final class SignalIngest
             );
 
         $user = $this->traderFor($channel, $message['chat_id']);
+
+        if ($existing !== null) {
+            return $this->editOf($existing, $message, $channel);
+        }
 
         $replyTo = $message['reply_to_message_id'] ?? null;
         $parent = $this->parentFor($message['source'], $message['chat_id'], $replyTo);
@@ -222,12 +244,16 @@ final class SignalIngest
             return ['ignored' => false, 'parsed' => true, 'signal' => $signal];
         }
 
-        $parsed = $this->parser->parse($message['text']);
+        $reading = $this->readFor($message);
+
+        $parsed = $reading['parsed'];
 
         $signal = TelegramSignal::updateOrCreate(
             ['external_id' => $message['external_id']],
             $attributes + [
                 'user_id' => $user->id,
+                'from_image' => $reading['from_image'],
+                'transcribed_text' => $reading['transcription'],
                 'parse_status' => $parsed['ok'] ? TelegramSignal::PARSE_OK : TelegramSignal::PARSE_FAILED,
                 'parse_error' => $parsed['error'],
                 'symbol' => $parsed['symbol'],
@@ -264,6 +290,132 @@ final class SignalIngest
             ->where('chat_id', $chatId)
             ->where('external_id', "tg:{$chatId}:{$replyToId}")
             ->first();
+    }
+
+    /**
+     * Parse the message, falling back to the picture it carried.
+     *
+     * Text first, always. A caption that parses is a signal the provider wrote out, and
+     * reading digits off an image when somebody has already typed them is strictly worse:
+     * transcription can be confidently wrong in a way text cannot.
+     *
+     * The image is only consulted when the text does not yield a signal - which is the case
+     * that was previously recorded as unparsed and left there.
+     *
+     * @param  array<string, mixed>  $message
+     * @return array{parsed: array<string, mixed>, from_image: bool, transcription: string|null}
+     */
+    private function readFor(array $message): array
+    {
+        $parsed = $this->parser->parse($message['text']);
+
+        $image = $message['image'] ?? null;
+
+        if ($parsed['ok'] || ! is_string($image) || $image === '') {
+            return ['parsed' => $parsed, 'from_image' => false, 'transcription' => null];
+        }
+
+        $read = app(ImageSignalReader::class)->read(
+            $image,
+            (string) ($message['image_mime'] ?? 'image/jpeg'),
+            $message['text'],
+        );
+
+        if (! $read['ok']) {
+            // The refusal replaces the text parser's complaint, because "no instrument
+            // found" is a misleading thing to say about a message that was a picture.
+            return [
+                'parsed' => ['ok' => false, 'error' => $read['error']] + $parsed,
+                'from_image' => true,
+                'transcription' => $read['text'],
+            ];
+        }
+
+        return ['parsed' => $read['parsed'], 'from_image' => true, 'transcription' => $read['text']];
+    }
+
+    /**
+     * A message we already hold, arriving again.
+     *
+     * Identical content is a retry and changes nothing. Different content is the provider
+     * editing themselves, and what to do about that depends entirely on whether the signal
+     * has been acted on:
+     *
+     * Untouched - the corrected message is simply the message. Re-parsed and sent back for
+     * review as if it had arrived this way, because it effectively did.
+     *
+     * Already queued or filled - the levels that matter are the ones the order carries and
+     * they cannot be un-sent. The original text is preserved so the record still shows what
+     * was acted on, the parsed columns are left alone so the analytics keep grading the
+     * trade against the levels it was actually taken at, and the new text is stored beside
+     * them. Silently rewriting those columns would not have caused a bad trade; it would
+     * have caused a bad measurement, which is harder to notice and lasts longer.
+     *
+     * @param  array<string, mixed>  $message
+     * @return array{ignored: bool, parsed: bool, signal: TelegramSignal, edited?: bool}
+     */
+    private function editOf(TelegramSignal $signal, array $message, ?TelegramChannel $channel): array
+    {
+        $text = mb_substr($message['text'], 0, 4000);
+
+        if ($text === $signal->raw_text) {
+            // A retry. The whole point of external_id being unique.
+            return ['ignored' => false, 'parsed' => $signal->parse_status === TelegramSignal::PARSE_OK, 'signal' => $signal];
+        }
+
+        $acted = $signal->execution_status !== TelegramSignal::EXEC_NONE;
+
+        $attributes = [
+            'raw_text' => $text,
+            'original_text' => $signal->original_text ?? $signal->raw_text,
+            'edited_at' => now(),
+            'edit_count' => $signal->edit_count + 1,
+        ];
+
+        if ($acted || $signal->isFollowUp()) {
+            $signal->update($attributes);
+
+            if ($acted) {
+                // Loud on purpose. A provider correcting a signal you are already in is a
+                // thing to look at, and it is the one case here that nothing downstream
+                // can act on by itself: the order has gone.
+                app(AlertNotifier::class)->announce(
+                    sprintf('Provider edited a signal already acted on (%s)', $signal->symbol ?? 'unknown'),
+                    implode('
+', [
+                        'Was: '.mb_substr((string) $signal->original_text, 0, 300),
+                        '',
+                        'Now: '.mb_substr($text, 0, 300),
+                        '',
+                        'The order carries the original levels and they cannot be un-sent. Check the position.',
+                    ]),
+                    '🟠',
+                    ['telegram_signal_id' => $signal->id, 'edit_count' => $signal->edit_count + 1],
+                );
+            }
+
+            return ['ignored' => false, 'parsed' => true, 'signal' => $signal, 'edited' => true];
+        }
+
+        $parsed = $this->parser->parse($text);
+
+        $signal->update($attributes + [
+            'parse_status' => $parsed['ok'] ? TelegramSignal::PARSE_OK : TelegramSignal::PARSE_FAILED,
+            'parse_error' => $parsed['error'],
+            'symbol' => $parsed['symbol'],
+            'direction' => $parsed['direction'],
+            'entry_price' => $parsed['entry_price'],
+            'entry_zone_high' => $parsed['entry_zone_high'],
+            'sl_price' => $parsed['sl_price'],
+            'tp_prices' => $parsed['tp_prices'] ?: null,
+            // Back to the start of the pipeline. An approval was of the old text.
+            'review_status' => $parsed['ok'] ? TelegramSignal::REVIEW_PENDING : TelegramSignal::REVIEW_SKIPPED,
+            'review_reasoning' => null,
+            'review_confidence' => null,
+            'reviewed_at' => null,
+        ]);
+
+        return ['ignored' => false, 'parsed' => $parsed['ok'], 'signal' => $signal, 'edited' => true];
     }
 
     /**

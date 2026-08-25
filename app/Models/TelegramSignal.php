@@ -80,7 +80,8 @@ class TelegramSignal extends Model
 
     protected $fillable = [
         'user_id', 'source', 'kind', 'external_id', 'reply_to_message_id', 'parent_signal_id',
-        'chat_title', 'chat_id', 'telegram_channel_id', 'raw_text', 'posted_at',
+        'chat_title', 'chat_id', 'telegram_channel_id', 'raw_text', 'original_text', 'transcribed_text', 'from_image',
+        'posted_at', 'edited_at', 'edit_count',
         'parse_status', 'parse_error', 'symbol', 'direction', 'entry_price', 'entry_zone_high',
         'sl_price', 'tp_prices',
         'follow_up_action', 'follow_up_fraction', 'follow_up_price',
@@ -92,6 +93,8 @@ class TelegramSignal extends Model
     {
         return [
             'posted_at' => 'datetime',
+            'edited_at' => 'datetime',
+            'from_image' => 'boolean',
             'reviewed_at' => 'datetime',
             'tp_prices' => 'array',
             'entry_price' => 'float',

@@ -6,6 +6,7 @@ use App\Models\BotHeartbeat;
 use App\Models\BotSettings;
 use App\Models\BrokerAccount;
 use App\Models\Candle;
+use App\Models\Strategy;
 use App\Models\SymbolSpec;
 use App\Models\TelegramSignal;
 use App\Models\Trade;
@@ -65,7 +66,7 @@ class SignalExecutorTest extends TestCase
         SymbolSpec::updateOrCreate(
             ['broker_account_id' => $this->account->id, 'symbol' => 'XAUUSD'],
             ['base_symbol' => 'XAUUSD',
-             'pip_size' => 0.10, 'digits' => 2, 'pip_value_per_lot' => 10.0, 'volume_min' => 0.01, 'volume_step' => 0.01],
+                'pip_size' => 0.10, 'digits' => 2, 'pip_value_per_lot' => 10.0, 'volume_min' => 0.01, 'volume_step' => 0.01],
         );
 
         BotHeartbeat::create([
@@ -283,7 +284,7 @@ class SignalExecutorTest extends TestCase
     {
         Trade::create([
             'user_id' => $this->user->id, 'broker_account_id' => $this->account->id,
-            'strategy_id' => \App\Models\Strategy::where('user_id', $this->user->id)->value('id'),
+            'strategy_id' => Strategy::where('user_id', $this->user->id)->value('id'),
             'origin' => AiFund::ORIGIN, 'symbol' => 'XAUUSD', 'direction' => 'buy',
             'initial_lot_size' => 0.01, 'remaining_lot_size' => 0.01, 'entry_price' => 2600,
             'status' => 'closed', 'net_pnl_money' => -500.00,
@@ -434,7 +435,7 @@ class SignalExecutorTest extends TestCase
         ]));
         $this->assertTrue($r['ok'], $r['note']);
 
-        $columns = explode("	", TradeCommand::firstOrFail()->toWireLine());
+        $columns = explode('	', TradeCommand::firstOrFail()->toWireLine());
 
         $this->assertCount(count(TradeCommand::WIRE_COLUMNS), $columns);
         $this->assertSame('open_pending', $columns[1]);

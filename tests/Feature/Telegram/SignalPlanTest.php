@@ -55,7 +55,7 @@ class SignalPlanTest extends TestCase
         SymbolSpec::updateOrCreate(
             ['broker_account_id' => $this->account->id, 'symbol' => 'XAUUSD'],
             ['base_symbol' => 'XAUUSD', 'pip_size' => 0.10, 'digits' => 2,
-             'pip_value_per_lot' => 10.0, 'volume_min' => 0.01, 'volume_step' => 0.01],
+                'pip_value_per_lot' => 10.0, 'volume_min' => 0.01, 'volume_step' => 0.01],
         );
 
         // A steady 4-wide range, so ATR is a round number to reason about.

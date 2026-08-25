@@ -38,11 +38,23 @@ final class OpenRouter
      * @param  array<string, mixed>  $schema  A JSON Schema object
      * @return array{ok: bool, data: array<string, mixed>|null, error: string|null, model: string|null}
      */
-    public function structured(string $model, string $system, string $brief, string $schemaName, array $schema): array
+    /**
+     * @param  string|null  $imageDataUri  A data: URI, when the brief is about a picture
+     */
+    public function structured(string $model, string $system, string $brief, string $schemaName, array $schema, ?string $imageDataUri = null): array
     {
         if (! $this->configured()) {
             return $this->failure('No OPENROUTER_API_KEY is configured.');
         }
+
+        // Sent inline as a data URI rather than as a link. A URL would have to be publicly
+        // reachable for the model to fetch it, which means publishing somebody's chart to
+        // the open internet to read it - a needless disclosure for a picture that only has
+        // to travel one hop.
+        $userContent = $imageDataUri === null ? $brief : [
+            ['type' => 'text', 'text' => $brief],
+            ['type' => 'image_url', 'image_url' => ['url' => $imageDataUri]],
+        ];
 
         try {
             $response = Http::withToken((string) config('ai.key'))
@@ -58,7 +70,7 @@ final class OpenRouter
                     'model' => $model,
                     'messages' => [
                         ['role' => 'system', 'content' => $system],
-                        ['role' => 'user', 'content' => $brief],
+                        ['role' => 'user', 'content' => $userContent],
                     ],
                     'response_format' => [
                         'type' => 'json_schema',

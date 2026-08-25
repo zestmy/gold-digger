@@ -5,6 +5,7 @@ namespace Tests\Feature\Telegram;
 use App\Models\BotSettings;
 use App\Models\BrokerAccount;
 use App\Models\Candle;
+use App\Models\Strategy;
 use App\Models\TelegramSignal;
 use App\Models\Trade;
 use App\Models\User;
@@ -141,7 +142,7 @@ class SignalReviewerTest extends TestCase
     {
         Trade::create([
             'user_id' => $this->user->id, 'broker_account_id' => $this->account->id,
-            'strategy_id' => \App\Models\Strategy::where('user_id', $this->user->id)->value('id'),
+            'strategy_id' => Strategy::where('user_id', $this->user->id)->value('id'),
             'origin' => 'ai', 'symbol' => 'XAUUSD', 'direction' => 'buy',
             'initial_lot_size' => 0.01, 'remaining_lot_size' => 0.01, 'entry_price' => 2600,
             'status' => 'closed', 'net_pnl_money' => -500.00,

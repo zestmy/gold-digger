@@ -39,6 +39,7 @@ Configuration is by environment variable; see .env.example.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import sys
@@ -65,6 +66,10 @@ REFRESH_SECONDS = int(os.environ.get("GD_REFRESH_SECONDS", "60"))
 # is not a trade, and forwarding a channel's entire history would fill the pipeline with
 # things that can only ever be declined.
 BACKFILL_LIMIT = int(os.environ.get("GD_BACKFILL_LIMIT", "20"))
+
+# Beyond this a picture is a chart to look at rather than a signal card, and forwarding it
+# costs more than it can be worth.
+MAX_IMAGE_BYTES = int(os.environ.get("GD_MAX_IMAGE_BYTES", "4000000"))
 
 
 def require_config() -> None:
@@ -217,7 +222,20 @@ async def forward(tg: TelegramClient, state: dict, chat_id: str, messages) -> in
     for message in messages:
         text = message.message or ""
 
-        if not text.strip():
+        # A chart screenshot with the levels written on it, and often no caption at all.
+        # Downloaded here rather than linked: the dashboard reads it inline, so the picture
+        # never has to be published anywhere to be read.
+        image = None
+
+        if getattr(message, "photo", None) is not None:
+            try:
+                blob = await message.download_media(file=bytes)
+                if blob and len(blob) <= MAX_IMAGE_BYTES:
+                    image = base64.b64encode(blob).decode()
+            except Exception as error:  # noqa: BLE001 - a bad image must not stop the batch
+                print(f"[{chat_id}] could not download image: {error}")
+
+        if not text.strip() and image is None:
             continue
 
         entity = await message.get_chat()
@@ -234,6 +252,8 @@ async def forward(tg: TelegramClient, state: dict, chat_id: str, messages) -> in
                 # interpretable. Without it the dashboard sees an instruction with no
                 # subject and can only record it.
                 "reply_to_message_id": reply_target(message),
+                "image": image,
+                "image_mime": "image/jpeg" if image else None,
             }
         )
 
@@ -323,6 +343,18 @@ async def cmd_run() -> None:
                 print(f"Could not reach the dashboard: {error}")
 
             await asyncio.sleep(REFRESH_SECONDS)
+
+    @tg.on(events.MessageEdited())
+    async def on_edit(event) -> None:
+        """
+        A provider correcting themselves.
+
+        Forwarded down the same path as a new message: the dashboard keys on chat plus
+        message id, so an edit updates the signal it belongs to rather than becoming a
+        second one. What it does with it depends on whether that signal has traded, which
+        is a question this has no business answering.
+        """
+        await on_message(event)
 
     @tg.on(events.NewMessage())
     async def on_message(event) -> None:

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Telegram;
 
+use App\Livewire\Pages\SignalCopier;
 use App\Models\BotHeartbeat;
 use App\Models\BotSettings;
 use App\Models\BrokerAccount;
@@ -17,6 +18,7 @@ use App\Services\Telegram\FollowUpExecutor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
@@ -302,8 +304,8 @@ class FollowUpTest extends TestCase
 
         (new FollowUpExecutor)->execute($followUp);
 
-        \Livewire\Livewire::actingAs($this->user)
-            ->test(\App\Livewire\Pages\SignalCopier::class)
+        Livewire::actingAs($this->user)
+            ->test(SignalCopier::class)
             ->assertSee('Instructions since')
             ->assertSee('Secure half')
             ->assertSee('secure partial');
@@ -316,8 +318,8 @@ class FollowUpTest extends TestCase
     {
         $this->followUp(TelegramSignal::FOLLOW_PARTIAL, fraction: 0.5);
 
-        \Livewire\Livewire::actingAs($this->user)
-            ->test(\App\Livewire\Pages\SignalCopier::class)
+        Livewire::actingAs($this->user)
+            ->test(SignalCopier::class)
             // One signal listed, not two rows.
             ->assertViewHas('signals', fn ($signals) => $signals->total() === 1);
     }

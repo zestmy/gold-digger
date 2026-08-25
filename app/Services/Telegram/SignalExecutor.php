@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Models\BotHeartbeat;
 use App\Models\BotSettings;
+use App\Models\Candle;
 use App\Models\TelegramSignal;
 use App\Models\TradeCommand;
 use App\Models\User;
@@ -169,7 +170,7 @@ final class SignalExecutor
             return false;
         }
 
-        $last = \App\Models\Candle::where('symbol', $signal->symbol)
+        $last = Candle::where('symbol', $signal->symbol)
             ->orderByDesc('open_time')
             ->value('close');
 
@@ -281,7 +282,7 @@ final class SignalExecutor
 
     private function lastPrice(TelegramSignal $signal): ?float
     {
-        $close = \App\Models\Candle::where('symbol', $signal->symbol)
+        $close = Candle::where('symbol', $signal->symbol)
             ->orderByDesc('open_time')
             ->value('close');
 
