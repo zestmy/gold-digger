@@ -93,7 +93,8 @@ class SignalIngestTest extends TestCase
 
         $this->assertSame(1, $result['ignored']);
         $this->assertSame(TelegramSignal::PARSE_FAILED, $signal->parse_status);
-        $this->assertStringContainsString('allow-listed', $signal->parse_error);
+        // Wording follows the control: the switch now lives on the channel row, not in config.
+        $this->assertStringContainsString('not enabled', $signal->parse_error);
         $this->assertSame(TelegramSignal::REVIEW_SKIPPED, $signal->review_status);
         $this->assertNull($signal->symbol, 'An un-allow-listed message must never be parsed into a tradeable signal.');
         $this->assertFalse($signal->isActionable());

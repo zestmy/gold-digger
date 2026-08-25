@@ -10,10 +10,13 @@
                 Signals captured from Telegram, parsed, reviewed, and executed against the AI fund.
             </p>
             <p class="mt-1 text-xs text-gray-500">
-                Only allow-listed chats can produce a tradeable signal &mdash; the bot is publicly
-                reachable, so a message from anywhere else is recorded and never traded. Nothing is
-                executed until you press Execute, and every gate is checked again when you do.
+                Only enabled channels can produce a tradeable signal &mdash; anything else is recorded
+                and never traded. Nothing is executed until you press Execute, and every gate is
+                checked again when you do.
             </p>
+            <a href="{{ route('signals.channels') }}" class="mt-2 inline-block text-xs text-yellow-500 hover:text-yellow-400">
+                Channels, and what each has been worth &rarr;
+            </a>
         </div>
 
         <!-- The numbers worth looking at -->
