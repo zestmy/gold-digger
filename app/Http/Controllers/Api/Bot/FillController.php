@@ -207,16 +207,30 @@ class FillController extends Controller
                 ],
             );
 
-            // Costs arrive per-close, so accumulate rather than overwrite.
-            $remaining = round((float) $trade->remaining_lot_size - (float) $data['volume'], 4);
+            // Derived from the partials, never accumulated.
+            //
+            // The partial row is keyed on the broker's deal ticket and so is idempotent;
+            // the totals were not. Any re-delivery of a deal - a retried report, or the
+            // replay the EA performs on attach - updated the row and added the money a
+            // second time. A position closed in two deals showed exactly twice its profit,
+            // and nothing about the number looked wrong.
+            //
+            // Summing what is stored is idempotent by construction, which is the only way
+            // this stays right under a protocol that is allowed to repeat itself.
+            $partials = $trade->partials()->get();
+
+            $remaining = round(
+                (float) $trade->initial_lot_size - (float) $partials->sum('closed_lot_size'),
+                4,
+            );
 
             $trade->fill([
                 'remaining_lot_size' => max($remaining, 0),
-                'gross_pnl_pips' => (float) $trade->gross_pnl_pips + (float) $data['pips_profit'],
-                'gross_pnl_money' => (float) $trade->gross_pnl_money + $gross,
-                'net_pnl_money' => (float) $trade->net_pnl_money + $gross + $commission + $swap,
-                'commission_money' => (float) $trade->commission_money + $commission,
-                'swap_money' => (float) $trade->swap_money + $swap,
+                'gross_pnl_pips' => round((float) $partials->sum('pips_profit'), 2),
+                'gross_pnl_money' => round((float) $partials->sum('gross_money_profit'), 2),
+                'net_pnl_money' => round((float) $partials->sum('net_money_profit'), 2),
+                'commission_money' => round((float) $partials->sum('commission_money'), 2),
+                'swap_money' => round((float) $partials->sum('swap_money'), 2),
             ]);
 
             if ($remaining > 0.00005) {

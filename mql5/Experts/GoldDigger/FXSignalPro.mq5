@@ -1,8 +1,8 @@
 //+------------------------------------------------------------------+
-//|                                          GoldDiggerBridge.mq5    |
-//|              Gold Digger - Laravel <-> MetaTrader 5 execution EA  |
+//|                                               FXSignalPro.mq5    |
+//|              FXSignalPro - Laravel <-> MetaTrader 5 execution EA  |
 //+------------------------------------------------------------------+
-//| Executes the trade_commands queue from the Gold Digger dashboard  |
+//| Executes the trade_commands queue from the FXSignalPro dashboard  |
 //| and reports fills, heartbeats and logs back to it.                |
 //|                                                                   |
 //| WHY AN EA RATHER THAN THE PYTHON MetaTrader5 PACKAGE?             |
@@ -25,9 +25,9 @@
 //| The chart's own symbol and timeframe are irrelevant: every        |
 //| instruction names its symbol, and all work happens on a timer.    |
 //+------------------------------------------------------------------+
-#property copyright "Gold Digger"
+#property copyright "FXSignalPro"
 #property version   "1.00"
-#property description "Executes Gold Digger dashboard commands and reports fills back."
+#property description "Executes FXSignalPro dashboard commands and reports fills back."
 
 #include <GoldDigger/GDExecutor.mqh>
 
@@ -41,7 +41,7 @@
 //| Inputs                                                            |
 //+------------------------------------------------------------------+
 input group             "Connection"
-input string   ApiBaseUrl    = "https://your-dashboard.example.com"; // Dashboard URL (must be whitelisted)
+input string   ApiBaseUrl    = "https://fxsignal.pro";               // Dashboard URL (must be whitelisted)
 input string   ApiToken      = "";                                   // Token from: php artisan bot:token
 input int      PollSeconds   = 5;                                    // Seconds between polls
 input int      HttpTimeoutMs = 4000;                                 // Per-request timeout

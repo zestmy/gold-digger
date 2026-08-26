@@ -48,6 +48,7 @@
     ];
 @endphp
 
+
 <!-- Logo -->
 <div class="flex h-16 shrink-0 items-center">
     <a href="{{ route('dashboard') }}" class="flex items-center gap-x-3">
@@ -61,48 +62,21 @@
     </a>
 </div>
 
-{{-- Two independent preferences, both in localStorage rather than on the server: they are
-     about this browser window, they have to survive a full page load without a round trip,
-     and a sidebar that reopened itself on every navigation would be worse than one that
-     never closed.
-
-     Sections start closed apart from Overview. Fourteen links open at once is a wall to
-     scan on every page; the section containing the current page is forced open, so
+{{-- Which section is open, and whether the bar is minimised, both live in localStorage:
+     they are preferences about this browser window and have to survive a full page load
+     without a round trip. The section containing the current page is forced open, so
      collapsing something can never hide where you are. --}}
-<!-- Logo -->
-<div class="flex h-16 shrink-0 items-center">
-    <a href="{{ route('dashboard') }}" class="flex items-center gap-x-3">
-        <svg class="h-8 w-8" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M4 20L8 14H24L28 20V26H4V20Z" fill="#FFD700" stroke="#DAA520" stroke-width="1"/>
-            <path d="M8 14L12 8H20L24 14H8Z" fill="#FFD700" stroke="#DAA520" stroke-width="1"/>
-            <path d="M16 6L24 14" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round"/>
-            <path d="M22 12L28 6M24 14L30 8" stroke="#6B7280" stroke-width="2" stroke-linecap="round"/>
-        </svg>
-        <span class="whitespace-nowrap text-xl font-bold text-white" x-show="!collapsed">FX<span class="text-yellow-400">SignalPro</span></span>
-    </a>
-</div>
-
-{{-- Collapsed state lives in localStorage rather than on the server: it is a preference
-     about this browser window, it has to survive a full page load without a round trip,
-     and a section that reopened itself on every navigation would be worse than one that
-     never closed. A section containing the current page is forced open, so collapsing
-     something can never hide where you are. --}}
 <nav class="flex flex-1 flex-col"
      x-data="{
-         /* Sections opened by hand. Closed is the default, so this list is what somebody
-            has deliberately expanded rather than what they have hidden. */
-         /* 'null' rather than a quoted array literal: a JSON string containing
-            quotes cannot live inside this attribute without escaping that the
-            template mangles, and a broken x-data expression takes the whole nav
-            down silently - no toggle, no sections, nothing to click. */
-         opened: JSON.parse(localStorage.getItem('gd-nav-open') || 'null') || ['Overview'],
+         /* One section at a time. Five open at once is the wall this replaced, and a
+            list that keeps growing as you explore it never settles. Stored as a single
+            name rather than a set, because that is what it now is. */
+         opened: localStorage.getItem('gd-nav-open') || 'Overview',
          toggle(name) {
-             this.opened = this.opened.includes(name)
-                 ? this.opened.filter(n => n !== name)
-                 : [...this.opened, name];
-             localStorage.setItem('gd-nav-open', JSON.stringify(this.opened));
+             this.opened = this.opened === name ? '' : name;
+             localStorage.setItem('gd-nav-open', this.opened);
          },
-         open(name, hasCurrent) { return hasCurrent || this.opened.includes(name); }
+         open(name, hasCurrent) { return hasCurrent || this.opened === name; }
      }">
     <ul role="list" class="flex flex-1 flex-col gap-y-4">
         @foreach($sections as $heading => $links)
