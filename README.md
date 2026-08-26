@@ -31,6 +31,10 @@ are picked up by [`docs/RECONCILIATION.md`](docs/RECONCILIATION.md).
 > refuses entries around high-impact releases, and holds them entirely when the calendar is
 > stale rather than trading through one unseen.
 
+> **Wondering what the AI is allowed to do?** [`docs/AI_INTEGRATION.md`](docs/AI_INTEGRATION.md)
+> — nine call sites behind one key, bounded by a fund cap, and a single rule: the model
+> never produces a number that becomes a price.
+
 > **Running it unattended?** [`docs/MONITORING.md`](docs/MONITORING.md) covers the health checks
 > and Telegram alerting. A dashboard only helps somebody who is looking at it.
 
