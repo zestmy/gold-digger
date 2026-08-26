@@ -1,6 +1,6 @@
 # AI Integration
 
-Nine call sites, one client, one API key, and a single rule that shapes all of them: **the
+Nine call sites, one client, four model keys, and a single rule that shapes all of them: **the
 model never produces a number that becomes a price.**
 
 Everything is off unless `OPENROUTER_API_KEY` is set. An unconfigured analyst is not an
@@ -121,46 +121,43 @@ the correct shape agree here.
 
 ---
 
-## Findings
+## Model routing
 
-Things this audit turned up that are worth fixing. None is breaking anything today.
+Four keys, because four jobs. Everything defaults to the current Sonnet generation; the
+split exists so a more capable model can be bought where it is worth buying, rather than
+everywhere at once.
 
-**1. The model pins are two generations behind.** `config/ai.php` defaults all three keys
-to `anthropic/claude-sonnet-4.5`. Sonnet 4.6 and Sonnet 5 have both shipped since. Because
-these are OpenRouter slugs rather than Anthropic API ids, check the current slug against
-OpenRouter's model list before editing — the naming is theirs, not Anthropic's. It is an
-`.env` change and no deploy, which is exactly what the OpenRouter choice bought.
+| Key | Env | Used by | The job |
+|---|---|---|---|
+| `ai.model` | `OPENROUTER_MODEL` | `AutonomousTrader`, `ChartAnalyst`, `ScanAnalyst`, `PairAnalyst` | Reading numbers this system computed |
+| `ai.reviewer_model` | `OPENROUTER_REVIEWER_MODEL` | `SignalReviewer`, `FollowUpInterpreter`, `EditInterpreter` | Judging a stranger's words, with a position on the line |
+| `ai.proposer_model` | `OPENROUTER_PROPOSER_MODEL` | `StrategyProposer` | Reasoning about indicator behaviour |
+| `ai.vision_model` | `OPENROUTER_VISION_MODEL` | `ImageSignalReader` | Transcribing a screenshot |
 
-**2. `OPENROUTER_VISION_MODEL` is not in `.env.example`.** `config/ai.php` reads it and
-`ImageSignalReader` uses it, but an operator reading `.env.example` cannot discover the
-knob exists. `OPENROUTER_BASE_URL`, `OPENROUTER_TIMEOUT` and `AI_CACHE_MINUTES` are
-undocumented there too.
+`reviewer_model` defaults to whatever `OPENROUTER_MODEL` is, so naming it changed nothing
+on its own. It exists because those three callers are the only ones that read text written
+by somebody else and then move real money — a different job from summarising the trend
+card, and one that had been sharing a model with it by accident rather than by decision.
+`anthropic/claude-opus-5` is the intended upgrade path for it and for the proposer; both
+cost more per call, which is why each is a deliberate `.env` edit rather than a default.
 
-**3. The proposer's comment block in `config/ai.php` is orphaned.** It sits directly above
-`vision_model`, so the paragraph explaining why the proposer deserves a capable model now
-appears to describe the vision key. `proposer_model` is defined below with no comment.
+---
 
-**4. `OpenRouter`'s docblock claims shared retry behaviour that does not exist.** It says
-sharing the client means "the retry behaviour, the timeout, the attribution headers" exist
-once. The timeout and headers are there; there is no `->retry()`. Either add one — as
-`CalendarFeed` does — or drop the claim.
+## Known limits
 
-**5. Cache TTLs disagree.** `AiAnalysisCard` honours `config('ai.cache_minutes')` (15).
-`ChartAnalyst` and `ScanAnalyst` each hardcode a private `CACHE_MINUTES = 5` and ignore the
-config key, so `AI_CACHE_MINUTES` only moves one of the three cached surfaces.
+**Nothing retries a paid call twice.** Connection failures get one retry; HTTP status codes
+get none, on purpose — see the note in `OpenRouter`. A blip during `ai:decide` means a
+missed consideration, not a wrong one, and the schedule comes round again in fifteen
+minutes.
 
-**6. Seven of nine call sites share `ai.model`.** Only `StrategyProposer` reads
-`proposer_model` and only `ImageSignalReader` reads `vision_model`; everything else runs on
-the one default. That is defensible — the split was drawn between reasoning and summarising
-— but `SignalReviewer` and `FollowUpInterpreter` read strangers' text and move real
-positions, which is closer to the first job than the second. Worth revisiting deliberately
-rather than by default.
+**`AI_CACHE_MINUTES` is a backstop, not the expiry.** Every cached surface keys on the
+newest bar, so a new bar produces a new key whatever the TTL says. Raising it does not make
+an answer staler than the bar it was read from; it only stops an idle tab paying twice.
 
-**7. `ImageSignalReader`'s config fallback is redundant.** It calls
-`config('ai.vision_model', config('ai.model'))`, but `vision_model` is always defined in
-`config/ai.php` with its own default, so the second argument can never apply — and it
-evaluates `config('ai.model')` on every call regardless. Harmless, but it reads as though
-the key might be absent when it cannot be.
+**The fund cap is the only bound that is measured.** Everything else in this system can be
+backtested before it costs anything. AI-initiated trading cannot be, and no amount of
+prompt care substitutes for that — which is the argument for keeping the cap small enough
+that being wrong about all of this is affordable.
 
 ---
 

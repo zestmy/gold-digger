@@ -2,6 +2,7 @@
 
 namespace App\Services\Ai;
 
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -11,10 +12,22 @@ use Throwable;
  *
  * One place that knows how to ask a model for a JSON object matching a schema.
  *
- * Both callers - the analysis card and the strategy proposer - need exactly this and
- * nothing else: a system prompt, a brief, a schema, and a validated array back. Sharing
- * it means the retry behaviour, the timeout, the attribution headers and the "what if the
- * model returns prose instead of JSON" handling exist once.
+ * Every caller - the analysis cards, the copier's reviewer, the interpreters, the strategy
+ * proposer - needs exactly this and nothing else: a system prompt, a brief, a schema, and a
+ * validated array back. Sharing it means the retry behaviour, the timeout, the attribution
+ * headers and the "what if the model returns prose instead of JSON" handling exist once.
+ *
+ * ## What is retried, and what deliberately is not
+ *
+ * Connection failures only - a refused socket, a DNS blip, a read that times out before
+ * anything came back. One retry, after two seconds.
+ *
+ * HTTP status codes are not retried, and that is the deliberate half. This endpoint bills
+ * per request that reaches it, so a 500 that arrived after the model had already generated
+ * is a charge; retrying it buys a second charge for the same answer. A 402 means the credit
+ * is gone and will still be gone in two seconds. A 429 wants a longer wait than anything
+ * worth blocking a request on. All three are reported instead - the interactive surfaces
+ * have a refresh button, and the scheduled ones run again on their own timer.
  *
  * ## On schemas
  *
@@ -65,6 +78,10 @@ final class OpenRouter
                     'X-Title' => (string) config('ai.title'),
                 ])
                 ->timeout((int) config('ai.timeout'))
+                // Connection failures only - see the note above on why a status code is
+                // reported rather than retried. `throw: false` keeps the 401/402/5xx
+                // handling below reachable instead of routing it through the catch.
+                ->retry(2, 2000, when: fn (Throwable $e) => $e instanceof ConnectionException, throw: false)
                 ->acceptJson()
                 ->post(rtrim((string) config('ai.base_url'), '/').'/chat/completions', [
                     'model' => $model,

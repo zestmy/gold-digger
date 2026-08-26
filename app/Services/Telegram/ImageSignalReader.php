@@ -69,7 +69,7 @@ final class ImageSignalReader
         }
 
         $result = $this->router->structured(
-            model: (string) config('ai.vision_model', config('ai.model')),
+            model: (string) config('ai.vision_model'),
             system: $this->systemPrompt(),
             brief: $this->brief($caption),
             schemaName: 'image_signal',

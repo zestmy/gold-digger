@@ -61,7 +61,7 @@ final class FollowUpInterpreter
         }
 
         $result = $this->router->structured(
-            model: (string) config('ai.model'),
+            model: (string) config('ai.reviewer_model'),
             system: $this->systemPrompt(),
             brief: $this->brief($followUp, $parent),
             schemaName: 'follow_up_instruction',

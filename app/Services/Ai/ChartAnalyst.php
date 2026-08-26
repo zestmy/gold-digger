@@ -39,8 +39,18 @@ final class ChartAnalyst
     /** Bars of context. Enough for structure to exist, few enough to stay readable. */
     private const BARS = 120;
 
-    /** Analyses are cached this long: the answer cannot change faster than the bars do. */
-    private const CACHE_MINUTES = 5;
+    /**
+     * Analyses are cached this long: the answer cannot change faster than the bars do.
+     *
+     * Read from config rather than fixed here so `AI_CACHE_MINUTES` moves every cached
+     * surface, not just the dashboard card. The key is scoped to the newest bar anyway,
+     * so this is a backstop against an idle tab rather than the thing that expires an
+     * answer - a new bar produces a new key regardless of what this says.
+     */
+    private function cacheMinutes(): int
+    {
+        return (int) config('ai.cache_minutes');
+    }
 
     public function __construct(
         private readonly OpenRouter $router = new OpenRouter,
@@ -107,7 +117,7 @@ final class ChartAnalyst
             Cache::forget($key);
         }
 
-        $reading = Cache::remember($key, now()->addMinutes(self::CACHE_MINUTES), function () use ($symbol, $timeframe, $market, $structure, $bars) {
+        $reading = Cache::remember($key, now()->addMinutes($this->cacheMinutes()), function () use ($symbol, $timeframe, $market, $structure, $bars) {
             $result = $this->router->structured(
                 model: (string) config('ai.model'),
                 system: $this->systemPrompt(),

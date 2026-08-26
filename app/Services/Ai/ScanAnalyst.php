@@ -41,8 +41,17 @@ final class ScanAnalyst
     /** How many of the ranked candidates the model is shown. */
     public const SHORTLIST = 6;
 
-    /** Cached this long: the answer cannot change faster than the bars it was read from. */
-    private const CACHE_MINUTES = 5;
+    /**
+     * Cached this long: the answer cannot change faster than the bars it was read from.
+     *
+     * Read from config so `AI_CACHE_MINUTES` moves every cached surface rather than only
+     * the dashboard card. The key already carries each candidate's newest bar, so this is
+     * a backstop against an idle tab, not the thing that expires an answer.
+     */
+    private function cacheMinutes(): int
+    {
+        return (int) config('ai.cache_minutes');
+    }
 
     public function __construct(private readonly OpenRouter $router = new OpenRouter) {}
 
@@ -84,7 +93,7 @@ final class ScanAnalyst
             Cache::forget($key);
         }
 
-        $data = Cache::remember($key, now()->addMinutes(self::CACHE_MINUTES), function () use ($shortlist, $timeframe) {
+        $data = Cache::remember($key, now()->addMinutes($this->cacheMinutes()), function () use ($shortlist, $timeframe) {
             $result = $this->router->structured(
                 model: (string) config('ai.model'),
                 system: $this->systemPrompt(),

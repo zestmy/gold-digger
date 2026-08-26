@@ -70,7 +70,7 @@ final class EditInterpreter
         }
 
         $result = $this->router->structured(
-            model: (string) config('ai.model'),
+            model: (string) config('ai.reviewer_model'),
             system: $this->systemPrompt(),
             brief: $this->brief($signal, $before, $after),
             schemaName: 'signal_edit',

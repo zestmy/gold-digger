@@ -94,7 +94,7 @@ final class SignalReviewer
         }
 
         $result = $this->router->structured(
-            model: (string) config('ai.model'),
+            model: (string) config('ai.reviewer_model'),
             system: $this->systemPrompt(),
             brief: $this->brief($signal, $settings),
             schemaName: 'signal_review',
