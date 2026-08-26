@@ -164,7 +164,7 @@ returning `None`) disappears. The EA polls Laravel with `WebRequest`, executes, 
 *Caveat:* `WebRequest` is synchronous and can stall the EA's tick handler — keep the timeout short
 (1–2 s) and poll on a timer, not on every tick. Algo Trading must still be enabled.
 
-**As built:** `mql5/Experts/GoldDigger/GoldDiggerBridge.mq5` plus `mql5/Include/GoldDigger/GDExecutor.mqh`,
+**As built:** `mql5/Experts/FXSignalPro/FXSignalPro.mq5` plus `mql5/Include/FXSignalPro/Executor.mqh`,
 against the `trade_commands` queue and the `/api/v1/bot/*` endpoints. Fill reports are buffered and
 flushed on the timer rather than sent from `OnTradeTransaction`, precisely because of the caveat
 above. Full detail in [`MT5_EA_BRIDGE.md`](MT5_EA_BRIDGE.md).
@@ -339,8 +339,8 @@ accept that it means handing a third party your live credentials.
 |---|---|
 | `docs/MT5_EXECUTION.md` | This document |
 | `docs/MT5_EA_BRIDGE.md` | Setup, wire protocol, and troubleshooting for the chosen executor |
-| `mql5/Experts/GoldDigger/GoldDiggerBridge.mq5` | The EA: polls, executes, reports fills and heartbeats |
-| `mql5/Include/GoldDigger/GDExecutor.mqh` | MQL5 order primitives — the guards from §2, in the terminal |
+| `mql5/Experts/FXSignalPro/FXSignalPro.mq5` | The EA: polls, executes, reports fills and heartbeats |
+| `mql5/Include/FXSignalPro/Executor.mqh` | MQL5 order primitives — the guards from §2, in the terminal |
 | `bot/mt5_preflight.py` | Diagnostic walking every cause in §2; prints PASS/WARN/FAIL with the exact remedy |
 | `bot/mt5_executor.py` | Python reference executor the MQL5 one mirrors |
 | `app/Models/TradeCommand.php` etc. | Command queue, tokens, heartbeats |

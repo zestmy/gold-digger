@@ -54,7 +54,7 @@ class TerminalSetupTest extends TestCase
 
         $this->assertStringContainsString(
             'input string   ApiBaseUrl    = "https://fx.example.com"',
-            $zip['MQL5/Experts/GoldDigger/GoldDiggerBridge.mq5'],
+            $zip['MQL5/Experts/FXSignalPro/FXSignalPro.mq5'],
         );
     }
 
@@ -64,7 +64,7 @@ class TerminalSetupTest extends TestCase
         // else running it.
         $this->assertStringNotContainsString(
             'fx.example.com',
-            file_get_contents(base_path('mql5/Experts/GoldDigger/GoldDiggerBridge.mq5')),
+            file_get_contents(base_path('mql5/Experts/FXSignalPro/FXSignalPro.mq5')),
         );
     }
 
@@ -88,8 +88,8 @@ class TerminalSetupTest extends TestCase
         // Extracting over the data folder has to merge, not create a stray directory.
         $zip = $this->extract($this->get(route('terminal.download')));
 
-        $this->assertArrayHasKey('MQL5/Experts/GoldDigger/GoldDiggerBridge.mq5', $zip);
-        $this->assertArrayHasKey('MQL5/Include/GoldDigger/GDExecutor.mqh', $zip);
+        $this->assertArrayHasKey('MQL5/Experts/FXSignalPro/FXSignalPro.mq5', $zip);
+        $this->assertArrayHasKey('MQL5/Include/FXSignalPro/Executor.mqh', $zip);
     }
 
     public function test_the_readme_names_the_wire_version_and_the_url_to_whitelist(): void

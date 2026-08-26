@@ -51,7 +51,7 @@ final class CalendarFeed
                 ->retry(2, 3000, throw: false)
                 // Identify ourselves. A default client UA is the kind of thing a CDN
                 // in front of a free endpoint declines on sight.
-                ->withHeaders(['User-Agent' => 'GoldDigger/1.0 (economic calendar sync)'])
+                ->withHeaders(['User-Agent' => 'FXSignalPro/1.0 (economic calendar sync)'])
                 ->acceptJson()
                 ->get(self::URL);
         } catch (Throwable $e) {

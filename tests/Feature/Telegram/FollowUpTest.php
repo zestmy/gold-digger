@@ -148,7 +148,7 @@ class FollowUpTest extends TestCase
         $command = TradeCommand::where('type', 'modify')->firstOrFail();
 
         $this->assertEqualsWithDelta(2648.0, $command->payload['sl_price'], 1e-9);
-        // Zero leaves the target alone; see CGDExecutor::ModifyPosition.
+        // Zero leaves the target alone; see CFXSExecutor::ModifyPosition.
         $this->assertEqualsWithDelta(0.0, $command->payload['tp_price'], 1e-9);
     }
 

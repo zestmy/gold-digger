@@ -14,7 +14,7 @@ privilege mismatches, `order_send` returning `None` — cannot occur here.
 ```
   Browser                 Laravel + MySQL                  MetaTrader 5 (Windows VPS)
  ┌─────────┐            ┌──────────────────┐             ┌──────────────────────────┐
- │ Start   │──click───▶ │ trade_commands   │◀──GET ──────│ GoldDiggerBridge.mq5     │
+ │ Start   │──click───▶ │ trade_commands   │◀──GET ──────│ FXSignalPro.mq5          │
  │ Stop    │            │  (pending)       │   poll 5s   │  OnTimer                 │
  │ CloseAll│            │                  │──lines────▶ │  ├─ heartbeat            │
  └─────────┘            │ bot_heartbeats   │◀──POST──────│  ├─ flush fill reports   │
@@ -39,10 +39,10 @@ Copy into your terminal's data folder (MetaTrader → File → Open Data Folder)
 
 | Repo path | Terminal path |
 |---|---|
-| `mql5/Include/GoldDigger/` | `MQL5/Include/GoldDigger/` |
-| `mql5/Experts/GoldDigger/` | `MQL5/Experts/GoldDigger/` |
+| `mql5/Include/FXSignalPro/` | `MQL5/Include/FXSignalPro/` |
+| `mql5/Experts/FXSignalPro/` | `MQL5/Experts/FXSignalPro/` |
 
-Open `GoldDiggerBridge.mq5` in MetaEditor and compile (F7).
+Open `FXSignalPro.mq5` in MetaEditor and compile (F7).
 
 ### 2. Whitelist the dashboard URL
 
@@ -50,7 +50,7 @@ Tools → Options → Expert Advisors → **Allow WebRequest for listed URL**, a
 dashboard's origin exactly (scheme and host, no path):
 
 ```
-https://your-dashboard.example.com
+https://fxsignal.pro
 ```
 
 `WebRequest` fails with error `4014` until this is done. The EA detects that specific
@@ -138,8 +138,8 @@ The same endpoint still returns JSON to any other client — only the EA asks fo
 Everything the EA *sends* is JSON, because building a string is safe where parsing one is
 not.
 
-`WireProtocolContractTest` reads the EA source and asserts `GD_WIRE_VERSION` and
-`GD_WIRE_COLUMNS` still match the Laravel constants. Adding a column without bumping the
+`WireProtocolContractTest` reads the EA source and asserts `FXS_WIRE_VERSION` and
+`FXS_WIRE_COLUMNS` still match the Laravel constants. Adding a column without bumping the
 EA is otherwise a silent 3am failure.
 
 ---
@@ -257,7 +257,7 @@ Mirrors `bot/mt5_executor.py` deliberately, so both executors send the same requ
 | Retry with a fresh tick on requote | `10004`, `10020`, `10021` |
 | Position ticket read from the deal's `DEAL_POSITION_ID` | closes aimed at the wrong ticket in netting mode |
 
-Every retcode is mapped to a plain-language remedy by `GDExplainRetcode()` and lands in
+Every retcode is mapped to a plain-language remedy by `FXSExplainRetcode()` and lands in
 `bot_logs`.
 
 ---

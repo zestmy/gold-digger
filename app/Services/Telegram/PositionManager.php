@@ -149,7 +149,7 @@ final class PositionManager
             $this->queue($trade, $heartbeat, 'modify', [
                 'ticket' => $trade->mt5_ticket,
                 'sl_price' => round($target, (int) ($heartbeat->digits ?? 2)),
-                // Zero leaves the target alone; see CGDExecutor::ModifyPosition.
+                // Zero leaves the target alone; see CFXSExecutor::ModifyPosition.
                 'tp_price' => 0.0,
                 'reason' => 'copier-protect',
             ], "protect:{$trade->id}:".$this->bucket($target));

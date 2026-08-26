@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Schema;
  *
  * Trade management is what needs them. Taking 50% of a 0.02-lot position leaves 0.01 on
  * each side and works; taking 50% of a 0.01-lot position asks the broker to close 0.005,
- * which is below every broker's minimum. `CGDExecutor::NormalizeVolume` snaps that to zero
+ * which is below every broker's minimum. `CFXSExecutor::NormalizeVolume` snaps that to zero
  * and the close fails - so without these values a small account would generate a failing
  * partial-close command at every rung of the ladder, on every trade, for ever.
  *

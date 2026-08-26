@@ -77,7 +77,7 @@ jobs:
       # The EA cannot be compiled here - MetaEditor is Windows-only - so these catch the
       # two fault classes a text scan finds reliably. See scripts/check_mql5.py.
       - name: Check MQL5 sources
-        run: python3 scripts/check_mql5.py mql5/Experts/GoldDigger/GoldDiggerBridge.mq5 mql5/Include/GoldDigger/GDExecutor.mqh
+        run: python3 scripts/check_mql5.py mql5/Experts/FXSignalPro/FXSignalPro.mq5 mql5/Include/FXSignalPro/Executor.mqh
 
   deploy:
     name: Deploy to production

@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|                                               FXSignalPro.mq5    |
+//|                                                 FXSignalPro.mq5  |
 //|              FXSignalPro - Laravel <-> MetaTrader 5 execution EA  |
 //+------------------------------------------------------------------+
 //| Executes the trade_commands queue from the FXSignalPro dashboard  |
@@ -13,8 +13,8 @@
 //| inside the terminal. See docs/MT5_EXECUTION.md section 4.         |
 //|                                                                   |
 //| SETUP                                                             |
-//|  1. Copy mql5/Include/GoldDigger -> <terminal>/MQL5/Include/      |
-//|     and mql5/Experts/GoldDigger  -> <terminal>/MQL5/Experts/      |
+//|  1. Copy mql5/Include/FXSignalPro -> <terminal>/MQL5/Include/     |
+//|     and mql5/Experts/FXSignalPro  -> <terminal>/MQL5/Experts/     |
 //|  2. Compile this file in MetaEditor (F7).                         |
 //|  3. Tools > Options > Expert Advisors > "Allow WebRequest for     |
 //|     listed URL" and add your dashboard's origin. HTTPS only.      |
@@ -29,13 +29,13 @@
 #property version   "1.00"
 #property description "Executes FXSignalPro dashboard commands and reports fills back."
 
-#include <GoldDigger/GDExecutor.mqh>
+#include <FXSignalPro/Executor.mqh>
 
 //--- Must match TradeCommand::WIRE_VERSION on the Laravel side.
-#define GD_WIRE_VERSION   "GDCMD2"
-#define GD_WIRE_COLUMNS   13
-#define GD_EA_VERSION     "1.0.0"
-#define GD_MAX_PENDING    200
+#define FXS_WIRE_VERSION   "GDCMD2"
+#define FXS_WIRE_COLUMNS   13
+#define FXS_EA_VERSION     "1.0.0"
+#define FXS_MAX_PENDING    200
 
 //+------------------------------------------------------------------+
 //| Inputs                                                            |
@@ -85,10 +85,10 @@ input bool     DemoOnly      = true;         // Refuse to run on a live account
 //--- symbol's specification and every poll walks the whole list, so a terminal
 //--- carrying dozens would spend its timer on HTTP rather than trading. Eight is far
 //--- more than any account here runs and makes the array a fixed cost.
-#define GD_MAX_SYMBOLS 8
+#define FXS_MAX_SYMBOLS 8
 
-CGDExecutor  g_exec[GD_MAX_SYMBOLS];
-string       g_base[GD_MAX_SYMBOLS];       // what the dashboard calls each one
+CFXSExecutor g_exec[FXS_MAX_SYMBOLS];
+string       g_base[FXS_MAX_SYMBOLS];      // what the dashboard calls each one
 int          g_symbols          = 0;       // how many were resolved at init
 
 bool         g_ready            = false;   // OnInit completed successfully
@@ -98,10 +98,10 @@ datetime     g_last_warned      = 0;       // rate-limits the repeated-warning s
 //--- Newest closed bar already pushed, per series *per symbol*. Shared state here was
 //--- the whole of what made this EA single-instrument in practice: one cursor across
 //--- several feeds means the first symbol to close a bar suppresses the rest.
-datetime     g_last_entry_bar[GD_MAX_SYMBOLS];
-datetime     g_last_trend_bar[GD_MAX_SYMBOLS];
-bool         g_entry_seeded[GD_MAX_SYMBOLS];
-bool         g_trend_seeded[GD_MAX_SYMBOLS];
+datetime     g_last_entry_bar[FXS_MAX_SYMBOLS];
+datetime     g_last_trend_bar[FXS_MAX_SYMBOLS];
+bool         g_entry_seeded[FXS_MAX_SYMBOLS];
+bool         g_trend_seeded[FXS_MAX_SYMBOLS];
 
 //--- Why this EA was told to close a position, kept until the resulting deal shows
 //--- up in OnTradeTransaction. A broker deal cannot say which rung of the take-profit
@@ -109,7 +109,7 @@ bool         g_trend_seeded[GD_MAX_SYMBOLS];
 //--- a target - so the dashboard states the rung on the command and it is echoed back
 //--- with the fill. Without this every commanded close is recorded as "manual" and the
 //--- ladder is invisible in trade_partials.
-#define GD_MAX_CLOSE_REASONS 32
+#define FXS_MAX_CLOSE_REASONS 32
 ulong        g_close_ticket[];
 string       g_close_reason[];
 
@@ -124,7 +124,7 @@ string       g_pending[];
 //+------------------------------------------------------------------+
 //| Escape a string for embedding in JSON.                            |
 //+------------------------------------------------------------------+
-string GDJsonEscape(const string value)
+string FXSJsonEscape(const string value)
   {
    string out = value;
    StringReplace(out, "\\", "\\\\");
@@ -139,14 +139,14 @@ string GDJsonEscape(const string value)
 //| Perform one HTTP request against the dashboard.                   |
 //| Returns the HTTP status code, or -1 when the request never left.  |
 //+------------------------------------------------------------------+
-int GDHttp(const string method, const string path, const string body,
+int FXSHttp(const string method, const string path, const string body,
            const string accept, string &out_body)
   {
    out_body = "";
 
    if(ApiToken == "")
      {
-      Print("[GD] ApiToken is empty - set it in the EA inputs.");
+      Print("[FXS] ApiToken is empty - set it in the EA inputs.");
       return -1;
      }
 
@@ -176,10 +176,10 @@ int GDHttp(const string method, const string path, const string body,
      {
       const int err = GetLastError();
       if(err == 4014)
-         PrintFormat("[GD] WebRequest is not permitted for %s. Tools > Options > Expert Advisors > "
+         PrintFormat("[FXS] WebRequest is not permitted for %s. Tools > Options > Expert Advisors > "
                      "'Allow WebRequest for listed URL' and add exactly this origin.", ApiBaseUrl);
       else
-         PrintFormat("[GD] WebRequest to %s failed with error %d.", url, err);
+         PrintFormat("[FXS] WebRequest to %s failed with error %d.", url, err);
       return -1;
      }
 
@@ -187,7 +187,7 @@ int GDHttp(const string method, const string path, const string body,
       out_body = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
 
    if(status >= 400)
-      PrintFormat("[GD] %s %s -> HTTP %d: %s", method, path, status, out_body);
+      PrintFormat("[FXS] %s %s -> HTTP %d: %s", method, path, status, out_body);
 
    return status;
   }
@@ -196,29 +196,29 @@ int GDHttp(const string method, const string path, const string body,
 //| Send a log line to the dashboard so it appears on /logs.          |
 //| Failures here are swallowed: logging must never break trading.    |
 //+------------------------------------------------------------------+
-void GDLog(const string level, const string message)
+void FXSLog(const string level, const string message)
   {
-   PrintFormat("[GD][%s] %s", level, message);
+   PrintFormat("[FXS][%s] %s", level, message);
 
    const string body = StringFormat("{\"level\":\"%s\",\"source\":\"mql5_ea\",\"message\":\"%s\"}",
-                                    level, GDJsonEscape(message));
+                                    level, FXSJsonEscape(message));
    string ignored;
-   GDHttp("POST", "/api/v1/bot/logs", body, "application/json", ignored);
+   FXSHttp("POST", "/api/v1/bot/logs", body, "application/json", ignored);
   }
 
 //+------------------------------------------------------------------+
 //| Queue a fill report for the next OnTimer flush.                   |
 //+------------------------------------------------------------------+
-void GDQueueReport(const string json)
+void FXSQueueReport(const string json)
   {
    const int n = ArraySize(g_pending);
 
-   if(n >= GD_MAX_PENDING)
+   if(n >= FXS_MAX_PENDING)
      {
       //--- Dropping the oldest is the least-bad option: a backlog this size means
       //--- the dashboard has been unreachable for a long time, and the newest fills
       //--- are the ones that still matter for reconciliation.
-      Print("[GD] pending report buffer full; dropping the oldest entry");
+      Print("[FXS] pending report buffer full; dropping the oldest entry");
       for(int i = 1; i < n; i++)
          g_pending[i - 1] = g_pending[i];
       g_pending[n - 1] = json;
@@ -232,7 +232,7 @@ void GDQueueReport(const string json)
 //+------------------------------------------------------------------+
 //| Flush queued fill reports. Anything that fails stays queued.      |
 //+------------------------------------------------------------------+
-void GDFlushReports(void)
+void FXSFlushReports(void)
   {
    const int n = ArraySize(g_pending);
    if(n == 0)
@@ -244,7 +244,7 @@ void GDFlushReports(void)
    for(int i = 0; i < n; i++)
      {
       string response;
-      const int status = GDHttp("POST", "/api/v1/bot/fills", g_pending[i], "application/json", response);
+      const int status = FXSHttp("POST", "/api/v1/bot/fills", g_pending[i], "application/json", response);
 
       //--- 2xx means recorded. A 4xx means the dashboard rejected it and will keep
       //--- rejecting it, so retrying forever would block every later report.
@@ -253,7 +253,7 @@ void GDFlushReports(void)
 
       if(status >= 400 && status < 500)
         {
-         PrintFormat("[GD] fill report rejected (HTTP %d), discarding: %s", status, response);
+         PrintFormat("[FXS] fill report rejected (HTTP %d), discarding: %s", status, response);
          continue;
         }
 
@@ -269,7 +269,7 @@ void GDFlushReports(void)
 //+------------------------------------------------------------------+
 //| Report the outcome of a command.                                  |
 //+------------------------------------------------------------------+
-void GDReportResult(const long command_id, const bool ok, const uint retcode,
+void FXSReportResult(const long command_id, const bool ok, const uint retcode,
                     const ulong ticket, const double price, const double volume,
                     const string error)
   {
@@ -280,17 +280,17 @@ void GDReportResult(const long command_id, const bool ok, const uint retcode,
       //--- particular symbol's digits was only ever cosmetic here, and with several
       //--- instruments loaded there is no longer one right answer to pick.
       DoubleToString(price, 6), DoubleToString(volume, 2),
-      GDJsonEscape(error));
+      FXSJsonEscape(error));
 
    string response;
-   GDHttp("POST", "/api/v1/bot/commands/" + IntegerToString(command_id) + "/result",
+   FXSHttp("POST", "/api/v1/bot/commands/" + IntegerToString(command_id) + "/result",
           body, "application/json", response);
   }
 
 //+------------------------------------------------------------------+
 //| Remember why a commanded close was made.                          |
 //+------------------------------------------------------------------+
-void GDRememberCloseReason(const ulong ticket, const string reason)
+void FXSRememberCloseReason(const ulong ticket, const string reason)
   {
    if(reason == "")
       return;
@@ -306,7 +306,7 @@ void GDRememberCloseReason(const ulong ticket, const string reason)
 
    //--- A backlog this size means deals are not arriving at all. Dropping the oldest
    //--- costs one mislabelled partial; growing without limit costs the terminal.
-   if(n >= GD_MAX_CLOSE_REASONS)
+   if(n >= FXS_MAX_CLOSE_REASONS)
      {
       for(int i = 1; i < n; i++)
         {
@@ -331,7 +331,7 @@ void GDRememberCloseReason(const ulong ticket, const string reason)
 //| a reason left behind would be attached to whatever closed this    |
 //| position next - including a stop loss.                            |
 //+------------------------------------------------------------------+
-string GDTakeCloseReason(const ulong ticket)
+string FXSTakeCloseReason(const ulong ticket)
   {
    const int n = ArraySize(g_close_ticket);
 
@@ -380,7 +380,7 @@ string GDTakeCloseReason(const ulong ticket)
 //| first symbol would fill a gold order on whatever happened to be    |
 //| loaded first, which is the worst available outcome.                |
 //+------------------------------------------------------------------+
-int GDIndexFor(const string symbol)
+int FXSIndexFor(const string symbol)
   {
    if(symbol == "")
       return -1;
@@ -406,15 +406,15 @@ int GDIndexFor(const string symbol)
 //| and normalises to its own digits. Routed by the position's symbol  |
 //| so a stop on EURUSD is never clamped against the price of gold.    |
 //+------------------------------------------------------------------+
-int GDIndexForTicket(const ulong ticket)
+int FXSIndexForTicket(const ulong ticket)
   {
    if(!PositionSelectByTicket(ticket))
       return -1;
 
-   return GDIndexFor(PositionGetString(POSITION_SYMBOL));
+   return FXSIndexFor(PositionGetString(POSITION_SYMBOL));
   }
 
-double GDPipValuePerLot(const int idx)
+double FXSPipValuePerLot(const int idx)
   {
    const string sym = g_exec[idx].Symbol();
 
@@ -430,7 +430,7 @@ double GDPipValuePerLot(const int idx)
 //+------------------------------------------------------------------+
 //| Timeframe as the dashboard names it: PERIOD_M5 -> "M5".           |
 //+------------------------------------------------------------------+
-string GDTimeframeName(const ENUM_TIMEFRAMES tf)
+string FXSTimeframeName(const ENUM_TIMEFRAMES tf)
   {
    string name = EnumToString(tf);
    StringReplace(name, "PERIOD_", "");
@@ -446,7 +446,7 @@ string GDTimeframeName(const ENUM_TIMEFRAMES tf)
 //| it did not happen in, and the dashboard's session filter would    |
 //| gate London against the wrong window.                             |
 //+------------------------------------------------------------------+
-long GDServerToUtc(const datetime server_time)
+long FXSServerToUtc(const datetime server_time)
   {
    datetime server_now = TimeTradeServer();
    if(server_now == 0)
@@ -471,7 +471,7 @@ long GDServerToUtc(const datetime server_time)
 //| vanish inside the same bar - an entry the completed bar never     |
 //| justified.                                                        |
 //+------------------------------------------------------------------+
-bool GDPushCandles(const int idx, const ENUM_TIMEFRAMES tf, const int count)
+bool FXSPushCandles(const int idx, const ENUM_TIMEFRAMES tf, const int count)
   {
    if(count < 1)
       return false;
@@ -483,8 +483,8 @@ bool GDPushCandles(const int idx, const ENUM_TIMEFRAMES tf, const int count)
 
    if(copied <= 0)
      {
-      PrintFormat("[GD] CopyRates(%s, %s) returned %d - history may still be loading.",
-                  g_exec[idx].Symbol(), GDTimeframeName(tf), copied);
+      PrintFormat("[FXS] CopyRates(%s, %s) returned %d - history may still be loading.",
+                  g_exec[idx].Symbol(), FXSTimeframeName(tf), copied);
       return false;
      }
 
@@ -493,7 +493,7 @@ bool GDPushCandles(const int idx, const ENUM_TIMEFRAMES tf, const int count)
 
    for(int i = 0; i < copied; i++)
      {
-      const long utc = GDServerToUtc(rates[i].time);
+      const long utc = FXSServerToUtc(rates[i].time);
       if(utc <= 0)
          continue;
 
@@ -523,7 +523,7 @@ bool GDPushCandles(const int idx, const ENUM_TIMEFRAMES tf, const int count)
    //--- with price history also has a specification and the two cannot drift apart. This is
    //--- what lets the dashboard hold more than one instrument: its heartbeat has room for
    //--- exactly one symbol's figures, and this does not.
-   const double pip_value = GDPipValuePerLot(idx);
+   const double pip_value = FXSPipValuePerLot(idx);
 
    const string spec = StringFormat(
       "{\"pip_size\":%s,\"digits\":%d,\"pip_value_per_lot\":%s,"
@@ -537,10 +537,10 @@ bool GDPushCandles(const int idx, const ENUM_TIMEFRAMES tf, const int count)
    const string body = StringFormat(
       "{\"symbol\":\"%s\",\"base_symbol\":\"%s\",\"timeframe\":\"%s\","
       "\"source\":\"mql5_ea\",\"spec\":%s,\"bars\":[%s]}",
-      GDJsonEscape(g_exec[idx].Symbol()), GDJsonEscape(g_base[idx]), GDTimeframeName(tf), spec, bars);
+      FXSJsonEscape(g_exec[idx].Symbol()), FXSJsonEscape(g_base[idx]), FXSTimeframeName(tf), spec, bars);
 
    string response;
-   const int status = GDHttp("POST", "/api/v1/bot/candles", body, "application/json", response);
+   const int status = FXSHttp("POST", "/api/v1/bot/candles", body, "application/json", response);
 
    return (status >= 200 && status < 300);
   }
@@ -553,7 +553,7 @@ bool GDPushCandles(const int idx, const ENUM_TIMEFRAMES tf, const int count)
 //| what makes a dropped push self-healing - the dashboard upserts,   |
 //| so re-sending a stored bar costs nothing and fills any gap.       |
 //+------------------------------------------------------------------+
-void GDMaintainSeries(const int idx, const ENUM_TIMEFRAMES tf, datetime &last_bar, bool &seeded)
+void FXSMaintainSeries(const int idx, const ENUM_TIMEFRAMES tf, datetime &last_bar, bool &seeded)
   {
    const datetime closed = iTime(g_exec[idx].Symbol(), tf, 1);
 
@@ -564,7 +564,7 @@ void GDMaintainSeries(const int idx, const ENUM_TIMEFRAMES tf, datetime &last_ba
 
    //--- Only advance the marker on success, so a failed push is retried on the next
    //--- timer rather than being silently skipped until the following bar.
-   if(GDPushCandles(idx, tf, count))
+   if(FXSPushCandles(idx, tf, count))
      {
       last_bar = closed;
       seeded   = true;
@@ -574,7 +574,7 @@ void GDMaintainSeries(const int idx, const ENUM_TIMEFRAMES tf, datetime &last_ba
 //+------------------------------------------------------------------+
 //| Keep both series current.                                         |
 //+------------------------------------------------------------------+
-void GDMaintainCandles(void)
+void FXSMaintainCandles(void)
   {
    if(!PushCandles)
       return;
@@ -583,12 +583,12 @@ void GDMaintainCandles(void)
    //--- feeds meant the first symbol to close a bar suppressed the others' pushes.
    for(int i = 0; i < g_symbols; i++)
      {
-      GDMaintainSeries(i, EntryTimeframe, g_last_entry_bar[i], g_entry_seeded[i]);
+      FXSMaintainSeries(i, EntryTimeframe, g_last_entry_bar[i], g_entry_seeded[i]);
 
       //--- The trend series is an input to the next entry bar, not a trigger of its
       //--- own; the dashboard generates nothing when it arrives.
       if(TrendTimeframe != EntryTimeframe)
-         GDMaintainSeries(i, TrendTimeframe, g_last_trend_bar[i], g_trend_seeded[i]);
+         FXSMaintainSeries(i, TrendTimeframe, g_last_trend_bar[i], g_trend_seeded[i]);
      }
   }
 
@@ -606,7 +606,7 @@ void GDMaintainCandles(void)
 //| nothing from absence - otherwise a second EA on the same account  |
 //| would have its positions closed by this one's report.             |
 //+------------------------------------------------------------------+
-void GDReportPositions(void)
+void FXSReportPositions(void)
   {
    string items = "";
 
@@ -629,21 +629,21 @@ void GDReportPositions(void)
          "{\"ticket\":%s,\"symbol\":\"%s\",\"direction\":\"%s\",\"volume\":%s,"
          "\"entry_price\":%s,\"sl\":%s,\"tp\":%s,\"profit\":%s,\"opened_at\":%s}",
          IntegerToString((long)ticket),
-         GDJsonEscape(PositionGetString(POSITION_SYMBOL)),
+         FXSJsonEscape(PositionGetString(POSITION_SYMBOL)),
          (is_buy ? "buy" : "sell"),
          DoubleToString(PositionGetDouble(POSITION_VOLUME), 2),
          DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN), digits),
          DoubleToString(PositionGetDouble(POSITION_SL), digits),
          DoubleToString(PositionGetDouble(POSITION_TP), digits),
          DoubleToString(PositionGetDouble(POSITION_PROFIT), 2),
-         IntegerToString(GDServerToUtc((datetime)PositionGetInteger(POSITION_TIME))));
+         IntegerToString(FXSServerToUtc((datetime)PositionGetInteger(POSITION_TIME))));
      }
 
    const string body = StringFormat("{\"magic\":%s,\"positions\":[%s]}",
                                     IntegerToString(MagicNumber), items);
 
    string response;
-   GDHttp("POST", "/api/v1/bot/positions", body, "application/json", response);
+   FXSHttp("POST", "/api/v1/bot/positions", body, "application/json", response);
   }
 
 //+------------------------------------------------------------------+
@@ -659,7 +659,7 @@ void GDReportPositions(void)
 //| trade row with no strategy and no levels, which is what the       |
 //| position snapshot does properly.                                  |
 //+------------------------------------------------------------------+
-void GDReplayClosedDeals(const int days)
+void FXSReplayClosedDeals(const int days)
   {
    if(days <= 0)
       return;
@@ -669,7 +669,7 @@ void GDReplayClosedDeals(const int days)
 
    if(!HistorySelect(from, to))
      {
-      Print("[GD] History could not be selected; skipping the replay of past closes.");
+      Print("[FXS] History could not be selected; skipping the replay of past closes.");
       return;
      }
 
@@ -700,7 +700,7 @@ void GDReplayClosedDeals(const int days)
 
       //--- The deal names its own instrument, which is the only reliable way to format
       //--- it once this terminal carries more than one.
-      const int di = GDIndexFor(HistoryDealGetString(deal, DEAL_SYMBOL));
+      const int di = FXSIndexFor(HistoryDealGetString(deal, DEAL_SYMBOL));
 
       string reason_enum = "manual";
       if(why == DEAL_REASON_SL || why == DEAL_REASON_SO) reason_enum = "sl";
@@ -711,7 +711,7 @@ void GDReplayClosedDeals(const int days)
       //--- absent one, and the dashboard treats this as a historical correction.
       double pips = 0.0;
 
-      GDQueueReport(StringFormat(
+      FXSQueueReport(StringFormat(
          "{\"event\":\"closed\",\"ticket\":%s,\"deal_ticket\":%s,\"volume\":%s,"
          "\"price\":%s,\"pips_profit\":%s,\"profit\":%s,\"commission\":%s,\"swap\":%s,"
          "\"reason\":\"%s\",\"closure_note\":\"replayed from history on attach\"}",
@@ -725,14 +725,14 @@ void GDReplayClosedDeals(const int days)
      }
 
    if(replayed > 0)
-      GDLog("info", StringFormat("Replaying %d closing deal(s) from the last %d day(s); "
+      FXSLog("info", StringFormat("Replaying %d closing deal(s) from the last %d day(s); "
                                  "any the dashboard already has are ignored.", replayed, days));
   }
 
 //+------------------------------------------------------------------+
 //| Heartbeat: report liveness, read back the kill switch.            |
 //+------------------------------------------------------------------+
-void GDHeartbeat(void)
+void FXSHeartbeat(void)
   {
    //--- Both flags matter and they are different things: the toolbar button is
    //--- terminal-wide, the MQL flag is this EA's own "Allow Algo Trading" checkbox.
@@ -748,7 +748,7 @@ void GDHeartbeat(void)
    //--- carrying several, so index 0 keeps that field meaning what it always meant: the
    //--- primary instrument. Every other symbol's specification travels with its own
    //--- candles instead, which is why a second instrument needs no wire change here.
-   const double pip_value = GDPipValuePerLot(0);
+   const double pip_value = FXSPipValuePerLot(0);
 
    const string pip_size_json  = (g_exec[0].PipSize() > 0.0)
                                  ? DoubleToString(g_exec[0].PipSize(), 5) : "null";
@@ -765,7 +765,7 @@ void GDHeartbeat(void)
          symbols_json += ",";
 
       symbols_json += StringFormat("{\"base\":\"%s\",\"resolved\":\"%s\"}",
-                                   GDJsonEscape(g_base[i]), GDJsonEscape(g_exec[i].Symbol()));
+                                   FXSJsonEscape(g_base[i]), FXSJsonEscape(g_exec[i].Symbol()));
      }
 
    const string body = StringFormat(
@@ -775,9 +775,9 @@ void GDHeartbeat(void)
       "\"volume_min\":%s,\"volume_step\":%s,"
       "\"balance\":%s,\"equity\":%s,\"margin_free\":%s,\"open_positions\":%d,"
       "\"symbols\":[%s]}",
-      GD_EA_VERSION, (int)TerminalInfoInteger(TERMINAL_BUILD),
+      FXS_EA_VERSION, (int)TerminalInfoInteger(TERMINAL_BUILD),
       (algo ? "true" : "false"), (connected ? "true" : "false"),
-      GDJsonEscape(g_exec[0].Symbol()),
+      FXSJsonEscape(g_exec[0].Symbol()),
       pip_size_json, g_exec[0].Digits(), pip_value_json,
       DoubleToString(g_exec[0].VolumeMin(), 4), DoubleToString(g_exec[0].VolumeStep(), 4),
       DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2),
@@ -788,7 +788,7 @@ void GDHeartbeat(void)
       symbols_json);
 
    string response;
-   if(GDHttp("POST", "/api/v1/bot/heartbeat", body, "application/json", response) != 200)
+   if(FXSHttp("POST", "/api/v1/bot/heartbeat", body, "application/json", response) != 200)
       return;
 
    //--- Laravel emits compact JSON, so a substring test is enough here and saves
@@ -799,7 +799,7 @@ void GDHeartbeat(void)
 //+------------------------------------------------------------------+
 //| Execute one command line from the wire protocol.                  |
 //+------------------------------------------------------------------+
-void GDHandleCommand(const string &f[])
+void FXSHandleCommand(const string &f[])
   {
    const long   id      = StringToInteger(f[0]);
    const string type    = f[1];
@@ -821,7 +821,7 @@ void GDHandleCommand(const string &f[])
 
    if(DryRun)
      {
-      GDReportResult(id, false, 0, 0, 0.0, 0.0,
+      FXSReportResult(id, false, 0, 0, 0.0, 0.0,
                      StringFormat("DryRun is enabled - command '%s' was not executed", type));
       return;
      }
@@ -831,16 +831,16 @@ void GDHandleCommand(const string &f[])
    if(type == "start")
      {
       g_trading_enabled = true;
-      GDReportResult(id, true, 0, 0, 0.0, 0.0, "");
-      GDLog("info", "Trading enabled by dashboard command");
+      FXSReportResult(id, true, 0, 0, 0.0, 0.0, "");
+      FXSLog("info", "Trading enabled by dashboard command");
       return;
      }
 
    if(type == "stop")
      {
       g_trading_enabled = false;
-      GDReportResult(id, true, 0, 0, 0.0, 0.0, "");
-      GDLog("info", "Trading disabled by dashboard command - open positions left alone");
+      FXSReportResult(id, true, 0, 0, 0.0, 0.0, "");
+      FXSLog("info", "Trading disabled by dashboard command - open positions left alone");
       return;
      }
 
@@ -851,9 +851,9 @@ void GDHandleCommand(const string &f[])
       //--- instrument this EA owns. Looping the executors would re-walk the same
       //--- position list once per symbol and report the count several times over.
       const int closed = g_exec[0].CloseAllOwned(retcode);
-      GDReportResult(id, retcode == 0, retcode, 0, 0.0, (double)closed,
+      FXSReportResult(id, retcode == 0, retcode, 0, 0.0, (double)closed,
                      retcode == 0 ? "" : g_exec[0].LastError());
-      GDLog(retcode == 0 ? "info" : "error",
+      FXSLog(retcode == 0 ? "info" : "error",
             StringFormat("Close All: %d position(s) closed", closed));
       return;
      }
@@ -864,61 +864,61 @@ void GDHandleCommand(const string &f[])
 
       //--- Recorded before the call, because the resulting deal can reach
       //--- OnTradeTransaction as soon as this handler returns.
-      GDRememberCloseReason(ticket, reason);
+      FXSRememberCloseReason(ticket, reason);
 
       //--- Routed by the position rather than the command: a close carries a ticket,
       //--- and the executor doing the arithmetic must be the one that knows that
       //--- instrument's digits.
-      const int ci = GDIndexForTicket(ticket);
+      const int ci = FXSIndexForTicket(ticket);
 
       if(ci < 0)
         {
-         GDTakeCloseReason(ticket);
-         GDReportResult(id, false, 0, ticket, 0.0, 0.0,
+         FXSTakeCloseReason(ticket);
+         FXSReportResult(id, false, 0, ticket, 0.0, 0.0,
                         "Position is on an instrument this terminal was not told to carry");
          return;
         }
 
       if(g_exec[ci].ClosePosition(ticket, volume, retcode))
         {
-         GDReportResult(id, true, retcode, ticket, 0.0, volume, "");
+         FXSReportResult(id, true, retcode, ticket, 0.0, volume, "");
         }
       else
         {
          //--- Nothing closed, so nothing will arrive to consume the reason. Left in
          //--- place it would be attached to whatever closed this position next.
-         GDTakeCloseReason(ticket);
-         GDReportResult(id, false, retcode, ticket, 0.0, 0.0, g_exec[ci].LastError());
+         FXSTakeCloseReason(ticket);
+         FXSReportResult(id, false, retcode, ticket, 0.0, 0.0, g_exec[ci].LastError());
         }
       return;
      }
 
    //--- Moving the stop, typically to break-even once the first rung has filled.
-   //--- A zero level means "leave that one alone"; see CGDExecutor::ModifyPosition.
+   //--- A zero level means "leave that one alone"; see CFXSExecutor::ModifyPosition.
    if(type == "modify")
      {
       uint retcode = 0;
 
-      const int mi = GDIndexForTicket(ticket);
+      const int mi = FXSIndexForTicket(ticket);
 
       if(mi < 0)
         {
-         GDReportResult(id, false, 0, ticket, 0.0, 0.0,
+         FXSReportResult(id, false, 0, ticket, 0.0, 0.0,
                         "Position is on an instrument this terminal was not told to carry");
          return;
         }
 
       if(g_exec[mi].ModifyPosition(ticket, sl_prc, tp_prc, retcode))
         {
-         GDReportResult(id, true, retcode, ticket, 0.0, 0.0, "");
-         GDLog("info", StringFormat("Position #%s stop/target moved (%s)",
+         FXSReportResult(id, true, retcode, ticket, 0.0, 0.0, "");
+         FXSLog("info", StringFormat("Position #%s stop/target moved (%s)",
                                     IntegerToString((long)ticket),
                                     (reason == "" ? "no reason given" : reason)));
         }
       else
         {
-         GDReportResult(id, false, retcode, ticket, 0.0, 0.0, g_exec[mi].LastError());
-         GDLog("error", StringFormat("Modify rejected on #%s: %s",
+         FXSReportResult(id, false, retcode, ticket, 0.0, 0.0, g_exec[mi].LastError());
+         FXSLog("error", StringFormat("Modify rejected on #%s: %s",
                                      IntegerToString((long)ticket), g_exec[mi].LastError()));
         }
       return;
@@ -931,18 +931,18 @@ void GDHandleCommand(const string &f[])
      {
       if(!g_trading_enabled)
         {
-         GDReportResult(id, false, 0, 0, 0.0, 0.0, "Trading is disabled; pending entry skipped");
+         FXSReportResult(id, false, 0, 0, 0.0, 0.0, "Trading is disabled; pending entry skipped");
          return;
         }
 
       //--- Refused rather than defaulted. Falling back to the first symbol would fill
       //--- a gold order on whatever this terminal happened to load first, which is the
       //--- worst outcome available here.
-      const int si = GDIndexFor(symbol);
+      const int si = FXSIndexFor(symbol);
 
       if(si < 0)
         {
-         GDReportResult(id, false, 0, 0, 0.0, 0.0,
+         FXSReportResult(id, false, 0, 0, 0.0, 0.0,
                         StringFormat("Command names symbol '%s', which this terminal was not told to carry",
                                      symbol));
          return;
@@ -954,15 +954,15 @@ void GDHandleCommand(const string &f[])
       if(g_exec[si].OpenPending(dir == "buy", volume, entry_prc, sl_prc, tp_prc,
                                 PendingExpiryMinutes, comment, order_ticket, retcode))
         {
-         GDReportResult(id, true, retcode, order_ticket, entry_prc, volume, "");
-         GDLog("info", StringFormat("Resting %s order placed at %s, expires in %d minutes",
+         FXSReportResult(id, true, retcode, order_ticket, entry_prc, volume, "");
+         FXSLog("info", StringFormat("Resting %s order placed at %s, expires in %d minutes",
                                     dir, DoubleToString(entry_prc, g_exec[si].Digits()),
                                     PendingExpiryMinutes));
         }
       else
         {
-         GDReportResult(id, false, retcode, 0, 0.0, 0.0, g_exec[si].LastError());
-         GDLog("error", StringFormat("Resting order rejected: %s", g_exec[si].LastError()));
+         FXSReportResult(id, false, retcode, 0, 0.0, 0.0, g_exec[si].LastError());
+         FXSLog("error", StringFormat("Resting order rejected: %s", g_exec[si].LastError()));
         }
 
       return;
@@ -975,7 +975,7 @@ void GDHandleCommand(const string &f[])
       //--- trading has been turned off.
       if(!g_trading_enabled)
         {
-         GDReportResult(id, false, 0, 0, 0.0, 0.0, "Trading is disabled; entry skipped");
+         FXSReportResult(id, false, 0, 0, 0.0, 0.0, "Trading is disabled; entry skipped");
          return;
         }
 
@@ -984,11 +984,11 @@ void GDHandleCommand(const string &f[])
       //--- Refused rather than defaulted. Falling back to the first symbol would fill
       //--- a gold order on whatever this terminal happened to load first, which is the
       //--- worst outcome available here.
-      const int si = GDIndexFor(symbol);
+      const int si = FXSIndexFor(symbol);
 
       if(si < 0)
         {
-         GDReportResult(id, false, 0, 0, 0.0, 0.0,
+         FXSReportResult(id, false, 0, 0, 0.0, 0.0,
                         StringFormat("Command names symbol '%s', which this terminal was not told to carry",
                                      symbol));
          return;
@@ -1003,15 +1003,15 @@ void GDHandleCommand(const string &f[])
       if(g_exec[si].Open(is_buy, volume, sl_pips, tp_pips, sl_prc, tp_prc, comment,
                      out_ticket, out_price, out_volume, retcode))
         {
-         GDReportResult(id, true, retcode, out_ticket, out_price, out_volume, "");
+         FXSReportResult(id, true, retcode, out_ticket, out_price, out_volume, "");
 
          //--- Reported here rather than from OnTradeTransaction so the trade can be
          //--- linked back to the command that asked for it.
-         GDQueueReport(StringFormat(
+         FXSQueueReport(StringFormat(
             "{\"event\":\"opened\",\"command_id\":%s,\"ticket\":%s,\"symbol\":\"%s\","
             "\"direction\":\"%s\",\"volume\":%s,\"price\":%s,\"magic\":%s,\"spread_pips\":%s}",
             IntegerToString(id), IntegerToString((long)out_ticket),
-            GDJsonEscape(g_exec[si].Symbol()), (is_buy ? "buy" : "sell"),
+            FXSJsonEscape(g_exec[si].Symbol()), (is_buy ? "buy" : "sell"),
             DoubleToString(out_volume, 2), DoubleToString(out_price, g_exec[si].Digits()),
             IntegerToString(MagicNumber),
             DoubleToString(SymbolInfoInteger(g_exec[si].Symbol(), SYMBOL_SPREAD) * g_exec[si].Point()
@@ -1019,25 +1019,25 @@ void GDHandleCommand(const string &f[])
         }
       else
         {
-         GDReportResult(id, false, retcode, 0, 0.0, 0.0, g_exec[si].LastError());
-         GDLog("error", StringFormat("Open rejected: %s", g_exec[si].LastError()));
+         FXSReportResult(id, false, retcode, 0, 0.0, 0.0, g_exec[si].LastError());
+         FXSLog("error", StringFormat("Open rejected: %s", g_exec[si].LastError()));
         }
 
       return;
      }
 
-   GDReportResult(id, false, 0, 0, 0.0, 0.0, StringFormat("Unknown command type '%s'", type));
+   FXSReportResult(id, false, 0, 0, 0.0, 0.0, StringFormat("Unknown command type '%s'", type));
   }
 
 //+------------------------------------------------------------------+
 //| Poll for commands and execute them.                               |
 //+------------------------------------------------------------------+
-void GDPollCommands(void)
+void FXSPollCommands(void)
   {
    string body;
    //--- text/plain selects the tab-separated wire format; MQL5 has no JSON parser
    //--- and an EA is a poor place to debug a hand-rolled one.
-   if(GDHttp("GET", "/api/v1/bot/commands", "", "text/plain", body) != 200)
+   if(FXSHttp("GET", "/api/v1/bot/commands", "", "text/plain", body) != 200)
       return;
 
    string lines[];
@@ -1049,11 +1049,11 @@ void GDPollCommands(void)
    StringTrimRight(header);
    StringTrimLeft(header);
 
-   if(header != GD_WIRE_VERSION)
+   if(header != FXS_WIRE_VERSION)
      {
-      GDLog("critical", StringFormat(
+      FXSLog("critical", StringFormat(
             "Wire protocol mismatch: dashboard sent '%s', this EA understands '%s'. "
-            "Recompile the EA from the matching commit.", header, GD_WIRE_VERSION));
+            "Recompile the EA from the matching commit.", header, FXS_WIRE_VERSION));
       return;
      }
 
@@ -1077,10 +1077,10 @@ void GDPollCommands(void)
       //--- this EA does not understand, and guessing which column became which would
       //--- be worse than refusing. The line itself is logged because a column count on
       //--- its own never says what actually arrived - that cost an evening once.
-      if(n < 1 || n > GD_WIRE_COLUMNS)
+      if(n < 1 || n > FXS_WIRE_COLUMNS)
         {
-         GDLog("error", StringFormat("Malformed command line: expected %d columns, got %d: '%s'",
-                                     GD_WIRE_COLUMNS, n, line));
+         FXSLog("error", StringFormat("Malformed command line: expected %d columns, got %d: '%s'",
+                                     FXS_WIRE_COLUMNS, n, line));
          continue;
         }
 
@@ -1089,14 +1089,14 @@ void GDPollCommands(void)
       //--- ten empty columns. WIRE_COLUMNS is append-only, so a missing trailing column
       //--- can only mean empty. Pad rather than refuse, and let each command type
       //--- reject the fields it actually needs - Open() already refuses a zero volume.
-      if(n < GD_WIRE_COLUMNS)
+      if(n < FXS_WIRE_COLUMNS)
         {
-         ArrayResize(fields, GD_WIRE_COLUMNS);
-         for(int f = n; f < GD_WIRE_COLUMNS; f++)
+         ArrayResize(fields, FXS_WIRE_COLUMNS);
+         for(int f = n; f < FXS_WIRE_COLUMNS; f++)
             fields[f] = "";
         }
 
-      GDHandleCommand(fields);
+      FXSHandleCommand(fields);
      }
   }
 
@@ -1109,19 +1109,19 @@ int OnInit(void)
 
    if(ApiToken == "")
      {
-      Print("[GD] ApiToken is empty. Issue one with: php artisan bot:token you@example.com");
+      Print("[FXS] ApiToken is empty. Issue one with: php artisan bot:token you@example.com");
       return INIT_PARAMETERS_INCORRECT;
      }
 
    if(StringFind(ApiBaseUrl, "https://") != 0)
-      Print("[GD] WARNING: ApiBaseUrl is not HTTPS. The token is sent on every request.");
+      Print("[FXS] WARNING: ApiBaseUrl is not HTTPS. The token is sent on every request.");
 
    //--- Refuse a live account unless the operator has explicitly said otherwise.
    //--- The default is the safe direction; discovering this the other way round is
    //--- expensive.
    if(DemoOnly && AccountInfoInteger(ACCOUNT_TRADE_MODE) == ACCOUNT_TRADE_MODE_REAL)
      {
-      Print("[GD] This is a LIVE account and DemoOnly is enabled. Refusing to start.");
+      Print("[FXS] This is a LIVE account and DemoOnly is enabled. Refusing to start.");
       return INIT_FAILED;
      }
 
@@ -1136,15 +1136,15 @@ int OnInit(void)
 
    if(wanted < 1)
      {
-      Print("[GD] BaseSymbols is empty. Name at least one instrument.");
+      Print("[FXS] BaseSymbols is empty. Name at least one instrument.");
       return INIT_PARAMETERS_INCORRECT;
      }
 
-   if(wanted > GD_MAX_SYMBOLS)
+   if(wanted > FXS_MAX_SYMBOLS)
      {
-      PrintFormat("[GD] %d symbols requested but this build carries at most %d. "
+      PrintFormat("[FXS] %d symbols requested but this build carries at most %d. "
                   "Every poll walks the whole list, so a longer one spends the timer on HTTP.",
-                  wanted, GD_MAX_SYMBOLS);
+                  wanted, FXS_MAX_SYMBOLS);
       return INIT_PARAMETERS_INCORRECT;
      }
 
@@ -1167,7 +1167,7 @@ int OnInit(void)
 
       if(!g_exec[g_symbols].Init(base, MagicNumber, Deviation, pip_for, MaxRetries))
         {
-         PrintFormat("[GD] %s (%s)", g_exec[g_symbols].LastError(), base);
+         PrintFormat("[FXS] %s (%s)", g_exec[g_symbols].LastError(), base);
          return INIT_FAILED;
         }
 
@@ -1179,7 +1179,7 @@ int OnInit(void)
       g_entry_seeded[g_symbols]   = false;
       g_trend_seeded[g_symbols]   = false;
 
-      PrintFormat("[GD] Symbol %s -> %s (digits=%d point=%s pip=%s stops_level=%d min_lot=%s)",
+      PrintFormat("[FXS] Symbol %s -> %s (digits=%d point=%s pip=%s stops_level=%d min_lot=%s)",
                   base, g_exec[g_symbols].Symbol(), g_exec[g_symbols].Digits(),
                   DoubleToString(g_exec[g_symbols].Point(), 5),
                   DoubleToString(g_exec[g_symbols].PipSize(), 5),
@@ -1187,23 +1187,23 @@ int OnInit(void)
                   DoubleToString(g_exec[g_symbols].VolumeMin(), 2));
 
       if(g_symbols > 0 && g_exec[g_symbols].PipSize() <= 0.0)
-         PrintFormat("[GD] WARNING: pip size for %s could not be inferred.", base);
+         PrintFormat("[FXS] WARNING: pip size for %s could not be inferred.", base);
 
       g_symbols++;
      }
 
    if(g_symbols < 1)
      {
-      Print("[GD] BaseSymbols named nothing usable.");
+      Print("[FXS] BaseSymbols named nothing usable.");
       return INIT_PARAMETERS_INCORRECT;
      }
 
    if(PipSize <= 0.0)
-      Print("[GD] WARNING: PipSize was inferred. On gold the broker's point is 0.01 but most "
+      Print("[FXS] WARNING: PipSize was inferred. On gold the broker's point is 0.01 but most "
             "strategies mean 0.10 by 'a pip'. Being wrong by 10x makes every order return 10016.");
 
    if(TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) == 0)
-      Print("[GD] WARNING: Algo Trading is OFF in the terminal. Orders will return 10027 "
+      Print("[FXS] WARNING: Algo Trading is OFF in the terminal. Orders will return 10027 "
             "until you click the Algo Trading button.");
 
    //--- The dashboard rejects a push of more than 1000 bars outright, and a first push
@@ -1213,37 +1213,37 @@ int OnInit(void)
      {
       if(HistoryBars < 100 || HistoryBars > 1000)
         {
-         Print("[GD] HistoryBars must be between 100 and 1000. "
+         Print("[FXS] HistoryBars must be between 100 and 1000. "
                "Below 100 the dashboard's ADX and EMA never warm up; above 1000 the push is refused.");
          return INIT_PARAMETERS_INCORRECT;
         }
 
       if(WindowBars < 2 || WindowBars > HistoryBars)
         {
-         Print("[GD] WindowBars must be at least 2 and no larger than HistoryBars.");
+         Print("[FXS] WindowBars must be at least 2 and no larger than HistoryBars.");
          return INIT_PARAMETERS_INCORRECT;
         }
 
-      PrintFormat("[GD] Candle push on: %s entry, %s trend (%d bars first, %d per bar after). "
+      PrintFormat("[FXS] Candle push on: %s entry, %s trend (%d bars first, %d per bar after). "
                   "These must match the strategy's timeframes on the dashboard.",
-                  GDTimeframeName(EntryTimeframe), GDTimeframeName(TrendTimeframe),
+                  FXSTimeframeName(EntryTimeframe), FXSTimeframeName(TrendTimeframe),
                   HistoryBars, WindowBars);
 
-      const double pip_value = GDPipValuePerLot(0);
+      const double pip_value = FXSPipValuePerLot(0);
 
       //--- Without this the dashboard cannot size a position and will record every
       //--- signal as lot_size_unavailable, which looks like the strategy never firing.
       if(pip_value <= 0.0)
-         Print("[GD] WARNING: this symbol reports no tick value, so pip value per lot is unknown. "
+         Print("[FXS] WARNING: this symbol reports no tick value, so pip value per lot is unknown. "
                "The dashboard will refuse to size positions rather than guess.");
       else
-         PrintFormat("[GD] Pip value per lot: %s (pip size %s)",
+         PrintFormat("[FXS] Pip value per lot: %s (pip size %s)",
                      DoubleToString(pip_value, 5), DoubleToString(g_exec[0].PipSize(), 5));
      }
 
    if(Reconcile && ReconcileMinutes < 1)
      {
-      Print("[GD] ReconcileMinutes must be at least 1.");
+      Print("[FXS] ReconcileMinutes must be at least 1.");
       return INIT_PARAMETERS_INCORRECT;
      }
 
@@ -1256,11 +1256,11 @@ int OnInit(void)
       //--- happened while this was detached happened unobserved. Replay the closes
       //--- first, so a position that has already gone is settled before the snapshot
       //--- reports it missing and the dashboard has to close it without figures.
-      GDReplayClosedDeals(ReplayHistoryDays);
-      GDFlushReports();
+      FXSReplayClosedDeals(ReplayHistoryDays);
+      FXSFlushReports();
 
       g_last_reconcile = TimeCurrent();
-      GDReportPositions();
+      FXSReportPositions();
      }
 
    string carried = "";
@@ -1268,8 +1268,8 @@ int OnInit(void)
    for(int i = 0; i < g_symbols; i++)
       carried += (i == 0 ? "" : ", ") + g_exec[i].Symbol();
 
-   GDLog("info", StringFormat("EA %s attached carrying %s (terminal build %d)",
-                              GD_EA_VERSION, carried,
+   FXSLog("info", StringFormat("EA %s attached carrying %s (terminal build %d)",
+                              FXS_EA_VERSION, carried,
                               (int)TerminalInfoInteger(TERMINAL_BUILD)));
 
    return INIT_SUCCEEDED;
@@ -1286,8 +1286,8 @@ void OnDeinit(const int reason)
      {
       //--- One last flush: fills recorded but never reported would leave the
       //--- dashboard permanently out of step with the account.
-      GDFlushReports();
-      GDLog("info", StringFormat("EA detached (reason %d)", reason));
+      FXSFlushReports();
+      FXSLog("info", StringFormat("EA detached (reason %d)", reason));
      }
   }
 
@@ -1301,11 +1301,11 @@ void OnTimer(void)
 
    //--- Heartbeat first: it carries the kill-switch state that the commands
    //--- claimed in this same tick are then evaluated against.
-   GDHeartbeat();
+   FXSHeartbeat();
 
    //--- Report before claiming: never take on new work while the record of
    //--- already-executed work is still sitting in the buffer.
-   GDFlushReports();
+   FXSFlushReports();
 
    //--- Push bars before polling. A newly closed bar makes the dashboard evaluate the
    //--- strategy and, if it enters, queue the command inside that same request - so
@@ -1316,14 +1316,14 @@ void OnTimer(void)
    //--- record what the strategy would have done. The dashboard sees the same flag on
    //--- the heartbeat and skips those signals with "algo_trading_disabled" rather than
    //--- queueing entries that could only be refused.
-   GDMaintainCandles();
+   FXSMaintainCandles();
 
    //--- A correction, not a feed: /fills still reports every event as it happens, and
    //--- this only catches what no event covered.
    if(Reconcile && (TimeCurrent() - g_last_reconcile) >= (ReconcileMinutes * 60))
      {
       g_last_reconcile = TimeCurrent();
-      GDReportPositions();
+      FXSReportPositions();
      }
 
    if(TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) == 0 || MQLInfoInteger(MQL_TRADE_ALLOWED) == 0)
@@ -1333,12 +1333,12 @@ void OnTimer(void)
       if(TimeCurrent() - g_last_warned > 60)
         {
          g_last_warned = TimeCurrent();
-         Print("[GD] Algo Trading is disabled - not claiming commands.");
+         Print("[FXS] Algo Trading is disabled - not claiming commands.");
         }
       return;
      }
 
-   GDPollCommands();
+   FXSPollCommands();
   }
 
 //+------------------------------------------------------------------+
@@ -1405,7 +1405,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    //--- Pips are a per-instrument unit: a gold pip is 0.10 and a EURUSD pip is 0.0001,
    //--- so taking the figure from whichever executor loaded first would have been wrong
    //--- by orders of magnitude on every symbol but one.
-   const int ti = GDIndexFor(HistoryDealGetString(trans.deal, DEAL_SYMBOL));
+   const int ti = FXSIndexFor(HistoryDealGetString(trans.deal, DEAL_SYMBOL));
 
    double pips = 0.0;
    if(entry_price > 0.0 && ti >= 0 && g_exec[ti].PipSize() > 0.0)
@@ -1428,7 +1428,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       //--- Only an EXPERT close can have been commanded, so only this branch consults
       //--- the store. A stop or target that happened to fire on a position with a
       //--- stale entry must not inherit its rung.
-      const string commanded = GDTakeCloseReason((ulong)position_id);
+      const string commanded = FXSTakeCloseReason((ulong)position_id);
 
       if(commanded != "")
         {
@@ -1442,7 +1442,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
         }
      }
 
-   GDQueueReport(StringFormat(
+   FXSQueueReport(StringFormat(
       "{\"event\":\"%s\",\"ticket\":%s,\"deal_ticket\":%s,\"volume\":%s,\"price\":%s,"
       "\"pips_profit\":%s,\"profit\":%s,\"commission\":%s,\"swap\":%s,"
       "\"reason\":\"%s\",\"closure_note\":\"%s\"}",
@@ -1451,6 +1451,6 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       DoubleToString(volume, 2), DoubleToString(close_price, ti >= 0 ? g_exec[ti].Digits() : 6),
       DoubleToString(pips, 2), DoubleToString(profit, 2),
       DoubleToString(commission, 2), DoubleToString(swap, 2),
-      reason_enum, GDJsonEscape(reason_note)));
+      reason_enum, FXSJsonEscape(reason_note)));
   }
 //+------------------------------------------------------------------+

@@ -10,7 +10,7 @@ You need a Windows machine with MetaTrader 5 installed. There is no way around t
 MetaEditor is Windows-only.
 
 > **Done once, on 2026-08-25**, on demo account `230070844 @ Elev8-Demo2` against
-> `https://fx.affandy.com`. The procedure below is what was run; the notes marked
+> `https://fxsignal.pro`. The procedure below is what was run; the notes marked
 > **Measured** are what that account actually reported, and **Found** marks something that
 > only went wrong because it was run for real. Repeat this whole sequence for any new
 > account, broker or machine — none of the measured values transfer.
@@ -30,8 +30,8 @@ MetaEditor is Windows-only.
 
 ## 1 · Compile
 
-Copy `mql5/Include/GoldDigger/` and `mql5/Experts/GoldDigger/` into the terminal's data folder
-(File → Open Data Folder), then open `GoldDiggerBridge.mq5` in MetaEditor and press **F7**.
+Copy `mql5/Include/FXSignalPro/` and `mql5/Experts/FXSignalPro/` into the terminal's data folder
+(File → Open Data Folder), then open `FXSignalPro.mq5` in MetaEditor and press **F7**.
 
 Fix what it reports before going further. A warning about an unused variable can wait; anything
 about a type or a signature cannot.
@@ -44,7 +44,7 @@ about a type or a signature cannot.
 MetaEditor also compiles headlessly, which is easier to automate and easier to trust:
 
 ```bash
-MetaEditor64.exe /compile:"...\Experts\GoldDigger\GoldDiggerBridge.mq5" /log:"...\gd.log"
+MetaEditor64.exe /compile:"...\Experts\FXSignalPro\FXSignalPro.mq5" /log:"...\gd.log"
 ```
 
 The log is UTF-16 and the exit code means nothing useful — read `Result: N errors, M warnings`.
@@ -60,8 +60,8 @@ The log is UTF-16 and the exit code means nothing useful — read `Result: N err
 
 Tools → Options → Expert Advisors → **Allow WebRequest for listed URL**, and add the origin.
 
-Scheme and host only — `https://your-dashboard.example.com`, no trailing path. A path there is
-the usual cause of `WebRequest` error **4014**, which the EA logs with that exact explanation.
+Scheme and host only — `https://fxsignal.pro`, no trailing path. A path there is the usual
+cause of `WebRequest` error **4014**, which the EA logs with that exact explanation.
 
 ---
 
@@ -152,7 +152,7 @@ risking a position.
 > queueing rather than relying on the queued `stop` being delivered. That decision is recorded
 > in `HANDOFF.md` as a design note; this is the day it paid.
 >
-> The cross-language contract test could not have caught it. It compares `GD_WIRE_COLUMNS`
+> The cross-language contract test could not have caught it. It compares `FXS_WIRE_COLUMNS`
 > against `count(WIRE_COLUMNS)`, and both sides genuinely agreed on twelve — the disagreement
 > was about whitespace. Tests were added for the shape rather than the constant. **Use a
 > command that carries no payload for this check**, precisely because it is the fragile shape;

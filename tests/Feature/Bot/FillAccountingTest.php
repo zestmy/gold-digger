@@ -89,7 +89,7 @@ class FillAccountingTest extends TestCase
 
         $before = $this->trade->fresh()->only(['net_pnl_money', 'gross_pnl_pips', 'remaining_lot_size', 'status']);
 
-        // Exactly what GDReplayClosedDeals sends when the terminal reconnects.
+        // Exactly what FXSReplayClosedDeals sends when the terminal reconnects.
         $this->fill(deal: 86016866, volume: 0.01, price: 4663.43, pips: 50.20, profit: 5.02, reason: 'tp1');
         $this->fill(deal: 86022835, volume: 0.01, price: 4658.23, pips: -1.80, profit: -0.18, reason: 'sl');
 

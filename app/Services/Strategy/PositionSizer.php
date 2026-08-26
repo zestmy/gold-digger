@@ -25,7 +25,7 @@ namespace App\Services\Strategy;
  * ## Rounding
  *
  * The result is deliberately *not* snapped to the broker's volume step. Only the terminal
- * knows the step, and CGDExecutor::NormalizeVolume already snaps downward - rounding here
+ * knows the step, and CFXSExecutor::NormalizeVolume already snaps downward - rounding here
  * as well would round twice and could round up into more risk than the setting allows.
  */
 final class PositionSizer

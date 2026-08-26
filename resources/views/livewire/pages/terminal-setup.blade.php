@@ -156,10 +156,28 @@
             </h3>
             <ol class="mt-3 space-y-2 text-sm text-gray-300">
                 <li>Extract the archive over <em>File &rarr; Open Data Folder</em>, merging the MQL5 directory.</li>
-                <li>Open <code class="text-gray-400">Experts/GoldDigger/GoldDiggerBridge.mq5</code> in MetaEditor and press F7.</li>
+                <li>Open <code class="text-gray-400">Experts/FXSignalPro/FXSignalPro.mq5</code> in MetaEditor and press F7.</li>
                 <li>Drag it onto any chart of a <strong>demo</strong> account, paste the token into <code class="text-gray-400">ApiToken</code>.</li>
                 <li>Tick <strong>Allow Algo Trading</strong> in the Common tab, and check the toolbar button too.</li>
             </ol>
+
+            {{-- Asked for directly, because the instinct after a P&L discrepancy is to stop
+                 re-attaching - and re-attaching is both necessary and how the dashboard
+                 recovers from being out of touch. --}}
+            <div class="mt-4 rounded-md border border-gray-700 bg-gray-900/60 p-3">
+                <p class="text-xs font-medium text-gray-300">Re-attaching is safe, and sometimes necessary</p>
+                <p class="mt-1 text-xs text-gray-500">
+                    A recompile or an input change only takes effect when the EA is removed and put back:
+                    MetaTrader keeps the running copy in memory. On every attach the EA replays recent
+                    closing deals, which is how a fill that happened while the dashboard was unreachable
+                    still reaches it.
+                </p>
+                <p class="mt-2 text-xs text-gray-500">
+                    Those replays are matched on the broker's deal ticket, so a deal already recorded is
+                    updated rather than counted again. Bot Status will say if a position's total ever
+                    stops matching the deals behind it.
+                </p>
+            </div>
 
             {{-- The one that catches everybody, including during commissioning here. --}}
             <p class="mt-3 rounded-md bg-gray-900 p-3 text-xs text-gray-400">

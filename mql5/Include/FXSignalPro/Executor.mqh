@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//|                                                  GDExecutor.mqh  |
-//|                          Gold Digger - MT5 execution primitives   |
+//|                                                    Executor.mqh  |
+//|                          FXSignalPro - MT5 execution primitives   |
 //+------------------------------------------------------------------+
 //| Order placement hardened against the rejections documented in     |
 //| docs/MT5_EXECUTION.md:                                            |
@@ -14,7 +14,7 @@
 //| This mirrors bot/mt5_executor.py deliberately: whichever executor |
 //| is running, the same request should reach the broker.             |
 //+------------------------------------------------------------------+
-#property copyright "Gold Digger"
+#property copyright "FXSignalPro"
 
 #include <Trade/Trade.mqh>
 
@@ -22,7 +22,7 @@
 //| Human-readable explanation for an MT5 retcode.                    |
 //| Kept verbatim in step with RETCODES in bot/mt5_executor.py.        |
 //+------------------------------------------------------------------+
-string GDExplainRetcode(const uint code)
+string FXSExplainRetcode(const uint code)
   {
    switch(code)
      {
@@ -65,7 +65,7 @@ string GDExplainRetcode(const uint code)
 //+------------------------------------------------------------------+
 //| Is this retcode worth another attempt with a refreshed price?     |
 //+------------------------------------------------------------------+
-bool GDIsRetryable(const uint code)
+bool FXSIsRetryable(const uint code)
   {
    return code == TRADE_RETCODE_REQUOTE
        || code == TRADE_RETCODE_PRICE_CHANGED
@@ -75,9 +75,9 @@ bool GDIsRetryable(const uint code)
   }
 
 //+------------------------------------------------------------------+
-//| CGDExecutor                                                       |
+//| CFXSExecutor                                                      |
 //+------------------------------------------------------------------+
-class CGDExecutor
+class CFXSExecutor
   {
 private:
    CTrade            m_trade;
@@ -99,7 +99,7 @@ private:
    bool              ApplyFilling(const int attempt);
 
 public:
-                     CGDExecutor(void);
+                     CFXSExecutor(void);
 
    bool              Init(const string base_symbol, const long magic, const int deviation,
                           const double pip_size_override, const int max_retries);
@@ -141,11 +141,11 @@ public:
   };
 
 //+------------------------------------------------------------------+
-CGDExecutor::CGDExecutor(void) : m_symbol(""), m_digits(2), m_point(0.01),
-                                 m_stops_level(0), m_freeze_level(0),
-                                 m_vol_min(0.01), m_vol_max(100.0), m_vol_step(0.01),
-                                 m_pip_size(0.0), m_deviation(20), m_magic(0),
-                                 m_max_retries(3), m_last_error("")
+CFXSExecutor::CFXSExecutor(void) : m_symbol(""), m_digits(2), m_point(0.01),
+                                   m_stops_level(0), m_freeze_level(0),
+                                   m_vol_min(0.01), m_vol_max(100.0), m_vol_step(0.01),
+                                   m_pip_size(0.0), m_deviation(20), m_magic(0),
+                                   m_max_retries(3), m_last_error("")
   {
   }
 
@@ -158,8 +158,8 @@ CGDExecutor::CGDExecutor(void) : m_symbol(""), m_digits(2), m_point(0.01),
 //| find it - and it must be pushed into Market Watch before any      |
 //| SymbolInfo* call returns useful data.                             |
 //+------------------------------------------------------------------+
-bool CGDExecutor::Init(const string base_symbol, const long magic, const int deviation,
-                       const double pip_size_override, const int max_retries)
+bool CFXSExecutor::Init(const string base_symbol, const long magic, const int deviation,
+                        const double pip_size_override, const int max_retries)
   {
    m_magic       = magic;
    m_deviation   = deviation;
@@ -222,7 +222,7 @@ bool CGDExecutor::Init(const string base_symbol, const long magic, const int dev
   }
 
 //+------------------------------------------------------------------+
-void CGDExecutor::CacheSpec(void)
+void CFXSExecutor::CacheSpec(void)
   {
    m_digits       = (int)SymbolInfoInteger(m_symbol, SYMBOL_DIGITS);
    m_point        = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
@@ -242,7 +242,7 @@ void CGDExecutor::CacheSpec(void)
 //| Rounds DOWN, never up: risk sizing produces values like 0.037 and |
 //| rounding up would silently take more risk than the setting allows.|
 //+------------------------------------------------------------------+
-double CGDExecutor::NormalizeVolume(const double volume) const
+double CFXSExecutor::NormalizeVolume(const double volume) const
   {
    double snapped = MathFloor(volume / m_vol_step) * m_vol_step;
 
@@ -259,7 +259,7 @@ double CGDExecutor::NormalizeVolume(const double volume) const
 //+------------------------------------------------------------------+
 //| Minimum distance SL/TP must keep from price, in price units.      |
 //+------------------------------------------------------------------+
-double CGDExecutor::MinStopDistance(void) const
+double CFXSExecutor::MinStopDistance(void) const
   {
    return (double)MathMax(m_stops_level, m_freeze_level) * m_point;
   }
@@ -271,7 +271,7 @@ double CGDExecutor::MinStopDistance(void) const
 //| which the server reports as the same 10016 as a too-close stop.   |
 //| Zero means "no level", and is left untouched.                     |
 //+------------------------------------------------------------------+
-void CGDExecutor::ClampStops(const bool is_buy, const double price, double &sl, double &tp) const
+void CFXSExecutor::ClampStops(const bool is_buy, const double price, double &sl, double &tp) const
   {
    const double min_dist = MinStopDistance();
 
@@ -280,7 +280,7 @@ void CGDExecutor::ClampStops(const bool is_buy, const double price, double &sl, 
       const double limit = is_buy ? price - min_dist : price + min_dist;
       if((is_buy && sl > limit) || (!is_buy && sl < limit))
         {
-         PrintFormat("[GD] SL %s is inside the %d-point stops level; moving to %s",
+         PrintFormat("[FXS] SL %s is inside the %d-point stops level; moving to %s",
                      DoubleToString(sl, m_digits), MathMax(m_stops_level, m_freeze_level),
                      DoubleToString(limit, m_digits));
          sl = limit;
@@ -293,7 +293,7 @@ void CGDExecutor::ClampStops(const bool is_buy, const double price, double &sl, 
       const double limit = is_buy ? price + min_dist : price - min_dist;
       if((is_buy && tp < limit) || (!is_buy && tp > limit))
         {
-         PrintFormat("[GD] TP %s is inside the %d-point stops level; moving to %s",
+         PrintFormat("[FXS] TP %s is inside the %d-point stops level; moving to %s",
                      DoubleToString(tp, m_digits), MathMax(m_stops_level, m_freeze_level),
                      DoubleToString(limit, m_digits));
          tp = limit;
@@ -311,7 +311,7 @@ void CGDExecutor::ClampStops(const bool is_buy, const double price, double &sl, 
 //| the next. Attempt 0 uses the advertised mode; later attempts walk |
 //| the remaining candidates.                                         |
 //+------------------------------------------------------------------+
-bool CGDExecutor::ApplyFilling(const int attempt)
+bool CFXSExecutor::ApplyFilling(const int attempt)
   {
    const long mask = SymbolInfoInteger(m_symbol, SYMBOL_FILLING_MODE);
 
@@ -338,12 +338,12 @@ bool CGDExecutor::ApplyFilling(const int attempt)
 //| size) or as absolute prices; absolute wins when both are present. |
 //| Zero means "no level".                                            |
 //+------------------------------------------------------------------+
-bool CGDExecutor::Open(const bool is_buy, const double volume,
-                       const double sl_pips, const double tp_pips,
-                       const double sl_price_in, const double tp_price_in,
-                       const string comment,
-                       ulong &out_ticket, double &out_price, double &out_volume,
-                       uint &out_retcode)
+bool CFXSExecutor::Open(const bool is_buy, const double volume,
+                        const double sl_pips, const double tp_pips,
+                        const double sl_price_in, const double tp_price_in,
+                        const string comment,
+                        ulong &out_ticket, double &out_price, double &out_volume,
+                        uint &out_retcode)
   {
    out_ticket  = 0;
    out_price   = 0.0;
@@ -416,26 +416,26 @@ bool CGDExecutor::Open(const bool is_buy, const double volume,
          attempt--;                       // this attempt did not consume a retry
          if(filling_attempt > 2)
            {
-            m_last_error = GDExplainRetcode(out_retcode);
+            m_last_error = FXSExplainRetcode(out_retcode);
             return false;
            }
          continue;
         }
 
-      if(GDIsRetryable(out_retcode) && attempt < m_max_retries - 1)
+      if(FXSIsRetryable(out_retcode) && attempt < m_max_retries - 1)
         {
-         PrintFormat("[GD] attempt %d/%d: %s - retrying", attempt + 1, m_max_retries,
-                     GDExplainRetcode(out_retcode));
+         PrintFormat("[FXS] attempt %d/%d: %s - retrying", attempt + 1, m_max_retries,
+                     FXSExplainRetcode(out_retcode));
          Sleep(200 * (attempt + 1));
          continue;
         }
 
-      m_last_error = GDExplainRetcode(out_retcode) + " | " + m_trade.ResultRetcodeDescription();
+      m_last_error = FXSExplainRetcode(out_retcode) + " | " + m_trade.ResultRetcodeDescription();
       return false;
      }
 
    m_last_error = "Gave up after " + IntegerToString(m_max_retries) + " attempts: "
-                + GDExplainRetcode(out_retcode);
+                + FXSExplainRetcode(out_retcode);
    return false;
   }
 
@@ -451,11 +451,11 @@ bool CGDExecutor::Open(const bool is_buy, const double volume,
 //| the wrong one is refused with 10015. The dashboard cannot see    |
 //| the current tick, so it must not be the thing that chooses.      |
 //+------------------------------------------------------------------+
-bool CGDExecutor::OpenPending(const bool is_buy, const double volume,
-                              const double entry_price, const double sl_price_in,
-                              const double tp_price_in, const int expiry_minutes,
-                              const string comment,
-                              ulong &out_ticket, uint &out_retcode)
+bool CFXSExecutor::OpenPending(const bool is_buy, const double volume,
+                               const double entry_price, const double sl_price_in,
+                               const double tp_price_in, const int expiry_minutes,
+                               const string comment,
+                               ulong &out_ticket, uint &out_retcode)
   {
    out_ticket  = 0;
    out_retcode = 0;
@@ -537,7 +537,7 @@ bool CGDExecutor::OpenPending(const bool is_buy, const double volume,
       return true;
      }
 
-   m_last_error = GDExplainRetcode(out_retcode);
+   m_last_error = FXSExplainRetcode(out_retcode);
    return false;
   }
 
@@ -547,7 +547,7 @@ bool CGDExecutor::OpenPending(const bool is_buy, const double volume,
 //| Partial closes are how the TP1/TP2/TP3 ladder is executed; each   |
 //| one becomes a row in trade_partials.                              |
 //+------------------------------------------------------------------+
-bool CGDExecutor::ClosePosition(const ulong ticket, const double volume, uint &out_retcode)
+bool CFXSExecutor::ClosePosition(const ulong ticket, const double volume, uint &out_retcode)
   {
    out_retcode  = 0;
    m_last_error = "";
@@ -581,12 +581,12 @@ bool CGDExecutor::ClosePosition(const ulong ticket, const double volume, uint &o
 
       if(out_retcode != TRADE_RETCODE_INVALID_FILL)
         {
-         m_last_error = GDExplainRetcode(out_retcode) + " | " + m_trade.ResultRetcodeDescription();
+         m_last_error = FXSExplainRetcode(out_retcode) + " | " + m_trade.ResultRetcodeDescription();
          return false;
         }
      }
 
-   m_last_error = GDExplainRetcode(out_retcode);
+   m_last_error = FXSExplainRetcode(out_retcode);
    return false;
   }
 
@@ -605,8 +605,8 @@ bool CGDExecutor::ClosePosition(const ulong ticket, const double volume, uint &o
 //| has come back close to entry - which is precisely when it is      |
 //| being asked for.                                                  |
 //+------------------------------------------------------------------+
-bool CGDExecutor::ModifyPosition(const ulong ticket, const double sl_price_in,
-                                 const double tp_price_in, uint &out_retcode)
+bool CFXSExecutor::ModifyPosition(const ulong ticket, const double sl_price_in,
+                                  const double tp_price_in, uint &out_retcode)
   {
    out_retcode  = 0;
    m_last_error = "";
@@ -651,14 +651,14 @@ bool CGDExecutor::ModifyPosition(const ulong ticket, const double sl_price_in,
    if(sent && (out_retcode == TRADE_RETCODE_DONE || out_retcode == TRADE_RETCODE_PLACED))
       return true;
 
-   m_last_error = GDExplainRetcode(out_retcode) + " | " + m_trade.ResultRetcodeDescription();
+   m_last_error = FXSExplainRetcode(out_retcode) + " | " + m_trade.ResultRetcodeDescription();
    return false;
   }
 
 //+------------------------------------------------------------------+
 //| Count positions opened by this EA (magic number filter).          |
 //+------------------------------------------------------------------+
-int CGDExecutor::CountOwnedPositions(void) const
+int CFXSExecutor::CountOwnedPositions(void) const
   {
    int owned = 0;
 
@@ -682,7 +682,7 @@ int CGDExecutor::CountOwnedPositions(void) const
 //| Positions opened by hand or by another EA are deliberately left   |
 //| alone - the magic number is the only thing separating them.       |
 //+------------------------------------------------------------------+
-int CGDExecutor::CloseAllOwned(uint &out_retcode)
+int CFXSExecutor::CloseAllOwned(uint &out_retcode)
   {
    int closed = 0;
    out_retcode = 0;
@@ -701,7 +701,7 @@ int CGDExecutor::CloseAllOwned(uint &out_retcode)
       else
         {
          out_retcode = retcode;
-         PrintFormat("[GD] close-all could not close #%s: %s", IntegerToString((long)ticket), m_last_error);
+         PrintFormat("[FXS] close-all could not close #%s: %s", IntegerToString((long)ticket), m_last_error);
         }
      }
 

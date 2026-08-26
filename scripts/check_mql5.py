@@ -10,14 +10,14 @@ otherwise be the first to notice:
      string. In MQL5 this does not fail loudly; it prints nonsense, and every wire
      payload in this EA is built with StringFormat.
 
-  2. GD* functions that are called but never defined, which in MQL5 means the file
+  2. FXS* functions that are called but never defined, which in MQL5 means the file
      simply will not compile.
 
 Neither replaces a compiler. They exist so the obvious mistakes are caught by a push
 rather than by the person sitting down to commission the bot.
 
 Usage:
-    python scripts/check_mql5.py mql5/Experts/GoldDigger/*.mq5 mql5/Include/GoldDigger/*.mqh
+    python scripts/check_mql5.py mql5/Experts/FXSignalPro/*.mq5 mql5/Include/FXSignalPro/*.mqh
 
 Exits non-zero when something is wrong, so CI fails on it.
 """
@@ -155,9 +155,9 @@ def check(path):
                     '%s:%d  %s expects %d argument(s), %d supplied'
                     % (path, line, fname, specs, supplied))
 
-    # ---- 2. every GD* function called is defined somewhere in the sources ----
-    defined = set(re.findall(r'^[A-Za-z_][A-Za-z0-9_ *&]*?\b(GD[A-Za-z0-9_]*)\s*\(', src, re.M))
-    called = set(re.findall(r'\b(GD[A-Za-z0-9_]*)\s*\(', src))
+    # ---- 2. every FXS* function called is defined somewhere in the sources ----
+    defined = set(re.findall(r'^[A-Za-z_][A-Za-z0-9_ *&]*?\b(FXS[A-Za-z0-9_]*)\s*\(', src, re.M))
+    called = set(re.findall(r'\b(FXS[A-Za-z0-9_]*)\s*\(', src))
     return problems, defined, called
 
 
@@ -172,12 +172,12 @@ for f in files:
     all_defined |= d
     all_called |= c
 
-# GD_ prefixed macros are #defines, not functions.
+# FXS_ prefixed macros are #defines, not functions.
 macros = set()
 for f in files:
-    macros |= set(re.findall(r'#define\s+(GD_[A-Za-z0-9_]*)', io.open(f, encoding='utf-8').read()))
+    macros |= set(re.findall(r'#define\s+(FXS_[A-Za-z0-9_]*)', io.open(f, encoding='utf-8').read()))
 
-undefined = sorted(n for n in all_called - all_defined if n not in macros and not n.startswith('GD_'))
+undefined = sorted(n for n in all_called - all_defined if n not in macros and not n.startswith('FXS_'))
 
 print('=== format specifier / argument counts ===')
 if all_problems:
@@ -186,7 +186,7 @@ if all_problems:
 else:
     print('  all StringFormat/PrintFormat calls balanced')
 
-print('=== GD* functions called but never defined ===')
+print('=== FXS* functions called but never defined ===')
 print('  ' + (', '.join(undefined) if undefined else 'none'))
 
 sys.exit(1 if (all_problems or undefined) else 0)

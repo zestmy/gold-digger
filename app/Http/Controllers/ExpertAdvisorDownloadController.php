@@ -12,9 +12,10 @@ use ZipArchive;
  *
  * ## The URL is substituted, not hardcoded
  *
- * `ApiBaseUrl` in the committed source is a placeholder. Baking a particular deployment's
- * hostname into the repository would be wrong for anyone else running it, and telling
- * people to edit MQL5 by hand before their first compile is a step that gets skipped.
+ * `ApiBaseUrl` in the committed source names the canonical dashboard, https://fxsignal.pro.
+ * Pinning any one deployment's hostname there would be wrong for anyone else running it,
+ * and telling people to edit MQL5 by hand before their first compile is a step that gets
+ * skipped.
  *
  * So the archive is built per request with `config('app.url')` written into the default.
  * The EA arrives already pointing at the dashboard that served it, and remains overridable
@@ -37,8 +38,8 @@ class ExpertAdvisorDownloadController extends Controller
 {
     /** Files that make up the EA, and where they belong in the terminal's data folder. */
     private const FILES = [
-        'mql5/Experts/GoldDigger/GoldDiggerBridge.mq5' => 'MQL5/Experts/GoldDigger/GoldDiggerBridge.mq5',
-        'mql5/Include/GoldDigger/GDExecutor.mqh' => 'MQL5/Include/GoldDigger/GDExecutor.mqh',
+        'mql5/Experts/FXSignalPro/FXSignalPro.mq5' => 'MQL5/Experts/FXSignalPro/FXSignalPro.mq5',
+        'mql5/Include/FXSignalPro/Executor.mqh' => 'MQL5/Include/FXSignalPro/Executor.mqh',
     ];
 
     public function __invoke(Request $request): StreamedResponse
@@ -66,7 +67,7 @@ class ExpertAdvisorDownloadController extends Controller
         return response()->streamDownload(function () use ($archive) {
             readfile($archive);
             @unlink($archive);
-        }, "gold-digger-ea-{$version}.zip", [
+        }, "fxsignalpro-ea-{$version}.zip", [
             'Content-Type' => 'application/zip',
         ]);
     }
@@ -74,8 +75,8 @@ class ExpertAdvisorDownloadController extends Controller
     /**
      * Write this dashboard's URL into the EA's default input.
      *
-     * Matched on the input declaration rather than the placeholder string, so the
-     * substitution keeps working if the placeholder is ever changed.
+     * Matched on the input declaration rather than the URL itself, so the
+     * substitution keeps working if that default is ever changed.
      */
     private function configure(string $source, string $url): string
     {
@@ -106,9 +107,9 @@ class ExpertAdvisorDownloadController extends Controller
                {$url}
 
            Scheme and host only. A trailing path is the usual cause of error 4014.
-        4. In MetaEditor, open Experts/GoldDigger/GoldDiggerBridge.mq5 and press F7.
+        4. In MetaEditor, open Experts/FXSignalPro/FXSignalPro.mq5 and press F7.
            Expect 0 errors.
-        5. Drag GoldDiggerBridge onto any chart of a DEMO account.
+        5. Drag FXSignalPro onto any chart of a DEMO account.
              - Common tab: tick "Allow Algo Trading". This is separate from the toolbar
                button, and both must be on.
              - Inputs tab: paste your ApiToken. Everything else has a working default.

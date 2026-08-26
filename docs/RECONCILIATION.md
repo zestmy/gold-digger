@@ -150,7 +150,7 @@ To check the result: `trades` rows with `origin = 'adopted'` are what was found,
 The Laravel side is covered by tests, including adoption, refresh, the scoping rules and the
 full three-way correction.
 
-The EA side has **never been compiled** — `GDReportPositions` and `GDReplayClosedDeals` are
+The EA side has **never been compiled** — `FXSReportPositions` and `FXSReplayClosedDeals` are
 new code in a file that has never seen a compiler. On first run, watch for:
 
 - **Nothing being adopted.** The snapshot filters on `MagicNumber`, so positions opened by a

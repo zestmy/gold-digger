@@ -51,7 +51,7 @@ return [
     | Sent as attribution headers. OpenRouter shows these on the activity page, which is
     | how you tell the dashboard's spend apart from anything else on the same key.
     */
-    'referer' => env('OPENROUTER_REFERER', env('APP_URL', 'https://fx.affandy.com')),
+    'referer' => env('OPENROUTER_REFERER', env('APP_URL', 'https://fxsignal.pro')),
 
     'title' => env('OPENROUTER_TITLE', 'FXSignalPro'),
 

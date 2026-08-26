@@ -21,12 +21,12 @@ class WireProtocolContractTest extends TestCase
 {
     private function eaSource(): string
     {
-        return $this->readSource('mql5/Experts/GoldDigger/GoldDiggerBridge.mq5');
+        return $this->readSource('mql5/Experts/FXSignalPro/FXSignalPro.mq5');
     }
 
     private function executorSource(): string
     {
-        return $this->readSource('mql5/Include/GoldDigger/GDExecutor.mqh');
+        return $this->readSource('mql5/Include/FXSignalPro/Executor.mqh');
     }
 
     private function readSource(string $relative): string
@@ -41,22 +41,22 @@ class WireProtocolContractTest extends TestCase
     public function test_the_ea_expects_the_wire_version_laravel_sends(): void
     {
         $this->assertMatchesRegularExpression(
-            '/#define\s+GD_WIRE_VERSION\s+"'.preg_quote(TradeCommand::WIRE_VERSION, '/').'"/',
+            '/#define\s+FXS_WIRE_VERSION\s+"'.preg_quote(TradeCommand::WIRE_VERSION, '/').'"/',
             $this->eaSource(),
-            'GD_WIRE_VERSION in the EA must match TradeCommand::WIRE_VERSION.',
+            'FXS_WIRE_VERSION in the EA must match TradeCommand::WIRE_VERSION.',
         );
     }
 
     public function test_the_ea_expects_the_column_count_laravel_sends(): void
     {
-        preg_match('/#define\s+GD_WIRE_COLUMNS\s+(\d+)/', $this->eaSource(), $m);
+        preg_match('/#define\s+FXS_WIRE_COLUMNS\s+(\d+)/', $this->eaSource(), $m);
 
-        $this->assertNotEmpty($m, 'GD_WIRE_COLUMNS is not defined in the EA.');
+        $this->assertNotEmpty($m, 'FXS_WIRE_COLUMNS is not defined in the EA.');
         $this->assertSame(
             count(TradeCommand::WIRE_COLUMNS),
             (int) $m[1],
             'The EA splits each line into a fixed number of columns. Adding a field to '
-            .'WIRE_COLUMNS without bumping GD_WIRE_COLUMNS makes the EA reject every command.',
+            .'WIRE_COLUMNS without bumping FXS_WIRE_COLUMNS makes the EA reject every command.',
         );
     }
 
@@ -139,15 +139,15 @@ class WireProtocolContractTest extends TestCase
         $source = preg_replace('#//[^\n]*#', '', $this->eaSource());
 
         $this->assertStringContainsString(
-            'n > GD_WIRE_COLUMNS',
+            'n > FXS_WIRE_COLUMNS',
             $source,
             'The EA must treat only an over-long line as malformed.',
         );
 
         $this->assertStringNotContainsString(
-            'n != GD_WIRE_COLUMNS',
+            'n != FXS_WIRE_COLUMNS',
             $source,
-            'Rejecting a line for having FEWER columns than GD_WIRE_COLUMNS refuses every '
+            'Rejecting a line for having FEWER columns than FXS_WIRE_COLUMNS refuses every '
             .'command whose trailing columns are empty - close_all, start and stop. Pad the '
             .'missing columns instead and let each command type validate what it needs.',
         );

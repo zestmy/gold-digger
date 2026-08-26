@@ -116,7 +116,7 @@ a quiet day's trade loses, so the worst losses cluster exactly where they hurt m
 
 `pip_value_per_lot` comes from the heartbeat and has **no default**. Absent it, the signal
 is recorded `lot_size_unavailable`. The result is deliberately not snapped to the broker's
-volume step — `CGDExecutor::NormalizeVolume` already snaps *downward*, and rounding twice
+volume step — `CFXSExecutor::NormalizeVolume` already snaps *downward*, and rounding twice
 could round up into more risk than the setting allows.
 
 ---
@@ -124,7 +124,7 @@ could round up into more risk than the setting allows.
 ## What the order actually carries
 
 The command carries `sl_pips` and `tp_pips` and leaves the absolute price columns **empty**.
-`CGDExecutor::Open` uses an absolute level verbatim when given one, so sending the price
+`CFXSExecutor::Open` uses an absolute level verbatim when given one, so sending the price
 computed here would anchor the stop to a bar close that is already seconds stale — the real
 risk would differ from the intended risk by the gap. Sending pips lets the terminal place
 the stop relative to the tick it fills at.

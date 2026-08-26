@@ -167,10 +167,10 @@ php artisan view:clear
 Key `.env` settings for production:
 
 ```env
-APP_NAME="Gold Digger"
+APP_NAME="FXSignalPro"
 APP_ENV=production
 APP_DEBUG=false
-APP_URL=https://yourdomain.com
+APP_URL=https://fxsignal.pro
 
 DB_CONNECTION=mysql
 DB_HOST=127.0.0.1

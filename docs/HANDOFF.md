@@ -67,16 +67,16 @@ live broker credentials.
 - `QuickActionsCard` start/stop/close-all now queue real commands (were "Phase 3" stubs).
 
 **MQL5** (`mql5/`)
-- `GoldDiggerBridge.mq5` — polls, executes, reports fills/heartbeats/logs.
+- `FXSignalPro.mq5` — polls, executes, reports fills/heartbeats/logs.
   `OnTradeTransaction` catches broker-side SL/TP fills nothing asked for.
-- `GDExecutor.mqh` — runtime symbol resolution (`XAUUSD` → `XAUUSDm`/`.a`/`GOLD`), volume
+- `Executor.mqh` — runtime symbol resolution (`XAUUSD` → `XAUUSDm`/`.a`/`GOLD`), volume
   normalisation, stops clamping, filling-mode detection with fallback, requote retry,
   retcode → remedy mapping.
 
 **Python** (`bot/`) — `mt5_preflight.py` (diagnostic) and `mt5_executor.py` (reference).
 
 **Tests** — 81 in `tests/Feature/Bot/`, including a cross-language contract test that reads
-the EA source and fails if `GD_WIRE_VERSION` / `GD_WIRE_COLUMNS` drift from the Laravel
+the EA source and fails if `FXS_WIRE_VERSION` / `FXS_WIRE_COLUMNS` drift from the Laravel
 constants. That drift is how this integration breaks silently at 3am. Commissioning proved
 that a matching column *count* is not the same as a line the EA can parse, so that test now
 also checks the shape of a payloadless command — see the section below.
@@ -108,7 +108,7 @@ Full backlog: `MT5_EXECUTION.md` §5.
 
 Everything in this section used to read "never verified". It was carried out on demo
 account `230070844 @ Elev8-Demo2` against the production dashboard at
-`https://fx.affandy.com`. `COMMISSIONING.md` has the procedure and the account's measured
+`https://fxsignal.pro`. `COMMISSIONING.md` has the procedure and the account's measured
 constraints; this is the outcome.
 
 **The EA compiles.** `0 errors, 0 warnings`, first attempt, via
@@ -162,7 +162,7 @@ also the one way to be sure which binary the terminal is running:
 
 ```bash
 "C:\Program Files\<broker> MT5 Terminal\MetaEditor64.exe" \
-  /compile:"%APPDATA%\MetaQuotes\Terminal\<id>\MQL5\Experts\GoldDigger\GoldDiggerBridge.mq5" \
+  /compile:"%APPDATA%\MetaQuotes\Terminal\<id>\MQL5\Experts\FXSignalPro\FXSignalPro.mq5" \
   /log:"%TEMP%\gd_compile.log"
 ```
 

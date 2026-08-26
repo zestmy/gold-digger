@@ -147,7 +147,7 @@ see whether trailing is protecting gains or ending trades early.
 
 ## Positions too small to divide
 
-Half of the broker's minimum lot is not a tradeable volume: `CGDExecutor::NormalizeVolume`
+Half of the broker's minimum lot is not a tradeable volume: `CFXSExecutor::NormalizeVolume`
 snaps it to zero and the close fails. A rung is skipped when either the share itself or the
 remainder it would leave falls below `volume_min` (reported on the heartbeat).
 
@@ -218,7 +218,7 @@ answer a different question from the one being asked.
 Everything Laravel-side is covered by tests, including the full path from a candle push to a
 queued rung to a recorded `trade_partials` row.
 
-The EA side has **never been compiled** — this adds `CGDExecutor::ModifyPosition`, the
+The EA side has **never been compiled** — this adds `CFXSExecutor::ModifyPosition`, the
 `modify` command handler, and the close-reason store to code that had already never seen a
 compiler. Watch for, on first run:
 

@@ -195,7 +195,7 @@ class SignalGenerationTest extends TestCase
 
     /**
      * Stops travel as pips so the EA can place them against the tick it actually fills at.
-     * If an absolute price were supplied, CGDExecutor would use it verbatim and the real
+     * If an absolute price were supplied, CFXSExecutor would use it verbatim and the real
      * risk would differ from the intended risk by however far price moved in between.
      */
     public function test_the_wire_line_carries_pips_and_leaves_the_price_columns_empty(): void

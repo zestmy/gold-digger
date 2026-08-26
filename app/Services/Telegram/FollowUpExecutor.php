@@ -201,7 +201,7 @@ final class FollowUpExecutor
         return $this->queue($followUp, $heartbeat, 'modify', [
             'ticket' => $trade->mt5_ticket,
             'sl_price' => round($target, (int) ($heartbeat->digits ?? 2)),
-            // Zero means "leave the target alone"; see CGDExecutor::ModifyPosition.
+            // Zero means "leave the target alone"; see CFXSExecutor::ModifyPosition.
             'tp_price' => 0.0,
             'reason' => 'tg-followup-stop',
         ], sprintf('Moving the stop on #%s to %s (%s).', $trade->mt5_ticket, round($target, 2), $describedAs));

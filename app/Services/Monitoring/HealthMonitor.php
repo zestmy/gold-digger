@@ -104,6 +104,7 @@ final class HealthMonitor
             $this->feedStalled($user, $heartbeat, $settings),
             $this->dailyLossLimit($user, $settings, $heartbeat),
             $this->queueStalled(),
+            $this->booksDisagree($user),
         ] as $condition) {
             if ($condition !== null) {
                 $conditions[] = $condition;
@@ -430,6 +431,66 @@ final class HealthMonitor
      *
      * @param  array<string, mixed>  $condition
      */
+    /**
+     * Does a position's recorded result still equal the deals that produced it?
+     *
+     * A trade's totals and its partial rows are two records of the same money, and they
+     * are supposed to be the same number. They came apart once: totals were accumulated
+     * while partials were keyed on the broker's deal ticket, so a re-delivered deal added
+     * the profit twice and the dashboard reported double, in the flattering direction,
+     * with nothing about the figure looking wrong.
+     *
+     * That specific fault is fixed - the totals are summed from the partials now, which is
+     * idempotent by construction. This is here because it was undetectable, not because it
+     * is expected: two independent records of the same thing should be checked against each
+     * other, and the check is cheap.
+     *
+     * Deliberately not self-healing. Quietly rewriting the numbers would remove the only
+     * evidence that something upstream is wrong, and a P&L figure correcting itself while
+     * nobody watches is a worse property than one that is wrong and says so.
+     */
+    private function booksDisagree(User $user): ?array
+    {
+        $drifted = Trade::where('user_id', $user->id)
+            ->has('partials')
+            ->with('partials')
+            ->latest('id')
+            ->limit(200)
+            ->get()
+            ->filter(function (Trade $trade) {
+                // A cent of tolerance: the partials are rounded to two places each and the
+                // total is rounded once, so exact equality would fire on arithmetic.
+                return abs((float) $trade->partials->sum('net_money_profit') - (float) $trade->net_pnl_money) > 0.011;
+            });
+
+        if ($drifted->isEmpty()) {
+            return null;
+        }
+
+        $worst = $drifted->sortByDesc(
+            fn (Trade $t) => abs((float) $t->partials->sum('net_money_profit') - (float) $t->net_pnl_money)
+        )->first();
+
+        return [
+            'key' => 'books_disagree',
+            'level' => 'critical',
+            'title' => 'Recorded profit does not match the deals behind it',
+            'body' => sprintf(
+                '%d trade(s) show a total that differs from the sum of their closing deals. '
+                .'Trade #%d records %s where its deals add to %s. The deals carry the broker\'s own '
+                .'figures and are the ones to trust; the total is derived and has gone wrong.',
+                $drifted->count(),
+                $worst->id,
+                number_format((float) $worst->net_pnl_money, 2),
+                number_format((float) $worst->partials->sum('net_money_profit'), 2),
+            ),
+            'context' => [
+                'trades' => $drifted->pluck('id')->all(),
+                'worst_trade_id' => $worst->id,
+            ],
+        ];
+    }
+
     private function open(User $user, array $condition): Alert
     {
         $existing = Alert::where('user_id', $user->id)
