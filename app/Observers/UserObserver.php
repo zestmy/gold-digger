@@ -31,6 +31,11 @@ class UserObserver
     {
         // Create default bot settings
         // These are conservative defaults - user can adjust later
+        //
+        // The copier protection defaults are deliberately absent here and live on the
+        // columns instead, in protect_copied_positions_by_default. Setting them in both
+        // places would give one setting two sources of truth, and the column is the one
+        // that also covers rows this observer never sees.
         BotSettings::create([
             'user_id' => $user->id,
             'is_active' => false, // Bot starts inactive for safety

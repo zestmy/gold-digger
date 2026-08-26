@@ -52,7 +52,17 @@ class PositionManagerTest extends TestCase
         ]);
 
         $this->settings = BotSettings::where('user_id', $this->user->id)->firstOrFail();
-        $this->settings->update(['is_active' => true, 'copier_protect_at_r' => 1.00]);
+        // Pinned rather than inherited. The columns now default to this account's chosen
+        // protection - bank half, then trail - so a test of one branch would otherwise
+        // silently exercise another, and trailing supersedes break-even.
+        $this->settings->update([
+            'is_active' => true,
+            'copier_protect_at_r' => 1.00,
+            'copier_breakeven' => false,
+            'copier_breakeven_offset_pips' => null,
+            'copier_profit_lock_pct' => null,
+            'copier_trail_distance_r' => null,
+        ]);
 
         SymbolSpec::updateOrCreate(
             ['broker_account_id' => $this->account->id, 'symbol' => 'XAUUSD'],

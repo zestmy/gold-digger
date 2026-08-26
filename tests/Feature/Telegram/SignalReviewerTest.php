@@ -343,6 +343,9 @@ class SignalReviewerTest extends TestCase
             'copier_protect_at_r' => 1.0,
             'copier_profit_lock_pct' => 50,
             'copier_breakeven' => true,
+            // Explicit, because the column defaults to 1.00 and trailing supersedes
+            // break-even - which is a different sentence in the brief.
+            'copier_trail_distance_r' => null,
         ]);
 
         $this->verdict(true);
