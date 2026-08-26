@@ -35,8 +35,11 @@ Missing any of the first four and it exits naming them, rather than starting and
 per-account later.
 
 ```bash
-pip install -r requirements.txt
-python worker.py
+# Ubuntu 24.04 refuses a system-wide pip (PEP 668), and a venv inside the repo would be
+# at the mercy of the deploy's git reset. So it lives outside the checkout.
+python3 -m venv /opt/fxsignalpro-worker-venv
+/opt/fxsignalpro-worker-venv/bin/pip install -r requirements.txt
+/opt/fxsignalpro-worker-venv/bin/python worker.py
 ```
 
 ## Running it
@@ -51,8 +54,14 @@ After=network-online.target
 Type=simple
 User=www-data
 WorkingDirectory=/var/www/gold-digger/tools/telegram-worker
+
+# Without this, Python block-buffers stdout when it is not a terminal and the journal
+# stays empty until the buffer fills. Every line this program prints is diagnostic, so
+# that is the difference between a log and no log at all.
+Environment=PYTHONUNBUFFERED=1
+
 EnvironmentFile=/etc/fxsignalpro/telegram-worker.env
-ExecStart=/usr/bin/python3 worker.py
+ExecStart=/opt/fxsignalpro-worker-venv/bin/python worker.py
 Restart=always
 RestartSec=10
 
@@ -63,7 +72,8 @@ UMask=0077
 WantedBy=multi-user.target
 ```
 
-`chmod 600` the environment file and keep it out of the repository.
+The unit runs as `www-data`, so the environment file needs to be readable by it:
+`chown root:www-data`, `chmod 640`, and keep it out of the repository.
 
 Restarting is safe: checkpoints live on the dashboard rather than on disk, so a redeploy
 does not re-send the tail of every watched channel. That matters more than it sounds — a
