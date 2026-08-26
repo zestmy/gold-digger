@@ -168,6 +168,27 @@ def reply_target(message) -> int | None:
     return int(flat) if flat else None
 
 
+def kind_of(entity) -> str | None:
+    """
+    What sort of chat this is, in the dashboard's vocabulary.
+
+    Telethon models a bot as a User carrying `bot=True`, which is the distinction that
+    matters here: a bot is a service, a User is a person. Returns None for anything that
+    is neither a chat nor a correspondent - deleted accounts and the like - so the caller
+    can skip it without a second isinstance ladder.
+    """
+    if isinstance(entity, Channel):
+        return "channel" if getattr(entity, "broadcast", False) else "group"
+
+    if isinstance(entity, Chat):
+        return "group"
+
+    if isinstance(entity, User):
+        return "bot" if getattr(entity, "bot", False) else "user"
+
+    return None
+
+
 def title_of(entity) -> str | None:
     if isinstance(entity, (Channel, Chat)):
         return entity.title
@@ -200,9 +221,16 @@ async def announce(tg: TelegramClient, call=None) -> int:
     async for dialog in tg.iter_dialogs():
         entity = dialog.entity
 
-        # Only broadcast channels and groups. Private conversations with people are not
-        # signal sources and there is no reason to name them to a web server.
-        if not isinstance(entity, (Channel, Chat)):
+        kind = kind_of(entity)
+
+        # Channels, groups and bots. A bot is a service this account deliberately started,
+        # so naming it discloses nothing about who the person knows - and plenty of
+        # providers deliver by bot rather than by channel.
+        #
+        # Private conversations with people are still not reported. Inventorying somebody's
+        # correspondents into a database they do not operate is not a thing to do because
+        # it would have been convenient; one is registered only when its owner names it.
+        if kind is None or kind == "user":
             continue
 
         channels.append(
@@ -210,6 +238,7 @@ async def announce(tg: TelegramClient, call=None) -> int:
                 "chat_id": chat_id_of(entity),
                 "title": title_of(entity),
                 "username": getattr(entity, "username", None),
+                "kind": kind,
             }
         )
 
@@ -297,6 +326,37 @@ async def forward(tg: TelegramClient, state: dict, chat_id: str, messages, call=
     print(f"[{chat_id}] forwarded {result['stored']}, parsed {result['parsed']}")
 
     return result["stored"]
+
+
+async def resolve_named(tg: TelegramClient, usernames, call=None) -> None:
+    """
+    Turn the private chats somebody named in the dashboard into chat ids.
+
+    The dashboard cannot do this. `@someone` is meaningless without a signed-in client,
+    and this is the only place one exists - so the request is made there and answered
+    here. Resolving is not enabling: it fills in what was missing and the switch stays off.
+
+    A failure is reported rather than retried silently. "No user has that username" is
+    usually a typo, and a request that sits pending for ever with nothing said is the
+    shape of a feature people conclude is broken.
+    """
+    call = call or api
+
+    for username in usernames:
+        payload = {"username": username}
+
+        try:
+            entity = await tg.get_entity(username)
+            payload["chat_id"] = chat_id_of(entity)
+            payload["title"] = title_of(entity)
+        except Exception as error:  # noqa: BLE001 - Telegram's wording is the useful part
+            payload["error"] = str(error)[:200]
+
+        try:
+            call("POST", "channels/resolve", payload)
+            print(f"resolved @{username}: {payload.get('chat_id') or payload.get('error')}")
+        except requests.RequestException as error:
+            print(f"could not report resolution of @{username}: {error}")
 
 
 async def resolve(tg: TelegramClient, watch: set[str]) -> dict:
@@ -460,7 +520,11 @@ async def cmd_run() -> None:
 
         while True:
             try:
-                current = set(api("GET", "channels")["watch"])
+                listing = api("GET", "channels")
+                current = set(listing["watch"])
+
+                if listing.get("resolve"):
+                    await resolve_named(tg, listing["resolve"])
 
                 if current != watch:
                     added = current - watch

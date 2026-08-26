@@ -71,6 +71,9 @@ Route::prefix('v1/telegram')->middleware('bot.auth')->group(function () {
     // What the account can see, so channels can be picked from a list rather than by id.
     Route::post('channels', [CollectorController::class, 'announce'])->name('api.telegram.channels.announce');
 
+    // What `@someone` turned out to be. Only a signed-in client can answer this.
+    Route::post('channels/resolve', [CollectorController::class, 'resolve'])->name('api.telegram.channels.resolve');
+
     // Messages. Idempotent on chat + message id, so a retry cannot become a second trade.
     Route::post('messages', [CollectorController::class, 'store'])->name('api.telegram.messages.store');
 
@@ -119,5 +122,6 @@ Route::prefix('v1/telegram/worker/accounts/{account}')
     ->group(function () {
         Route::get('channels', [CollectorController::class, 'index'])->name('api.telegram.worker.channels');
         Route::post('channels', [CollectorController::class, 'announce'])->name('api.telegram.worker.announce');
+        Route::post('channels/resolve', [CollectorController::class, 'resolve'])->name('api.telegram.worker.resolve');
         Route::post('messages', [CollectorController::class, 'store'])->name('api.telegram.worker.messages');
     });

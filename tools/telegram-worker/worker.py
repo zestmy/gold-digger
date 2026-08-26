@@ -54,6 +54,7 @@ from collector import (  # noqa: E402
     announce,
     catch_up,
     forward,
+    resolve_named,
     serve_login,
 )
 
@@ -189,7 +190,13 @@ class Account:
         """Re-read the watch list, so the dashboard's switch takes effect while running."""
         while True:
             try:
-                current = set(self.call("GET", "channels")["watch"])
+                listing = self.call("GET", "channels")
+                current = set(listing["watch"])
+
+                # Private chats this tenant named. Only a signed-in client can turn a
+                # username into an id, and this account is the one that is signed in.
+                if listing.get("resolve"):
+                    await resolve_named(self.tg, listing["resolve"], call=self.call)
 
                 if current != self.watch:
                     added = current - self.watch

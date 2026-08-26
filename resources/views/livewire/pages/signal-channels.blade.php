@@ -304,6 +304,27 @@
                     @endif
                 </p>
 
+                {{-- Channels, groups and bots announce themselves. A person does not:
+                     inventorying somebody's private conversations into this database is
+                     not a thing to do because it would have been convenient, so one is
+                     named here, deliberately, one at a time. --}}
+                <div class="mt-4 flex flex-wrap items-end gap-2 rounded-md bg-gray-900/40 p-3">
+                    <div class="min-w-0 flex-1">
+                        <label for="privateUsername" class="block text-xs text-gray-500">
+                            Watch a private chat &mdash; a provider who sends signals by direct message
+                        </label>
+                        <input type="text" id="privateUsername" wire:model="privateUsername" placeholder="@username"
+                               class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-sm text-white focus:border-yellow-500 focus:ring-yellow-500">
+                    </div>
+                    <button type="button" wire:click="watchPrivate" wire:loading.attr="disabled"
+                            class="shrink-0 rounded-md bg-gray-700 px-3 py-2 text-xs font-medium text-gray-200 hover:bg-gray-600 disabled:opacity-50">
+                        Look up
+                    </button>
+                    @error('privateUsername')
+                        <p class="w-full text-xs text-red-400">{{ $message }}</p>
+                    @enderror
+                </div>
+
                 <ul class="mt-4 divide-y divide-gray-700 border-t border-gray-700">
                     @foreach($idle as $channel)
                         <li class="flex flex-wrap items-center justify-between gap-2 py-2 text-xs">
@@ -311,6 +332,22 @@
                                 <span class="text-gray-300">{{ $channel->label() }}</span>
                                 @if($channel->username)
                                     <span class="ml-2 text-gray-600">&#64;{{ $channel->username }}</span>
+                                @endif
+                                {{-- A bot delivering signals privately and a broadcast channel
+                                     arrive by the same transport and read identically here, but
+                                     they are not the same thing to trust. --}}
+                                @if($channel->resolve_state === \App\Models\TelegramChannel::RESOLVE_PENDING)
+                                    <span class="ml-2 rounded bg-yellow-900/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-yellow-500">looking up</span>
+                                @elseif($channel->resolve_state === \App\Models\TelegramChannel::RESOLVE_FAILED)
+                                    <span class="ml-2 rounded bg-red-900/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-red-400"
+                                          title="{{ $channel->resolve_error }}">not found</span>
+                                @endif
+                                @if($channel->kind === \App\Models\TelegramChannel::KIND_BOT)
+                                    <span class="ml-2 rounded bg-sky-900/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-sky-400">bot</span>
+                                @elseif($channel->kind === \App\Models\TelegramChannel::KIND_USER)
+                                    <span class="ml-2 rounded bg-purple-900/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-purple-400">private</span>
+                                @elseif($channel->kind === \App\Models\TelegramChannel::KIND_GROUP)
+                                    <span class="ml-2 rounded bg-gray-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-gray-400">group</span>
                                 @endif
                             </div>
                             <button type="button" wire:click="toggle({{ $channel->id }})"

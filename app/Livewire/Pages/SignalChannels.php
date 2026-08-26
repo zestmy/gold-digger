@@ -42,6 +42,9 @@ use Livewire\Component;
 #[Title('Signal Channels - FXSignalPro')]
 class SignalChannels extends Component
 {
+    /** A private chat named by its owner, waiting to be turned into a chat id. */
+    public string $privateUsername = '';
+
     /** Below this, results are described rather than ranked. */
     private const MEANINGFUL_TRADES = 10;
 
@@ -169,6 +172,51 @@ class SignalChannels extends Component
     public function expand(?int $channelId): void
     {
         $this->expanded = $this->expanded === $channelId ? null : $channelId;
+    }
+
+    /**
+     * Ask for a private chat to be watched, by name.
+     *
+     * `announce()` reports channels, groups and bots and deliberately not people, so a
+     * provider who delivers by direct message has no way of appearing in the list. This is
+     * how one gets named - by its owner, one at a time, rather than by inventorying every
+     * conversation they have.
+     *
+     * The row is created unresolved and unenabled. The dashboard cannot turn a username
+     * into a chat id; only a client that is signed in can, so this records the request and
+     * the collector answers it.
+     */
+    public function watchPrivate(): void
+    {
+        $this->validate(['privateUsername' => ['required', 'string', 'regex:/^@?[A-Za-z0-9_]{4,32}$/']]);
+
+        $username = ltrim(trim($this->privateUsername), '@');
+
+        if (TelegramChannel::where('user_id', Auth::id())->where('username', $username)->exists()) {
+            $this->privateUsername = '';
+            $this->dispatch('notify', type: 'info', message: "@{$username} is already on the list.");
+
+            return;
+        }
+
+        TelegramChannel::create([
+            'user_id' => Auth::id(),
+            'source' => TelegramChannel::SOURCE_ACCOUNT,
+            'kind' => TelegramChannel::KIND_USER,
+            // A placeholder until a signed-in client says otherwise. Unique per user, and
+            // no incoming message can ever match it - so a pending row cannot be traded
+            // even if somebody managed to enable it.
+            'chat_id' => "pending:{$username}",
+            'username' => $username,
+            'title' => "@{$username}",
+            'is_enabled' => false,
+            'resolve_state' => TelegramChannel::RESOLVE_PENDING,
+        ]);
+
+        $this->privateUsername = '';
+
+        $this->dispatch('notify', type: 'success', message:
+            "Looking up @{$username}. It appears once the collector confirms the account exists.");
     }
 
     public function render(ChannelPerformance $performance)
