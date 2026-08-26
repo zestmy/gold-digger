@@ -97,6 +97,7 @@ final class SignalQuality
      * @param  'buy'|'sell'  $direction
      * @param  float|null  $entryLow  Low end of the signal's entry zone, if it named one
      * @param  float|null  $entryHigh  High end of the zone
+     * @param  array<string, mixed>|null  $market  A snapshot the caller already computed
      * @return array{
      *     confluence: float,
      *     factors: array<int, array{name: string, weight: float, met: bool, note: string}>,
@@ -114,12 +115,16 @@ final class SignalQuality
         string $direction,
         ?float $entryLow = null,
         ?float $entryHigh = null,
+        ?array $market = null,
     ): array {
-        $market = $this->context->for($strategy, $brokerAccountId, $symbol);
+        // Recomputed unless the caller already has it. `MarketScanner` does, for every
+        // instrument it sweeps, and computing it twice per symbol is two more series reads
+        // per row for an answer that cannot have changed in between.
+        $market ??= $this->context->for($strategy, $brokerAccountId, $symbol);
 
         $settings = BotSettings::where('user_id', $strategy->user_id)->first();
 
-        $factors = $this->factors($market, $settings, $direction, $symbol, $entryLow, $entryHigh);
+        $factors = $this->factors($market, $settings, $brokerAccountId, $direction, $symbol, $entryLow, $entryHigh);
 
         $possible = array_sum(array_column($factors, 'weight'));
         $confluence = array_sum(array_map(
@@ -184,7 +189,7 @@ final class SignalQuality
      * @param  array<string, mixed>  $market
      * @return array<int, array{name: string, weight: float, met: bool, note: string}>
      */
-    private function factors(array $market, ?BotSettings $settings, string $direction, string $symbol, ?float $entryLow, ?float $entryHigh): array
+    private function factors(array $market, ?BotSettings $settings, ?int $brokerAccountId, string $direction, string $symbol, ?float $entryLow, ?float $entryHigh): array
     {
         $trendAgrees = $market['trend'] !== null && $market['trend'] === $direction;
         $adx = $market['adx'];
@@ -200,8 +205,11 @@ final class SignalQuality
         // Volatility compression, on the entry series. A squeeze says a move is more
         // likely, never which way - so it can support a direction that came from
         // elsewhere and can never supply one.
-        $closes = Candle::where('symbol', $symbol)
-            ->where('timeframe', $market['entry_timeframe'])
+        // Scoped to the account, as the context above already is. Unscoped it returns
+        // whichever terminal stored bars for this symbol first, so a factor about this
+        // account's volatility was sometimes measured on another account's series.
+        $closes = Candle::query()
+            ->series($brokerAccountId, $symbol, $market['entry_timeframe'])
             ->orderByDesc('open_time')
             ->limit(200)
             ->pluck('close')
