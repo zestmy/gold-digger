@@ -26,8 +26,40 @@ class TelegramChannel extends Model
     /** Read by a collector authenticated as a user account. */
     public const SOURCE_ACCOUNT = 'mtproto';
 
+    /** A broadcast channel. What this feature was originally only able to read. */
+    public const KIND_CHANNEL = 'channel';
+
+    /** A group or supergroup. */
+    public const KIND_GROUP = 'group';
+
+    /**
+     * A bot, in a private chat.
+     *
+     * Listed alongside channels because a bot is a service somebody deliberately started,
+     * not a person they happen to know - so naming it to the dashboard discloses nothing
+     * about them. Plenty of providers deliver by bot rather than by channel, and refusing
+     * to read those meant refusing a large part of the market.
+     */
+    public const KIND_BOT = 'bot';
+
+    /**
+     * A person, in a private chat.
+     *
+     * Never enumerated. `announce()` does not report these, because inventorying a
+     * tenant's private correspondents into a database somebody else operates is not a
+     * thing to do by default. One is registered only when its owner names it.
+     */
+    public const KIND_USER = 'user';
+
+    /** Named by its owner, waiting for a signed-in client to turn it into a chat id. */
+    public const RESOLVE_PENDING = 'pending';
+
+    /** Telegram could not find it, or would not say. `resolve_error` carries why. */
+    public const RESOLVE_FAILED = 'failed';
+
     protected $fillable = [
-        'user_id', 'source', 'chat_id', 'title', 'username',
+        'user_id', 'source', 'kind', 'chat_id', 'title', 'username',
+        'resolve_state', 'resolve_error',
         'is_enabled', 'last_message_at', 'notes',
         // Overrides. Null on every one of them means "inherit"; see policy().
         'risk_percentage', 'copier_levels', 'entry_preference', 'max_trades_per_day', 'min_confluence',
@@ -64,22 +96,49 @@ class TelegramChannel extends Model
     }
 
     /**
+     * Named but not yet turned into a chat id.
+     *
+     * Such a row cannot be watched and cannot be traded: `chat_id` is a placeholder, so no
+     * incoming message will ever match it. That is the intended state - it is a request,
+     * not a subscription, until a client that is actually signed in confirms the account
+     * exists.
+     */
+    public function scopeAwaitingResolution(Builder $query): Builder
+    {
+        return $query->where('resolve_state', self::RESOLVE_PENDING);
+    }
+
+    public function isResolved(): bool
+    {
+        return $this->resolve_state === null;
+    }
+
+    /**
      * Record that a chat exists, without granting it anything.
      *
      * Called on every inbound message, so it must never widen permission: an existing row
-     * keeps its `is_enabled` and its owner, and only the descriptive fields are refreshed.
+     * keeps its `is_enabled`, and only the descriptive fields are refreshed.
      * A channel that renames itself stays the same row, which is what keeps its results
      * attached to it.
      */
-    public static function register(string $source, string $chatId, ?string $title, ?string $username, int $fallbackUserId): self
+    public static function register(string $source, string $chatId, ?string $title, ?string $username, int $ownerId, ?string $kind = null): self
     {
-        $channel = static::firstOrNew(['source' => $source, 'chat_id' => $chatId]);
+        // The owner is part of the identity, not a fallback applied to a shared row. Two
+        // tenants in the same channel each get their own, which is what lets the second
+        // one enable it - and what stops either from seeing the other's settings.
+        $channel = static::firstOrNew([
+            'user_id' => $ownerId,
+            'source' => $source,
+            'chat_id' => $chatId,
+        ]);
 
         if (! $channel->exists) {
-            $channel->user_id = $fallbackUserId;
             $channel->is_enabled = false;
         }
 
+        // Refreshed like the other descriptive fields: a chat that was registered before
+        // kinds existed should stop calling itself a channel once something knows better.
+        $channel->kind = $kind ?: ($channel->kind ?: self::KIND_CHANNEL);
         $channel->title = $title ?: $channel->title;
         $channel->username = $username ?: $channel->username;
         $channel->last_message_at = now();

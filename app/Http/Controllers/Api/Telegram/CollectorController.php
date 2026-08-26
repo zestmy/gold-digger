@@ -70,21 +70,94 @@ class CollectorController extends Controller
         // runs once at startup and a busy channel may post nothing for hours.
         $this->account($request)?->update(['last_seen_at' => now()]);
 
+        // Scoped to the caller. Unscoped, `known` below was every channel in the
+        // database, so one tenant's collector could read another's channel titles - a
+        // leak that was invisible while there was one tenant and silent once there were
+        // two.
         $channels = TelegramChannel::where('source', TelegramChannel::SOURCE_ACCOUNT)
+            ->where('user_id', $user->id)
             ->orderBy('id')
             ->get();
 
         return response()->json([
             'watch' => $channels->where('is_enabled', true)
-                ->where('user_id', $user->id)
                 ->pluck('chat_id')
                 ->values(),
-            'known' => $channels->map(fn (TelegramChannel $c) => [
-                'chat_id' => $c->chat_id,
-                'title' => $c->title,
-                'enabled' => $c->is_enabled,
-            ])->values(),
+            'known' => $channels->reject(fn (TelegramChannel $c) => $c->resolve_state !== null)
+                ->map(fn (TelegramChannel $c) => [
+                    'chat_id' => $c->chat_id,
+                    'title' => $c->title,
+                    'enabled' => $c->is_enabled,
+                ])->values(),
+
+            // Private chats this tenant has named but nothing has looked up yet. Only a
+            // signed-in client can turn @someone into a chat id, so the dashboard asks
+            // rather than guessing.
+            'resolve' => $channels->where('resolve_state', TelegramChannel::RESOLVE_PENDING)
+                ->pluck('username')
+                ->values(),
         ]);
+    }
+
+    /**
+     * A collector reporting what `@someone` turned out to be.
+     *
+     * Resolution is the only way a private chat gets a real id, and it is deliberately
+     * one-way: this fills in what was missing and never enables anything. Naming a chat
+     * and trading it stay two separate acts, exactly as for a channel.
+     */
+    public function resolve(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'username' => ['required', 'string', 'max:64'],
+            'chat_id' => ['nullable', 'string', 'max:64'],
+            'title' => ['nullable', 'string', 'max:255'],
+            'error' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $user = $this->user($request);
+
+        $row = TelegramChannel::where('user_id', $user->id)
+            ->where('username', ltrim($data['username'], '@'))
+            ->awaitingResolution()
+            ->first();
+
+        if ($row === null) {
+            return response()->json(['message' => 'No pending request for that username.'], 404);
+        }
+
+        if (($data['chat_id'] ?? '') === '') {
+            $row->update([
+                'resolve_state' => TelegramChannel::RESOLVE_FAILED,
+                'resolve_error' => $data['error'] ?? 'Telegram did not recognise that username.',
+            ]);
+
+            return response()->json(['ok' => true, 'resolved' => false]);
+        }
+
+        // Another row for the same chat can already exist - the same account might also be
+        // reachable as a bot this tenant announced. Keep the one that is already real and
+        // drop the request rather than colliding on the key.
+        $existing = TelegramChannel::where('user_id', $user->id)
+            ->where('source', TelegramChannel::SOURCE_ACCOUNT)
+            ->where('chat_id', $data['chat_id'])
+            ->whereKeyNot($row->getKey())
+            ->first();
+
+        if ($existing !== null) {
+            $row->delete();
+
+            return response()->json(['ok' => true, 'resolved' => true, 'merged' => true]);
+        }
+
+        $row->update([
+            'chat_id' => $data['chat_id'],
+            'title' => $data['title'] ?: $row->title,
+            'resolve_state' => null,
+            'resolve_error' => null,
+        ]);
+
+        return response()->json(['ok' => true, 'resolved' => true]);
     }
 
     /**
@@ -97,6 +170,9 @@ class CollectorController extends Controller
             'channels.*.chat_id' => ['required', 'string', 'max:64'],
             'channels.*.title' => ['nullable', 'string', 'max:255'],
             'channels.*.username' => ['nullable', 'string', 'max:64'],
+            // Absent from an older collector, which is why it is nullable rather than
+            // required: a deploy should not stop a running one from announcing.
+            'channels.*.kind' => ['nullable', 'string', 'in:channel,group,bot'],
             'me' => ['nullable', 'array'],
             'me.username' => ['nullable', 'string', 'max:64'],
             'me.name' => ['nullable', 'string', 'max:255'],
@@ -123,6 +199,7 @@ class CollectorController extends Controller
                 $channel['title'] ?? null,
                 $channel['username'] ?? null,
                 $user->id,
+                $channel['kind'] ?? null,
             );
 
             // Which account can see it. Only claimed when unset or already ours, so two
@@ -167,12 +244,17 @@ class CollectorController extends Controller
             'messages.*.image_mime' => ['nullable', 'string', 'max:40'],
         ]);
 
+        // Whose messages these are, from the credential rather than the body. The same
+        // identity the watch list is scoped by, so what a collector may write and what it
+        // may read agree.
+        $user = $this->user($request);
+
         $stored = 0;
         $parsed = 0;
         $ignored = 0;
 
         foreach ($data['messages'] as $message) {
-            $result = $ingest->record([
+            $result = $ingest->record(ownerId: $user->id, message: [
                 'source' => TelegramChannel::SOURCE_ACCOUNT,
                 // Chat plus message id, because message ids are only unique within a chat.
                 'external_id' => "tg:{$message['chat_id']}:{$message['message_id']}",

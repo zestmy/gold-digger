@@ -166,13 +166,13 @@ final class SignalIngest
      * @param  array{source: string, external_id: string, chat_id: string, chat_title?: ?string, username?: ?string, text: string, posted_at?: ?Carbon}  $message
      * @return array{ignored: bool, parsed: bool, signal: TelegramSignal}
      */
-    public function record(array $message): array
+    public function record(array $message, ?int $ownerId = null): array
     {
-        $operator = (int) User::orderBy('id')->value('id');
-
-        // Already seen? Then this is either a retry or an edit, and they need different
-        // answers - see editOf().
-        $existing = TelegramSignal::where('external_id', $message['external_id'])->first();
+        // Whose message this is. Supplied by the caller that authenticated - the collector
+        // endpoints know which tenant is speaking. The Bot API webhook does not, and for
+        // that path there is exactly one operator, which is what this used to assume for
+        // everybody: it registered every channel in the database to user number one.
+        $operator = $ownerId ?: (int) User::orderBy('id')->value('id');
 
         $channel = $message['chat_id'] === ''
             ? null
@@ -192,12 +192,25 @@ final class SignalIngest
             unset($message['image']);
         }
 
+        // Already seen? Then this is either a retry or an edit, and they need different
+        // answers - see editOf().
+        //
+        // Looked up after the owner is known, and scoped to it, so the question asked is
+        // the same one the write will answer: has *this tenant* seen this message. Asking
+        // it globally meant the second tenant to receive a message from a shared channel
+        // was told it was an edit of somebody else's signal.
+        $owns = $user?->id ?: $operator;
+
+        $existing = TelegramSignal::where('user_id', $owns)
+            ->where('external_id', $message['external_id'])
+            ->first();
+
         if ($existing !== null) {
             return $this->editOf($existing, $message, $channel);
         }
 
         $replyTo = $message['reply_to_message_id'] ?? null;
-        $parent = $this->parentFor($message['source'], $message['chat_id'], $replyTo);
+        $parent = $this->parentFor($message['source'], $message['chat_id'], $replyTo, $owns);
 
         $attributes = [
             'source' => $message['source'],
@@ -215,7 +228,7 @@ final class SignalIngest
         // never reaches it.
         if ($user === null) {
             $signal = TelegramSignal::updateOrCreate(
-                ['external_id' => $message['external_id']],
+                ['user_id' => $operator, 'external_id' => $message['external_id']],
                 $attributes + [
                     // The table requires a user; attribute chats that may not trade to
                     // nobody tradeable by pointing at the operator while refusing to parse.
@@ -235,7 +248,7 @@ final class SignalIngest
         // off. Interpretation happens later, with the parent's numbers in hand.
         if ($parent !== null) {
             $signal = TelegramSignal::updateOrCreate(
-                ['external_id' => $message['external_id']],
+                ['user_id' => $user->id, 'external_id' => $message['external_id']],
                 $attributes + [
                     'user_id' => $user->id,
                     'kind' => TelegramSignal::KIND_FOLLOW_UP,
@@ -255,7 +268,7 @@ final class SignalIngest
         $parsed = $reading['parsed'];
 
         $signal = TelegramSignal::updateOrCreate(
-            ['external_id' => $message['external_id']],
+            ['user_id' => $user->id, 'external_id' => $message['external_id']],
             $attributes + [
                 'user_id' => $user->id,
                 'from_image' => $reading['from_image'],
@@ -286,13 +299,18 @@ final class SignalIngest
      * the collector was running finds nothing, and is recorded as a follow-up with no
      * parent - visible, and unactionable, which is the honest outcome.
      */
-    private function parentFor(string $source, string $chatId, ?string $replyToId): ?TelegramSignal
+    private function parentFor(string $source, string $chatId, ?string $replyToId, int $ownerId): ?TelegramSignal
     {
         if ($replyToId === null || $replyToId === '' || $chatId === '') {
             return null;
         }
 
-        return TelegramSignal::where('source', $source)
+        // Scoped to the owner. Two tenants subscribed to the same channel now hold their
+        // own copy of every message in it, and an unscoped lookup would let one tenant's
+        // "close half" attach to the other tenant's position - a follow-up instruction
+        // executing against somebody else's money.
+        return TelegramSignal::where('user_id', $ownerId)
+            ->where('source', $source)
             ->where('chat_id', $chatId)
             ->where('external_id', "tg:{$chatId}:{$replyToId}")
             ->first();
@@ -382,21 +400,45 @@ final class SignalIngest
             $signal->update($attributes);
 
             if ($acted) {
-                // Loud on purpose. A provider correcting a signal you are already in is a
-                // thing to look at, and it is the one case here that nothing downstream
-                // can act on by itself: the order has gone.
+                // Read what changed before announcing it. The alert used to say only that
+                // something had, which is the same sentence for a stop tightened by ten
+                // points and one removed altogether - untriageable without opening
+                // Telegram and comparing two messages by eye.
+                $reading = app(EditInterpreter::class)->interpret($signal->fresh());
+
+                $signal->update([
+                    'edit_action' => $reading['action'],
+                    'edit_risk' => $reading['risk'],
+                    'edit_confidence' => $reading['confidence'],
+                    'edit_reasoning' => $reading['reasoning'],
+                ]);
+
+                // Reading it does not mean obeying it. The order has gone, and letting a
+                // provider rewrite the terms of a position already open is a larger
+                // permission than "copy this signal" - so this still only tells somebody.
                 app(AlertNotifier::class)->announce(
-                    sprintf('Provider edited a signal already acted on (%s)', $signal->symbol ?? 'unknown'),
+                    sprintf(
+                        'Provider edited a signal already acted on (%s) - risk %s',
+                        $signal->symbol ?? 'unknown',
+                        $reading['risk'],
+                    ),
                     implode('
 ', [
+                        $reading['reasoning'],
+                        '',
                         'Was: '.mb_substr((string) $signal->original_text, 0, 300),
                         '',
                         'Now: '.mb_substr($text, 0, 300),
                         '',
                         'The order carries the original levels and they cannot be un-sent. Check the position.',
                     ]),
-                    '🟠',
-                    ['telegram_signal_id' => $signal->id, 'edit_count' => $signal->edit_count + 1],
+                    $reading['risk'] === EditInterpreter::RISK_INCREASED ? '🔴' : '🟠',
+                    [
+                        'telegram_signal_id' => $signal->id,
+                        'edit_count' => $signal->edit_count + 1,
+                        'edit_risk' => $reading['risk'],
+                        'edit_action' => $reading['action'],
+                    ],
                 );
             }
 
