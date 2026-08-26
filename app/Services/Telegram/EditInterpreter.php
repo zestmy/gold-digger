@@ -177,8 +177,8 @@ final class EditInterpreter
                 $trade->initial_lot_size, $trade->status,
             );
 
-        return implode("
-", array_merge($lines, [
+        return implode('
+', array_merge($lines, [
             '',
             'THE MESSAGE AS FIRST POSTED - this is what was traded',
             $this->indent($before),
@@ -193,8 +193,8 @@ final class EditInterpreter
         return collect(preg_split('/?
 /', mb_substr($text, 0, 1500)) ?: [])
             ->map(fn (string $line) => '  '.$line)
-            ->implode("
-");
+            ->implode('
+');
     }
 
     private function schema(): array
