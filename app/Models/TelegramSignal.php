@@ -91,6 +91,7 @@ class TelegramSignal extends Model
         'user_id', 'source', 'kind', 'external_id', 'reply_to_message_id', 'parent_signal_id',
         'chat_title', 'chat_id', 'telegram_channel_id', 'raw_text', 'original_text', 'transcribed_text', 'from_image',
         'posted_at', 'edited_at', 'edit_count',
+        'edit_action', 'edit_risk', 'edit_confidence', 'edit_reasoning',
         'parse_status', 'parse_error', 'symbol', 'direction', 'entry_price', 'entry_zone_high',
         'sl_price', 'tp_prices',
         'follow_up_action', 'follow_up_fraction', 'follow_up_price',
