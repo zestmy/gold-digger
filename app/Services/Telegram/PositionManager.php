@@ -4,7 +4,6 @@ namespace App\Services\Telegram;
 
 use App\Models\BotHeartbeat;
 use App\Models\BotSettings;
-use App\Models\Candle;
 use App\Models\Trade;
 use App\Models\TradeCommand;
 use App\Models\User;
@@ -36,7 +35,7 @@ use App\Services\Strategy\SymbolResolver;
  * times the stop on the second, so a pip trigger cannot be right for both. One times what
  * this trade risked means the same thing on every signal from every provider, which is the
  * only unit under which one setting is correct across all of them.
- *
+
  * ## It can only ever reduce risk
  *
  * Stops move toward the entry and never away, partials reduce the position and never add
@@ -48,6 +47,10 @@ final class PositionManager
 {
     /** How long the terminal has to act on a management instruction. */
     private const EXPIRY_SECONDS = 120;
+
+    public function __construct(
+        private readonly SignalSeries $series = new SignalSeries,
+    ) {}
 
     /**
      * Walk this account's open copied positions and act on any that have earned it.
@@ -98,7 +101,7 @@ final class PositionManager
     private function actionsFor(Trade $trade, BotSettings $settings, BotHeartbeat $heartbeat, float $trigger): array
     {
         $risk = abs((float) $trade->entry_price - (float) $trade->sl_price);
-        $best = $this->bestPriceSince($trade);
+        $best = $this->bestPriceSince($trade, $heartbeat);
 
         // No stop, or no bars since entry: there is no R to measure against and no reading
         // to measure. Both are refusals rather than assumptions.
@@ -214,7 +217,7 @@ final class PositionManager
      * had. It moves the stop closer than the market justified, which loses upside rather
      * than risking capital - the same direction of error the ladder already accepts.
      */
-    private function bestPriceSince(Trade $trade): ?float
+    private function bestPriceSince(Trade $trade, BotHeartbeat $heartbeat): ?float
     {
         if ($trade->opened_at === null) {
             return null;
@@ -222,11 +225,15 @@ final class PositionManager
 
         $isBuy = strtolower((string) $trade->direction) === 'buy';
 
-        $value = Candle::where('symbol', $trade->symbol)
-            ->where('open_time', '>=', $trade->opened_at)
-            ->{$isBuy ? 'max' : 'min'}($isBuy ? 'high' : 'low');
-
-        return $value === null ? null : (float) $value;
+        // Scoped to the account holding the position. Unscoped, a second account's bars
+        // for the same instrument could supply an extreme this position never saw - and
+        // this reading is what decides whether the stop moves and to where.
+        return $this->series->extremeSince(
+            $heartbeat->broker_account_id,
+            (string) $trade->symbol,
+            $trade->opened_at,
+            $isBuy,
+        );
     }
 
     /**

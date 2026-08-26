@@ -109,7 +109,7 @@ final class AutonomousTrader
         $verdict = $this->router->structured(
             model: (string) config('ai.model'),
             system: $this->systemPrompt(),
-            brief: $this->brief($symbol, $market, $strategy),
+            brief: $this->brief($symbol, $market, $strategy, $heartbeat?->broker_account_id),
             schemaName: 'autonomous_decision',
             schema: $this->schema(),
         );
@@ -232,7 +232,7 @@ final class AutonomousTrader
     /**
      * @param  array<string, mixed>  $market
      */
-    private function brief(string $symbol, array $market, Strategy $strategy): string
+    private function brief(string $symbol, array $market, Strategy $strategy, ?int $brokerAccountId): string
     {
         $lines = [
             "INSTRUMENT  {$symbol}",
@@ -259,15 +259,17 @@ final class AutonomousTrader
         }
 
         $lines[] = 'RECENT PRICE ACTION, oldest first';
-        $lines[] = $this->recentBars($symbol, $market['entry_timeframe']);
+        $lines[] = $this->recentBars($brokerAccountId, $symbol, $market['entry_timeframe']);
 
         return implode("\n", $lines);
     }
 
-    private function recentBars(string $symbol, string $timeframe): string
+    private function recentBars(?int $brokerAccountId, string $symbol, string $timeframe): string
     {
-        $bars = Candle::where('symbol', $symbol)
-            ->where('timeframe', $timeframe)
+        // Scoped to the account, as `MarketContext` above it already is. Two accounts'
+        // gold printed as one window is two price paths pretending to be one.
+        $bars = Candle::query()
+            ->series($brokerAccountId, $symbol, $timeframe)
             ->orderByDesc('open_time')
             ->limit(self::BARS)
             ->get()

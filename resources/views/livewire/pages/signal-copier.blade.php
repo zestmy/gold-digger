@@ -132,6 +132,29 @@
                                 {{ $signal->tp_prices ? implode(', ', array_map(fn ($t) => rtrim(rtrim(number_format((float) $t, 5, '.', ''), '0'), '.'), $signal->tp_prices)) : 'none' }}
                             </dd></div>
                     </dl>
+                    {{-- Stage 2b: what would actually be traded, where that is not what was posted.
+
+                         Only rendered under `copier_levels = strategy`, where the stop and
+                         ladder are this account's rather than the provider's. Without it the
+                         card shows one trade and the verdict underneath describes another,
+                         and the disagreement is invisible: a signal posted at 5.00 risk for
+                         8.00 reward can be declined for reward:risk and look like a bug. --}}
+                    @if($plan = $plans[$signal->id] ?? null)
+                        <dl class="mt-2 flex flex-wrap gap-x-6 gap-y-1 rounded border border-yellow-500/20 bg-yellow-500/5 px-3 py-2 text-xs">
+                            <div class="w-full text-yellow-600/90">Traded as</div>
+                            <div><dt class="inline text-gray-500">Entry</dt>
+                                <dd class="ml-1 inline font-mono text-gray-200">{{ $plan['entry'] === null ? 'market' : rtrim(rtrim(number_format($plan['entry'], 5, '.', ''), '0'), '.') }}</dd></div>
+                            <div><dt class="inline text-gray-500">Stop</dt>
+                                <dd class="ml-1 inline font-mono text-red-400">{{ $plan['sl'] === null ? '-' : rtrim(rtrim(number_format($plan['sl'], 5, '.', ''), '0'), '.') }}</dd></div>
+                            <div><dt class="inline text-gray-500">Targets</dt>
+                                <dd class="ml-1 inline font-mono text-green-400">
+                                    {{ $plan['tps'] ? implode(', ', array_map(fn ($t) => rtrim(rtrim(number_format((float) $t, 5, '.', ''), '0'), '.'), $plan['tps'])) : 'none' }}
+                                </dd></div>
+                            @if($plan['summary'])
+                                <p class="w-full text-gray-500">{{ $plan['summary'] }}</p>
+                            @endif
+                        </dl>
+                    @endif
                 @else
                     {{-- Kept and shown, because a provider changing format is otherwise silent. --}}
                     <p class="mt-3 text-xs text-gray-500">

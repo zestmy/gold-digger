@@ -7,6 +7,7 @@ use App\Models\TelegramSignal;
 use App\Services\Ai\AiFund;
 use App\Services\Telegram\SignalExecutor;
 use App\Services\Telegram\SignalIngest;
+use App\Services\Telegram\SignalPlan;
 use App\Services\Telegram\SignalReviewer;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
@@ -146,9 +147,12 @@ class SignalCopier extends Component
 
         $settings = BotSettings::where('user_id', Auth::id())->first();
 
+        $signals = $query->with(['followUps' => fn ($q) => $q->orderBy('id')])
+            ->orderByDesc('id')->paginate(15);
+
         return view('livewire.pages.signal-copier', [
-            'signals' => $query->with(['followUps' => fn ($q) => $q->orderBy('id')])
-                ->orderByDesc('id')->paginate(15),
+            'signals' => $signals,
+            'plans' => $this->plans($signals->items(), $settings),
             'counts' => $counts,
             // Of the ones actually judged. Including unreviewed messages in the denominator
             // would flatter the rate by counting chatter as a decline.
@@ -157,5 +161,47 @@ class SignalCopier extends Component
                 : null,
             'fund' => app(AiFund::class)->state($settings, (int) Auth::id()),
         ]);
+    }
+
+    /**
+     * What each listed signal would actually be traded with.
+     *
+     * Only worth showing where it differs from the message, which is what `summary()`
+     * decides. Under `copier_levels = strategy` the card was showing the provider's
+     * numbers beside a verdict written about entirely different ones - the reviewer
+     * declining a 0.23:1 trade while the card displayed the posted 1.60:1 - and there was
+     * no way to tell from the screen that they were two different trades.
+     *
+     * One planner for the whole page, so the account and symbol resolve once rather than
+     * once per row.
+     *
+     * @param  array<int, TelegramSignal>  $signals
+     * @return array<int, string>
+     */
+    private function plans(array $signals, ?BotSettings $settings): array
+    {
+        $planner = new SignalPlan;
+        $plans = [];
+
+        foreach ($signals as $signal) {
+            if ($signal->parse_status !== TelegramSignal::PARSE_OK) {
+                continue;
+            }
+
+            $plan = $planner->for($signal, $settings);
+
+            if ($plan['source'] !== SignalPlan::SOURCE_STRATEGY) {
+                continue;
+            }
+
+            $plans[$signal->id] = [
+                'entry' => $plan['entry'],
+                'sl' => $plan['sl'],
+                'tps' => $plan['tps'],
+                'summary' => $planner->summary($plan),
+            ];
+        }
+
+        return $plans;
     }
 }

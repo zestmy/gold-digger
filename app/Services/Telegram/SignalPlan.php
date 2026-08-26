@@ -38,6 +38,44 @@ final class SignalPlan
 
     public const SOURCE_STRATEGY = 'strategy';
 
+    public function __construct(
+        private readonly SignalSeries $series = new SignalSeries,
+    ) {}
+
+    /**
+     * The provider's targets, nearest first.
+     *
+     * Providers do not reliably post them in order - one of this account's own gold
+     * signals arrived as "TP1: 4622, TP2: 4620" on a buy, which lists the further target
+     * first. Everything downstream assumes the list is ordered by distance: the executor
+     * sends `end($targets)` to the broker as the position's take-profit, so on that signal
+     * the order would have carried the *nearer* target and given up two dollars an ounce
+     * that the provider had asked for.
+     *
+     * Sorted here rather than at each reader, because the plan is the one place both the
+     * reviewer and the executor agree to look.
+     *
+     * @param  array<int, float>  $tps
+     * @return array<int, float>
+     */
+    private function ordered(array $tps, ?float $entry, ?string $direction): array
+    {
+        if ($entry === null || $tps === []) {
+            return array_values($tps);
+        }
+
+        // Behind the entry is not a target, it is a typo or a mis-parse. Dropping it is
+        // safer than sorting it to the front and letting the executor aim there.
+        $ahead = array_values(array_filter(
+            $tps,
+            fn (float $tp) => strtolower((string) $direction) === 'buy' ? $tp > $entry : $tp < $entry,
+        ));
+
+        usort($ahead, fn (float $a, float $b) => abs($a - $entry) <=> abs($b - $entry));
+
+        return $ahead;
+    }
+
     /**
      * Which end of an entry zone to ask for.
      *
@@ -85,12 +123,18 @@ final class SignalPlan
             ?? $settings?->copier_levels
             ?? self::SOURCE_PROVIDER;
 
+        $entryFor = $this->entryFor($signal);
+
         $provider = [
             'ok' => true,
             'source' => self::SOURCE_PROVIDER,
-            'entry' => $this->entryFor($signal),
+            'entry' => $entryFor,
             'sl' => $signal->sl_price,
-            'tps' => array_map('floatval', $signal->tp_prices ?? []),
+            'tps' => $this->ordered(
+                array_map('floatval', $signal->tp_prices ?? []),
+                $entryFor,
+                $signal->direction,
+            ),
             'pending' => false,
             'why' => null,
         ];
@@ -116,7 +160,7 @@ final class SignalPlan
             ]);
         }
 
-        $atr = $this->atr($signal, (int) $strategy->atr_period);
+        $atr = $this->atr($signal, $strategy);
 
         if ($atr === null || $atr <= 0.0) {
             // Refusing to invent a level, the same rule the strategy path follows.
@@ -157,10 +201,50 @@ final class SignalPlan
             'tps' => $tps,
             'pending' => $this->rests($signal, $entry, $sl),
             'why' => sprintf(
-                'Provider entry, this account\'s stop (%.2f x ATR) and ladder.',
+                'Provider entry, this account\'s stop (%.2f x ATR on %s) and ladder.',
                 (float) $strategy->sl_atr_multiplier,
+                $this->series->timeframes($strategy)['entry'],
             ),
         ];
+    }
+
+    /**
+     * The plan in one line, for a reader looking at the card.
+     *
+     * Substituting the levels and then showing only the posted ones is how "why was this
+     * declined" became unanswerable from the screen: the card said 5.00 of risk for 8.00
+     * of reward while the verdict was written about 12.95 for 3.00. Both were true, about
+     * different trades, and the page only ever showed one of them.
+     *
+     * @param  array<string, mixed>  $plan
+     */
+    public function summary(array $plan): ?string
+    {
+        if ($plan['source'] !== self::SOURCE_STRATEGY || $plan['entry'] === null || $plan['sl'] === null) {
+            return $plan['why'];
+        }
+
+        $risk = abs((float) $plan['entry'] - (float) $plan['sl']);
+        $tps = $plan['tps'];
+
+        if ($risk <= 0.0 || $tps === []) {
+            return $plan['why'];
+        }
+
+        $reward = abs((float) end($tps) - (float) $plan['entry']);
+
+        return sprintf(
+            '%s Risking %s to make %s at the exit - %.2f : 1.',
+            $plan['why'],
+            $this->price($risk),
+            $this->price($reward),
+            $reward / $risk,
+        );
+    }
+
+    private function price(float $value): string
+    {
+        return rtrim(rtrim(number_format($value, 5, '.', ''), '0'), '.');
     }
 
     /**
@@ -180,25 +264,28 @@ final class SignalPlan
             return false;
         }
 
-        $last = Candle::where('symbol', $signal->symbol)->orderByDesc('open_time')->value('close');
+        $last = $this->series->lastClose($signal);
 
         if ($last === null) {
             return false;
         }
 
         // Within a tenth of the stop distance is "here".
-        return abs((float) $last - $entry) > abs($entry - $sl) * 0.1;
+        return abs($last - $entry) > abs($entry - $sl) * 0.1;
     }
 
-    private function atr(TelegramSignal $signal, int $period): ?float
+    private function atr(TelegramSignal $signal, Strategy $strategy): ?float
     {
-        $bars = Candle::where('symbol', $signal->symbol)
-            ->orderByDesc('open_time')
-            ->limit(max(60, $period * 4))
-            ->get()
-            ->reverse()
-            ->values()
-            ->all();
+        $period = (int) $strategy->atr_period;
+
+        // One timeframe, this account's own, under the broker's own name for the
+        // instrument. See SignalSeries for what the unscoped version of this query was
+        // measuring, and what it did to the stop it sized.
+        $bars = $this->series->bars(
+            $signal,
+            $this->series->timeframes($strategy)['entry'],
+            max(60, $period * 4),
+        );
 
         if (count($bars) < $period * 2 + 1) {
             return null;

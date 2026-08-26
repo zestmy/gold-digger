@@ -304,4 +304,124 @@ class SignalReviewerTest extends TestCase
                 && str_contains($brief, 'Absence of objection is not one');
         });
     }
+
+    /**
+     * The reward is measured at the target the order will actually carry.
+     *
+     * The executor sends one take-profit and it is the furthest rung; the copier takes no
+     * partials at the ones below it. Quoting the nearest rung against the full stop and
+     * calling it "Reward:risk" declined trades over a level the position never exits at -
+     * and on strategy levels, where the first rung is a fixed pip distance and the stop
+     * scales with ATR, it declined every signal regardless of what was posted.
+     */
+    public function test_the_brief_measures_reward_at_the_exit_target(): void
+    {
+        $this->verdict(true);
+
+        (new SignalReviewer)->review($this->signal([
+            // 10.00 of risk. Rungs at 3.00, 10.00 and 20.00 above the entry.
+            'tp_prices' => [2653.0, 2660.0, 2670.0],
+        ]));
+
+        Http::assertSent(function ($request) {
+            $brief = $request->data()['messages'][1]['content'];
+
+            return str_contains($brief, 'TP1 3 = 0.30R')
+                && str_contains($brief, 'TP3 20 = 2.00R')
+                && str_contains($brief, 'Order exits at  TP3')
+                && str_contains($brief, 'Reward:risk     2.00 : 1 at that exit')
+                && str_contains($brief, 'no partials at the intermediate targets');
+        });
+    }
+
+    /**
+     * What happens to the position before it reaches either end is part of the trade.
+     */
+    public function test_the_brief_states_how_the_position_is_protected(): void
+    {
+        $this->settings->update([
+            'copier_protect_at_r' => 1.0,
+            'copier_profit_lock_pct' => 50,
+            'copier_breakeven' => true,
+        ]);
+
+        $this->verdict(true);
+        (new SignalReviewer)->review($this->signal());
+
+        Http::assertSent(function ($request) {
+            $brief = $request->data()['messages'][1]['content'];
+
+            return str_contains($brief, 'Once 1.00R up')
+                && str_contains($brief, '50% of it is closed')
+                && str_contains($brief, 'break-even');
+        });
+    }
+
+    public function test_an_unmanaged_position_is_described_as_one(): void
+    {
+        $this->settings->update(['copier_protect_at_r' => null]);
+
+        $this->verdict(true);
+        (new SignalReviewer)->review($this->signal());
+
+        Http::assertSent(function ($request) {
+            $brief = $request->data()['messages'][1]['content'];
+
+            return str_contains($brief, 'Nothing moves this stop once open');
+        });
+    }
+
+    /**
+     * The trend the prompt calls "higher-timeframe" has to be one.
+     *
+     * With only the entry series stored, an EMA cross on it is not the higher-timeframe
+     * trend and must not be labelled as one - the model declines trades for fighting that
+     * trend, and it was being handed a hundred minutes of gold under the label.
+     */
+    public function test_the_higher_timeframe_trend_is_not_faked_from_the_entry_series(): void
+    {
+        $this->verdict(true);
+        (new SignalReviewer)->review($this->signal());
+
+        Http::assertSent(function ($request) {
+            $brief = $request->data()['messages'][1]['content'];
+
+            return str_contains($brief, 'Trend')
+                && str_contains($brief, 'H1 bars stored')
+                && str_contains($brief, 'Entry bias')
+                && str_contains($brief, 'ATR')
+                && str_contains($brief, 'on M5');
+        });
+    }
+
+    /**
+     * Bars from another account describe another market, and are not a fallback.
+     */
+    public function test_it_declines_when_only_another_accounts_bars_exist(): void
+    {
+        Candle::where('symbol', 'XAUUSD')->delete();
+
+        $other = BrokerAccount::create([
+            'user_id' => User::factory()->create()->id, 'label' => 'Someone else',
+            'broker_name' => 'Elsewhere', 'account_number' => '999', 'server' => 'Other-Live',
+            'is_demo' => false, 'is_active' => true,
+        ]);
+
+        for ($i = 300; $i > 0; $i--) {
+            Candle::create([
+                'user_id' => $other->user_id, 'broker_account_id' => $other->id,
+                'symbol' => 'XAUUSD', 'timeframe' => 'M5',
+                'open_time' => now()->subMinutes(5 * $i),
+                'open' => 2300, 'high' => 2302, 'low' => 2298, 'close' => 2300,
+            ]);
+        }
+
+        Http::fake();
+
+        $result = (new SignalReviewer)->review($this->signal());
+
+        $this->assertSame(TelegramSignal::REVIEW_DECLINED, $result['status']);
+        $this->assertStringContainsString('No stored price', $result['reasoning']);
+        Http::assertNothingSent();
+    }
 }

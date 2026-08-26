@@ -170,4 +170,107 @@ class SignalPlanTest extends TestCase
         $this->assertSame($first['tps'], $second['tps']);
         $this->assertNotSame($signal->sl_price, $first['sl'], 'Fixture sanity: the plan differs from the message.');
     }
+
+    /**
+     * The ATR that sizes the stop comes from one timeframe, not from every bar stored.
+     *
+     * An account pushing M5 and H1 has twelve M5 bars per H1 bar, all with distinct open
+     * times, so an unfiltered "newest 300 bars" is a blend of the two. The blend's ATR is
+     * between the two real ones and describes neither market - and it went straight into a
+     * live stop distance.
+     */
+    public function test_the_stop_is_measured_on_one_timeframe(): void
+    {
+        $this->settings->update(['copier_levels' => SignalPlan::SOURCE_STRATEGY]);
+
+        // Four times as wide as the M5 series seeded in setUp, over the same period.
+        for ($i = 120; $i > 0; $i--) {
+            Candle::create([
+                'user_id' => $this->user->id, 'broker_account_id' => $this->account->id,
+                'symbol' => 'XAUUSD', 'timeframe' => 'H1',
+                'open_time' => now()->subHours($i),
+                'open' => 4640, 'high' => 4648, 'low' => 4632, 'close' => 4640,
+            ]);
+        }
+
+        $plan = $this->plan($this->signal());
+
+        // M5 ATR is 4, so 1.5 x ATR is 6. The H1 series would give 24, and a blend of the
+        // two something in between - which is what this used to produce.
+        $this->assertEqualsWithDelta(4637.96 + 6.0, $plan['sl'], 0.01);
+    }
+
+    /**
+     * Bars belonging to another account are not this account's market.
+     */
+    public function test_another_accounts_bars_do_not_size_this_stop(): void
+    {
+        $this->settings->update(['copier_levels' => SignalPlan::SOURCE_STRATEGY]);
+
+        $other = BrokerAccount::create([
+            'user_id' => $this->user->id, 'label' => 'Other', 'broker_name' => 'Elsewhere',
+            'account_number' => '999', 'server' => 'Other-Live', 'is_demo' => false, 'is_active' => false,
+        ]);
+
+        for ($i = 400; $i > 0; $i--) {
+            Candle::create([
+                'user_id' => $this->user->id, 'broker_account_id' => $other->id,
+                'symbol' => 'XAUUSD', 'timeframe' => 'M5',
+                'open_time' => now()->subMinutes(5 * $i),
+                'open' => 2300, 'high' => 2340, 'low' => 2260, 'close' => 2300,
+            ]);
+        }
+
+        $plan = $this->plan($this->signal());
+
+        $this->assertEqualsWithDelta(4637.96 + 6.0, $plan['sl'], 0.01);
+    }
+
+    /**
+     * Providers do not reliably post their targets nearest-first.
+     *
+     * The executor sends `end($targets)` to the broker as the position's take-profit. On a
+     * list that arrived furthest-first that is the nearest target, and the order gives up
+     * the distance the provider actually asked for.
+     */
+    public function test_targets_are_ordered_by_distance_whatever_order_they_arrived_in(): void
+    {
+        $plan = $this->plan($this->signal([
+            'direction' => 'buy', 'entry_price' => 4614.0, 'sl_price' => 4609.0,
+            // As posted: "TP1: 4622, TP2: 4620".
+            'tp_prices' => [4622.0, 4620.0],
+        ]));
+
+        $this->assertSame([4620.0, 4622.0], $plan['tps']);
+        $this->assertSame(4622.0, end($plan['tps']), 'The order must carry the furthest target.');
+    }
+
+    /**
+     * A "target" the trade would have to reverse to reach is a typo, not a target.
+     */
+    public function test_targets_behind_the_entry_are_dropped(): void
+    {
+        $plan = $this->plan($this->signal([
+            'direction' => 'buy', 'entry_price' => 4614.0, 'sl_price' => 4609.0,
+            'tp_prices' => [4622.0, 4600.0],
+        ]));
+
+        $this->assertSame([4622.0], $plan['tps']);
+    }
+
+    /**
+     * What the card needs in order to explain a verdict about substituted levels.
+     */
+    public function test_the_summary_states_the_reward_to_risk_the_substitution_produces(): void
+    {
+        $this->settings->update(['copier_levels' => SignalPlan::SOURCE_STRATEGY]);
+
+        $signal = $this->signal();
+        $plan = $this->plan($signal);
+        $summary = (new SignalPlan)->summary($plan);
+
+        // 20.00 to the last rung against a 6.00 stop.
+        $this->assertStringContainsString('3.33 : 1', $summary);
+        $this->assertStringContainsString('M5', $summary);
+    }
 }

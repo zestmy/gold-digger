@@ -11,7 +11,9 @@ use App\Services\Ai\OpenRouter;
 use App\Services\Indicators\Indicators;
 use App\Services\Instruments\InstrumentProfile;
 use App\Services\News\NewsBlackout;
+use App\Services\Strategy\MarketContext;
 use App\Services\Strategy\SignalQuality;
+use App\Services\Strategy\StrategyEvaluator;
 use App\Services\Strategy\TradingSession;
 use Illuminate\Support\Carbon;
 
@@ -66,6 +68,7 @@ final class SignalReviewer
     public function __construct(
         private readonly OpenRouter $router = new OpenRouter,
         private readonly AiFund $fund = new AiFund,
+        private readonly SignalSeries $series = new SignalSeries,
     ) {}
 
     /**
@@ -203,17 +206,18 @@ final class SignalReviewer
             return null;
         }
 
-        $last = Candle::where('symbol', $signal->symbol)
-            ->orderByDesc('open_time')
-            ->value('close');
+        $last = $this->series->lastClose($signal);
 
         if ($last === null) {
-            // No price for this instrument. Not evidence against the signal, but nothing
-            // downstream could size it either.
-            return "No stored price for {$signal->symbol}, so the entry cannot be checked against the market.";
+            // No price on this account's own series for this instrument. Not evidence
+            // against the signal, but nothing downstream could size it either.
+            $series = $this->series->for($signal);
+
+            return $series['account'] === null
+                ? "No broker account is reporting bars for this user, so {$signal->symbol} cannot be checked against the market."
+                : "No stored price for {$series['symbol']} on this account, so the entry cannot be checked against the market.";
         }
 
-        $last = (float) $last;
         $stopDistance = abs($signal->entry_price - $signal->sl_price);
 
         if ($stopDistance <= 0.0) {
@@ -258,8 +262,11 @@ final class SignalReviewer
 
         What makes a positive case:
 
-        - The reward justifies the risk. Compare the distance to the first target against
-          the distance to the stop. Less than roughly 1:1 needs a specific reason.
+        - The reward justifies the risk. The brief names the one target the order will
+          actually carry and states it as a multiple of the risk. Judge against that.
+          Intermediate targets are context and are never where this position exits - the
+          copier does not take partials at them - so a signal is not "0.2:1" because its
+          nearest target is close. Below roughly 1:1 at the exit needs a specific reason.
         - The direction is not fighting the higher-timeframe trend you are shown. Taking a
           buy against a clearly falling trend needs to be argued for, not assumed.
         - The stop is somewhere defensible rather than an arbitrary round number a few
@@ -270,7 +277,8 @@ final class SignalReviewer
 
         Reasons to decline that are worth stating plainly:
 
-        - Reward that does not justify risk, however confident the provider sounds.
+        - Reward at the exit target that does not justify risk, however confident the
+          provider sounds.
         - A stop so tight relative to ATR that it is likely to be hit by noise alone.
         - A direction opposing the trend with nothing offered to justify it.
         - Anything you cannot assess from what you were given. Say so rather than guessing.
@@ -287,21 +295,19 @@ final class SignalReviewer
     {
         $profile = app(InstrumentProfile::class)->for((string) $signal->symbol);
 
-        $last = Candle::where('symbol', $signal->symbol)->orderByDesc('open_time')->value('close');
-        $last = $last === null ? null : (float) $last;
+        $last = $this->series->lastClose($signal);
 
         // The levels that would actually be traded, which under `copier_levels = strategy`
         // are not the ones in the message. Judging the posted package and executing a
         // different one would be approving a trade that never existed.
         $plan = app(SignalPlan::class)->for($signal, $settings);
 
-        $entry = $plan['entry'];
+        $entry = $plan['entry'] ?? $last;
         $stopDistance = ($entry !== null && $plan['sl'] !== null)
             ? abs($entry - $plan['sl'])
             : null;
 
         $tps = $plan['tps'];
-        $firstTarget = $tps[0] ?? null;
 
         // Measured here rather than left to the model. A confidence percentage a writer
         // chose looks like a measurement and is an opinion with a decimal point, and it
@@ -309,10 +315,15 @@ final class SignalReviewer
         $strategy = Strategy::where('user_id', $signal->user_id)->where('is_active', true)->first()
             ?? Strategy::where('user_id', $signal->user_id)->first();
 
+        // The account whose bars everything here is measured on. `bot_settings` has no
+        // `broker_account_id` column, so the old `$settings?->broker_account_id` was
+        // always null and every quality score was computed over an unscoped series.
+        $series = $this->series->for($signal);
+
         $quality = $strategy === null ? null : app(SignalQuality::class)->assess(
             $strategy,
-            $settings?->broker_account_id,
-            (string) $signal->symbol,
+            $series['account'],
+            $series['symbol'],
             (string) $signal->direction,
             $signal->entry_price,
             $signal->entry_zone_high,
@@ -330,20 +341,18 @@ final class SignalReviewer
             '  Posted          '.($signal->posted_at?->diffForHumans() ?? 'unknown'),
             '',
             'RISK AND REWARD',
-            '  Stop distance   '.($stopDistance === null ? 'unknown (market order)' : $this->num($stopDistance)),
+            '  Stop distance   '.($stopDistance === null ? 'unknown' : $this->num($stopDistance).'   - this is 1R, the whole risk on the trade'),
         ];
 
-        if ($stopDistance !== null && $firstTarget !== null && $entry !== null) {
-            $rewardDistance = abs((float) $firstTarget - $entry);
-            $lines[] = '  To first target '.$this->num($rewardDistance);
-            $lines[] = sprintf('  Reward:risk     %.2f : 1 (to the first target)', $rewardDistance / max($stopDistance, 1e-9));
+        foreach ($this->rewardLines($tps, $entry, $stopDistance, $settings) as $line) {
+            $lines[] = $line;
         }
 
         $lines[] = '';
         $lines[] = 'THE MARKET NOW, from this system\'s own stored bars';
         $lines[] = '  Last price      '.($last === null ? 'unknown' : $this->num($last));
 
-        $context = $this->marketContext($signal, $plan);
+        $context = $this->marketContext($signal, $strategy, $plan);
 
         foreach ($context as $label => $value) {
             $lines[] = sprintf('  %-15s %s', $label, $value);
@@ -364,50 +373,261 @@ final class SignalReviewer
     }
 
     /**
-     * Trend and volatility for the signal's instrument, where the system has bars for it.
+     * What this trade risks and where it can exit, in the units the decision is made in.
+     *
+     * ## Why the exit target, and not the first one
+     *
+     * The executor sends the broker one take-profit and it is `end($targets)` - the
+     * furthest rung. The intermediate levels are not managed: `PositionManager` protects a
+     * copied position in multiples of R, it does not close a share at TP1 and another at
+     * TP2 the way the strategy path does. So a position opened from a signal exits at its
+     * final target, at its stop, or at whatever the protection has moved the stop to.
+     *
+     * This block used to quote the *first* target against the full stop and label it
+     * "Reward:risk". On a strategy-levels plan that compares a fixed 30-pip rung against
+     * an ATR-scaled stop, which on gold is under 1:1 no matter what the provider posted
+     * and no matter how the trade goes - a permanent decline, for a level the order never
+     * carries. Whatever else the model gets wrong, it should be told about the trade the
+     * account will actually hold.
+     *
+     * @param  array<int, float>  $tps
+     * @return array<int, string>
+     */
+    private function rewardLines(array $tps, ?float $entry, ?float $stopDistance, ?BotSettings $settings): array
+    {
+        if ($entry === null || $stopDistance === null || $stopDistance <= 0.0 || $tps === []) {
+            return [];
+        }
+
+        $lines = [];
+        $rungs = [];
+
+        foreach ($tps as $i => $tp) {
+            $distance = abs((float) $tp - $entry);
+            $rungs[] = sprintf('TP%d %s = %.2fR', $i + 1, $this->num($distance), $distance / $stopDistance);
+        }
+
+        $exit = abs((float) end($tps) - $entry);
+
+        $lines[] = '  Targets         '.implode(', ', $rungs);
+        $lines[] = sprintf(
+            '  Order exits at  TP%d, %s away - the only take-profit the order carries',
+            count($tps),
+            $this->num($exit),
+        );
+        $lines[] = sprintf('  Reward:risk     %.2f : 1 at that exit', $exit / $stopDistance);
+
+        if (count($tps) > 1) {
+            $lines[] = '  Note            The copier takes no partials at the intermediate targets.';
+            $lines[] = '                  They are context; the position runs to the last one.';
+        }
+
+        foreach ($this->protectionLines($settings) as $line) {
+            $lines[] = $line;
+        }
+
+        return $lines;
+    }
+
+    /**
+     * What happens to the position before it reaches either end.
+     *
+     * The model was being asked to judge a naked entry-stop-target triangle for a position
+     * that is in fact managed: a share banked at a configured R, the stop moved to entry or
+     * trailed behind the high. That materially changes what the risk on this trade is, and
+     * it was simply absent from the brief.
+     *
+     * @return array<int, string>
+     */
+    private function protectionLines(?BotSettings $settings): array
+    {
+        $unmanaged = ['  Unmanaged       Nothing moves this stop once open. It is the full risk, start to finish.'];
+        $trigger = $settings?->copier_protect_at_r;
+
+        if ($settings === null || $trigger === null || (float) $trigger <= 0.0) {
+            return $unmanaged;
+        }
+
+        $steps = [];
+
+        if ($settings->copier_profit_lock_pct !== null && (int) $settings->copier_profit_lock_pct > 0) {
+            $steps[] = sprintf('%d%% of it is closed', (int) $settings->copier_profit_lock_pct);
+        }
+
+        if ($settings->copier_trail_distance_r !== null && (float) $settings->copier_trail_distance_r > 0.0) {
+            $steps[] = sprintf('the stop trails %.2fR behind the best price', (float) $settings->copier_trail_distance_r);
+        } elseif ($settings->copier_breakeven) {
+            $steps[] = 'the stop moves to break-even';
+        }
+
+        if ($steps === []) {
+            return $unmanaged;
+        }
+
+        return [sprintf(
+            '  Once %.2fR up    %s.',
+            (float) $trigger,
+            ucfirst(implode(', then ', $steps)),
+        )];
+    }
+
+    /**
+     * Trend and volatility for the signal's instrument, on this account's own series.
+     *
+     * Read through `MarketContext`, which is the same snapshot the dashboard and the
+     * strategy path use: trend on the strategy's trend timeframe, ATR and ADX on its entry
+     * timeframe, all scoped to one account and one symbol.
+     *
+     * What was here before computed EMA 20/50, ATR 14 and ADX 14 over
+     * `Candle::where('symbol', ...)->limit(300)`, which on an account pushing two
+     * timeframes is a blend of both - and it labelled the result "the higher-timeframe
+     * trend" in a prompt that asks the model to decline trades fighting it. On this
+     * account's stored gold that blend read ADX 19.6 where M5 alone read 16.8 and H1 alone
+     * read 40.6, and it reported a direction from a mostly-M5 window while the strategy's
+     * own H1 trend pointed the other way.
      *
      * @return array<string, string>
      */
-    private function marketContext(TelegramSignal $signal, ?array $plan = null): array
+    private function marketContext(TelegramSignal $signal, ?Strategy $strategy, ?array $plan = null): array
     {
-        $bars = Candle::where('symbol', $signal->symbol)
-            ->orderByDesc('open_time')
-            ->limit(300)
-            ->get()
-            ->reverse()
-            ->values()
-            ->all();
+        $series = $this->series->for($signal);
 
-        if (count($bars) < 60) {
-            return ['History' => 'too few stored bars for this instrument to describe its trend'];
+        if ($series['account'] === null) {
+            return ['History' => 'no broker account is reporting bars for this user, so its trend cannot be described'];
+        }
+
+        if ($strategy === null) {
+            return ['History' => 'no strategy is configured, so this account has no trend definition to read'];
+        }
+
+        $market = (new MarketContext(new StrategyEvaluator))->for($strategy, $series['account'], $series['symbol']);
+
+        if (! $market['warm']) {
+            // The higher timeframe is missing or short. That is worth saying rather than
+            // returning nothing: volatility on the entry series is still measurable, and
+            // it is what decides whether this stop sits inside ordinary noise. Refusing
+            // to describe the market at all would decline every signal on an account that
+            // only pushes one timeframe, which is a bug wearing a risk control's clothes.
+            return $this->entryOnlyContext($signal, $strategy, $market, $plan);
+        }
+
+        $word = fn (?string $direction) => match ($direction) {
+            'buy' => 'up',
+            'sell' => 'down',
+            default => 'flat',
+        };
+
+        $context = [
+            'Trend' => sprintf(
+                '%s on %s (EMA %d vs %d) - the higher timeframe',
+                $word($market['trend']),
+                $market['trend_timeframe'],
+                (int) $strategy->ema_fast,
+                (int) $strategy->ema_slow,
+            ),
+            'Entry bias' => sprintf('%s on %s', $word($market['entry_bias']), $market['entry_timeframe']),
+            'ADX' => sprintf(
+                '%s on %s (%s)',
+                $market['adx'] === null ? 'unknown' : number_format($market['adx'], 1),
+                $market['entry_timeframe'],
+                $market['adx_label'] ?? 'unreadable',
+            ),
+            'ATR' => sprintf(
+                '%s on %s',
+                $market['atr'] === null ? 'unknown' : $this->num($market['atr']),
+                $market['entry_timeframe'],
+            ),
+        ];
+
+        // The most useful single comparison the model can make: is this stop inside the
+        // instrument's ordinary noise?
+        $context += $this->stopVsAtr($market['atr'], $plan);
+
+        return $context;
+    }
+
+    /**
+     * Volatility and bias from the entry series alone, when the trend series is not there.
+     *
+     * Still one timeframe and still this account's - the property that was broken. What is
+     * missing here is the higher-timeframe trend, and the brief says so in those words
+     * rather than quietly presenting an entry-timeframe reading under the label the prompt
+     * tells the model is the higher timeframe. That mislabelling is what produced "buying
+     * into a down trend" from a hundred minutes of gold.
+     *
+     * @param  array<string, mixed>  $market
+     * @return array<string, string>
+     */
+    private function entryOnlyContext(TelegramSignal $signal, Strategy $strategy, array $market, ?array $plan): array
+    {
+        $period = (int) $strategy->atr_period;
+
+        $bars = $this->series->bars(
+            $signal,
+            (string) $market['entry_timeframe'],
+            StrategyEvaluator::LOOKBACK_BARS,
+        );
+
+        if (count($bars) < ($period * 2) + 1) {
+            return ['History' => sprintf(
+                'too few stored bars for %s to describe its trend (%d on %s, %d on %s)',
+                $this->series->for($signal)['symbol'],
+                $market['bars_entry'],
+                $market['entry_timeframe'],
+                $market['bars_trend'],
+                $market['trend_timeframe'],
+            )];
         }
 
         $closes = Candle::closes($bars);
         $highs = Candle::highs($bars);
         $lows = Candle::lows($bars);
 
-        $fast = Indicators::last(Indicators::ema($closes, 20));
-        $slow = Indicators::last(Indicators::ema($closes, 50));
-        $atr = Indicators::last(Indicators::atr($highs, $lows, $closes, 14));
-        $adx = Indicators::last(Indicators::adx($highs, $lows, $closes, 14)['adx']);
+        $fast = Indicators::last(Indicators::ema($closes, (int) $strategy->ema_fast));
+        $slow = Indicators::last(Indicators::ema($closes, (int) $strategy->ema_slow));
+        $atr = Indicators::last(Indicators::atr($highs, $lows, $closes, $period));
+        $adx = Indicators::last(Indicators::adx($highs, $lows, $closes, $period)['adx']);
 
-        $trend = ($fast === null || $slow === null || $fast === $slow)
+        $bias = ($fast === null || $slow === null || $fast === $slow)
             ? 'flat'
             : ($fast > $slow ? 'up' : 'down');
 
         $context = [
-            'Trend' => $trend.' (EMA 20 vs 50 on the stored series)',
-            'ADX' => $adx === null ? 'unknown' : number_format($adx, 1),
-            'ATR' => $atr === null ? 'unknown' : $this->num($atr),
+            'Trend' => sprintf(
+                'unknown - only %d %s bars stored, and the %s trend needs %d',
+                $market['bars_trend'],
+                $market['trend_timeframe'],
+                $market['trend_timeframe'],
+                (int) $strategy->ema_slow + 1,
+            ),
+            'Entry bias' => sprintf('%s on %s (EMA %d vs %d)', $bias, $market['entry_timeframe'], (int) $strategy->ema_fast, (int) $strategy->ema_slow),
+            'ADX' => sprintf(
+                '%s on %s',
+                $adx === null ? 'unknown' : number_format($adx, 1),
+                $market['entry_timeframe'],
+            ),
+            'ATR' => sprintf(
+                '%s on %s',
+                $atr === null ? 'unknown' : $this->num($atr),
+                $market['entry_timeframe'],
+            ),
         ];
 
-        // The most useful single comparison the model can make: is this stop inside the
-        // instrument's ordinary noise?
-        if ($atr !== null && $atr > 0.0 && $plan !== null && $plan['entry'] !== null && $plan['sl'] !== null) {
-            $context['Stop vs ATR'] = number_format(abs($plan['entry'] - $plan['sl']) / $atr, 2).' x ATR';
+        return $context + $this->stopVsAtr($atr, $plan);
+    }
+
+    /**
+     * Is this stop inside the instrument's ordinary noise?
+     *
+     * @return array<string, string>
+     */
+    private function stopVsAtr(?float $atr, ?array $plan): array
+    {
+        if ($atr === null || $atr <= 0.0 || $plan === null || $plan['entry'] === null || $plan['sl'] === null) {
+            return [];
         }
 
-        return $context;
+        return ['Stop vs ATR' => number_format(abs($plan['entry'] - $plan['sl']) / $atr, 2).' x ATR'];
     }
 
     private function num(?float $value): string

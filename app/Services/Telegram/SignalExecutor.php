@@ -4,7 +4,6 @@ namespace App\Services\Telegram;
 
 use App\Models\BotHeartbeat;
 use App\Models\BotSettings;
-use App\Models\Candle;
 use App\Models\TelegramSignal;
 use App\Models\Trade;
 use App\Models\TradeCommand;
@@ -45,6 +44,7 @@ final class SignalExecutor
     public function __construct(
         private readonly AiFund $fund = new AiFund,
         private readonly SignalReviewer $reviewer = new SignalReviewer,
+        private readonly SignalSeries $series = new SignalSeries,
     ) {}
 
     /**
@@ -179,9 +179,7 @@ final class SignalExecutor
             return false;
         }
 
-        $last = Candle::where('symbol', $signal->symbol)
-            ->orderByDesc('open_time')
-            ->value('close');
+        $last = $this->series->lastClose($signal);
 
         if ($last === null) {
             return false;
@@ -191,7 +189,7 @@ final class SignalExecutor
         // just delays the same fill.
         $tolerance = abs($sizing['entry'] - $sizing['sl']) * 0.1;
 
-        return abs((float) $last - $sizing['entry']) > $tolerance;
+        return abs($last - $sizing['entry']) > $tolerance;
     }
 
     /**
@@ -322,9 +320,7 @@ final class SignalExecutor
      */
     private function spreadPips(TelegramSignal $signal, array $spec, float $pipSize): float
     {
-        $points = Candle::where('symbol', $signal->symbol)
-            ->orderByDesc('open_time')
-            ->value('spread_points');
+        $points = $this->series->lastSpreadPoints($signal);
 
         $digits = (int) ($spec['digits'] ?? 0);
 
@@ -335,7 +331,7 @@ final class SignalExecutor
         // One point is 10^-digits of price; a pip is pip_size of price.
         $point = 10 ** (-$digits);
 
-        return max(0.0, ((float) $points * $point) / $pipSize);
+        return max(0.0, ($points * $point) / $pipSize);
     }
 
     /**
@@ -378,11 +374,7 @@ final class SignalExecutor
 
     private function lastPrice(TelegramSignal $signal): ?float
     {
-        $close = Candle::where('symbol', $signal->symbol)
-            ->orderByDesc('open_time')
-            ->value('close');
-
-        return $close === null ? null : (float) $close;
+        return $this->series->lastClose($signal);
     }
 
     /**
