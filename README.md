@@ -19,6 +19,10 @@ computes the indicators and queues the order. See
 reversal and time exits, and the break-even stop. Positions the dashboard did not open
 are picked up by [`docs/RECONCILIATION.md`](docs/RECONCILIATION.md).
 
+> **Looking for something to trade?** [`docs/MARKET_SCAN.md`](docs/MARKET_SCAN.md) — `/analysis`
+> ranks every instrument there are bars for on measured evidence, then asks one question of a
+> model: of this shortlist, which. The ranking is arithmetic and works with no API key.
+
 > **Changing a strategy setting?** [`docs/BACKTESTING.md`](docs/BACKTESTING.md) — `php artisan
 > backtest` replays it over the stored bars using the same evaluator that trades, so a change can
 > be measured instead of argued about.

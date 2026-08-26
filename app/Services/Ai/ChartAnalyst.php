@@ -64,8 +64,12 @@ final class ChartAnalyst
             return $this->fail("Not enough {$symbol} history on {$timeframe} to read structure from.");
         }
 
-        $bars = Candle::where('symbol', $symbol)
-            ->where('timeframe', $timeframe)
+        // Scoped to the account, the way `MarketContext` above already is. Without it the
+        // indicators describe this terminal's series and the levels are read off another
+        // one, which is not an error anywhere - it is two halves of a page quietly
+        // disagreeing about which market they are describing.
+        $bars = Candle::query()
+            ->series($brokerAccountId, $symbol, $timeframe)
             ->orderByDesc('open_time')
             ->limit(self::BARS)
             ->get()
@@ -112,7 +116,13 @@ final class ChartAnalyst
                 schema: $this->schema(),
             );
 
-            return $result['ok'] ? $result['data'] : null;
+            // Checked before it is cached, not after. `strict` json_schema means a
+            // conforming model cannot return a partial object, but "cannot" here rests on
+            // the provider honouring a flag - and the failure when one does not is a view
+            // reading a missing key, which is a 500 on a page whose whole job is to be
+            // read. A missing field is a failed reading, and a failed reading already has
+            // somewhere to go.
+            return ($result['ok'] && $this->complete($result['data'])) ? $result['data'] : null;
         });
 
         if ($reading === null) {
@@ -132,6 +142,30 @@ final class ChartAnalyst
             'structure' => $structure['structure'],
             'reading' => $this->resolve($reading, $structure['levels']),
         ];
+    }
+
+    /**
+     * Does this reading have every field the plan is made of?
+     *
+     * @param  array<string, mixed>|null  $reading
+     */
+    private function complete(?array $reading): bool
+    {
+        if ($reading === null) {
+            return false;
+        }
+
+        foreach (['headline', 'structure', 'bias', 'plan', 'reasoning', 'invalidation'] as $field) {
+            if (! isset($reading[$field]) || ! is_string($reading[$field]) || trim($reading[$field]) === '') {
+                return false;
+            }
+        }
+
+        // The level indices are allowed to be null - that is what waiting looks like - so
+        // they are checked for presence rather than for a value.
+        return array_key_exists('entry_level', $reading)
+            && array_key_exists('stop_level', $reading)
+            && array_key_exists('target_level', $reading);
     }
 
     /**

@@ -207,9 +207,8 @@ class ChartAnalysisTest extends TestCase
 
         Livewire::actingAs($this->user)
             ->test(ChartAnalysis::class)
-            ->set('symbol', 'XAUUSD')
             ->set('timeframe', 'M5')
-            ->call('analyse')
+            ->call('focus', 'XAUUSD')
             ->assertOk()
             ->assertSee('Reward against risk');
     }
@@ -221,21 +220,40 @@ class ChartAnalysisTest extends TestCase
 
         Livewire::actingAs($this->user)
             ->test(ChartAnalysis::class)
-            ->set('symbol', 'XAUUSD')
             ->set('timeframe', 'M5')
-            ->call('analyse')
+            ->call('focus', 'XAUUSD')
             ->assertOk()
             ->assertSee('No plan proposed');
     }
 
-    public function test_the_page_renders_before_anything_is_analysed(): void
+    /**
+     * Opening an instrument is not the same as reading it. The first is free; the second
+     * is a model call, and it waits to be asked for.
+     */
+    public function test_focusing_an_instrument_does_not_read_it_until_asked(): void
+    {
+        $this->bars();
+        Http::fake();
+
+        Livewire::actingAs($this->user)
+            ->test(ChartAnalysis::class)
+            ->set('timeframe', 'M5')
+            ->set('mode', 'focus')
+            ->set('symbol', 'XAUUSD')
+            ->assertOk()
+            ->assertSee('Read this chart');
+
+        Http::assertNothingSent();
+    }
+
+    public function test_the_page_renders_before_anything_is_scanned(): void
     {
         $this->bars();
 
         Livewire::actingAs($this->user)
             ->test(ChartAnalysis::class)
             ->assertOk()
-            ->assertSee('press Analyse');
+            ->assertSee('Press Scan');
     }
 
     // =====================================================================
