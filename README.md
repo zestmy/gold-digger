@@ -27,6 +27,10 @@ are picked up by [`docs/RECONCILIATION.md`](docs/RECONCILIATION.md).
 > backtest` replays it over the stored bars using the same evaluator that trades, so a change can
 > be measured instead of argued about.
 
+> **Wondering why it stood aside?** [`docs/NEWS_FILTER.md`](docs/NEWS_FILTER.md) — the bot
+> refuses entries around high-impact releases, and holds them entirely when the calendar is
+> stale rather than trading through one unseen.
+
 > **Running it unattended?** [`docs/MONITORING.md`](docs/MONITORING.md) covers the health checks
 > and Telegram alerting. A dashboard only helps somebody who is looking at it.
 
