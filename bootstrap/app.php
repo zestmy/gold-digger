@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Middleware\AuthenticateBot;
+use App\Http\Middleware\AuthenticateWorker;
+use App\Http\Middleware\BindWorkerAccount;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -18,6 +20,8 @@ return Application::configure(basePath: dirname(__DIR__))
         // Bearer-token auth for the MQL5 EA and any future executor.
         $middleware->alias([
             'bot.auth' => AuthenticateBot::class,
+            'worker.auth' => AuthenticateWorker::class,
+            'worker.account' => BindWorkerAccount::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

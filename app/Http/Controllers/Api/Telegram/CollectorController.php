@@ -21,11 +21,22 @@ use Illuminate\Support\Carbon;
  * every chat the account has and post as them - and it is created by an interactive flow
  * (phone number, code, second factor) that no web request can perform.
  *
- * Holding that on the web server would mean a dashboard compromise is a Telegram account
- * takeover, which is a far worse outcome than the one this feature is worth. So the
- * collector is a separate program, running wherever the operator chooses, holding the
- * session there and posting messages in over the same bearer-token API the terminal uses.
- * The dashboard never sees the account credential and cannot leak it.
+ * Holding that on the web server means a dashboard compromise is a Telegram account
+ * takeover. That is the reason the collector is a separate program, running wherever the
+ * operator chooses, holding the session there and posting messages in over the same
+ * bearer-token API the terminal uses.
+ *
+ * ## And why a hosted mode exists anyway
+ *
+ * Because the above asks a new customer for Python, a file on disk and an application
+ * registered at my.telegram.org before the product has done anything for them, and a
+ * signup funnel does not survive that. So a tenant may instead let the platform sign them
+ * in and keep the session - see `config/telegram.php` and `tools/telegram-worker/`.
+ *
+ * The risk is not argued away by being chosen: on a hosted account a dashboard compromise
+ * IS a Telegram account takeover, and the sessions are encrypted at rest and kept off
+ * every response a browser can reach because that is the only mitigation available. Both
+ * modes feed this same controller, so the ingest path stays single.
  *
  * This mirrors how the Expert Advisor already works, deliberately: an outside process
  * that observes something this application cannot reach, authenticated by a revocable
@@ -196,18 +207,30 @@ class CollectorController extends Controller
 
     private function user(Request $request): User
     {
-        return $request->attributes->get('bot_user');
+        return $this->account($request)?->user
+            ?? $request->attributes->get('bot_user');
     }
 
     /**
-     * Which account this collector is, from the token it authenticated with.
+     * Which account is speaking.
      *
-     * The token is the identity. A collector cannot claim to be an account it was not
-     * issued a token for, which is what keeps two of them on one machine from writing over
-     * each other's channel list.
+     * Two ways in, and in both of them the identity comes from the credential rather than
+     * from anything in the body. A self-hosted collector is named by the token it
+     * authenticated with; a hosted account is named by the route, which only the worker
+     * token can reach and which `BindWorkerAccount` has already checked is hosted.
+     *
+     * What matters either way is that a collector cannot claim to be an account it was
+     * not issued a token for, which is what keeps two of them from writing over each
+     * other's channel list.
      */
     private function account(Request $request): ?TelegramAccount
     {
+        $bound = $request->attributes->get('telegram_account');
+
+        if ($bound instanceof TelegramAccount) {
+            return $bound;
+        }
+
         $token = $request->attributes->get('bot_token');
 
         return $token === null

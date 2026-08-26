@@ -50,7 +50,22 @@ class LoginController extends Controller
 
         $account->update(['last_seen_at' => now()]);
 
-        return response()->json(match ($account->login_state) {
+        return response()->json(self::instructionFor($account));
+    }
+
+    /**
+     * The next step of a sign-in, and the secrets that step needs.
+     *
+     * Shared with the hosted worker, which drives the identical conversation for an
+     * account it was handed rather than one a token names. Keeping it in one place is
+     * what stops the two paths drifting into subtly different state machines - the sort
+     * of divergence that shows up as a sign-in that works self-hosted and hangs hosted.
+     *
+     * Calling this is destructive: a secret is handed over exactly once.
+     */
+    public static function instructionFor(TelegramAccount $account): array
+    {
+        return match ($account->login_state) {
             TelegramAccount::REQUESTED => [
                 'action' => 'send_code',
                 'phone' => $account->login_phone,
@@ -59,14 +74,14 @@ class LoginController extends Controller
                 'action' => 'sign_in',
                 'phone' => $account->login_phone,
                 // Handed over exactly once.
-                'code' => $this->take($account, 'code'),
+                'code' => self::take($account, 'code'),
             ],
             TelegramAccount::PASSWORD_SUBMITTED => [
                 'action' => 'password',
-                'password' => $this->take($account, 'password'),
+                'password' => self::take($account, 'password'),
             ],
             default => ['action' => 'none'],
-        });
+        };
     }
 
     /**
@@ -87,6 +102,16 @@ class LoginController extends Controller
             return response()->json(['message' => 'This token is not bound to an account.'], 404);
         }
 
+        self::applyReport($account, $data);
+
+        return response()->json(['ok' => true]);
+    }
+
+    /**
+     * Record how a step went, whoever carried it out.
+     */
+    public static function applyReport(TelegramAccount $account, array $data): void
+    {
         $account->advance($data['state'], $data['message'] ?? null);
 
         if ($data['state'] === TelegramAccount::ACTIVE) {
@@ -97,20 +122,18 @@ class LoginController extends Controller
 
             // Nothing left to relay. A completed sign-in should leave no trace of the
             // conversation that produced it.
-            $this->forget($account);
+            self::forget($account);
         }
 
         if ($data['state'] === TelegramAccount::FAILED) {
-            $this->forget($account);
+            self::forget($account);
         }
-
-        return response()->json(['ok' => true]);
     }
 
     /**
      * Read a relayed secret and destroy it in the same breath.
      */
-    private function take(TelegramAccount $account, string $what): ?string
+    private static function take(TelegramAccount $account, string $what): ?string
     {
         $key = self::key($account, $what);
         $value = Cache::get($key);
@@ -120,7 +143,7 @@ class LoginController extends Controller
         return is_string($value) ? $value : null;
     }
 
-    private function forget(TelegramAccount $account): void
+    private static function forget(TelegramAccount $account): void
     {
         Cache::forget(self::key($account, 'code'));
         Cache::forget(self::key($account, 'password'));

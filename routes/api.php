@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\Bot\LogController;
 use App\Http\Controllers\Api\Bot\PositionController;
 use App\Http\Controllers\Api\Telegram\CollectorController;
 use App\Http\Controllers\Api\Telegram\LoginController;
+use App\Http\Controllers\Api\Telegram\WorkerController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -78,3 +79,45 @@ Route::prefix('v1/telegram')->middleware('bot.auth')->group(function () {
     Route::get('login', [LoginController::class, 'show'])->name('api.telegram.login.show');
     Route::post('login', [LoginController::class, 'store'])->name('api.telegram.login.store');
 });
+
+/*
+|--------------------------------------------------------------------------
+| Hosted session worker
+|--------------------------------------------------------------------------
+|
+| The same conversation as above, for accounts the platform signs in on the tenant's
+| behalf rather than ones they run a collector for themselves. Adding a Telegram account
+| through a browser is table stakes for a product people sign up to; requiring Python and
+| a file on disk is not.
+|
+| The cost is stated plainly because it is real: these endpoints hand out sessions that
+| can read every chat on a tenant's account. They are guarded by an infrastructure token
+| rather than an issued one, and they should not be exposed beyond the network the worker
+| runs on. See tools/telegram-worker/.
+|
+*/
+
+Route::prefix('v1/telegram/worker')->middleware('worker.auth')->group(function () {
+    // Every hosted account worth acting on, with the sessions needed to connect.
+    Route::get('accounts', [WorkerController::class, 'index'])->name('api.telegram.worker.accounts');
+
+    Route::get('accounts/{account}/login', [WorkerController::class, 'login'])->name('api.telegram.worker.login');
+    Route::post('accounts/{account}/login', [WorkerController::class, 'report'])->name('api.telegram.worker.report');
+
+    // Kept separately from the "active" report: a lost state is a confusing page, a lost
+    // session is a tenant signing in again.
+    Route::put('accounts/{account}/session', [WorkerController::class, 'storeSession'])->name('api.telegram.worker.session');
+
+    Route::put('accounts/{account}/state', [WorkerController::class, 'storeState'])->name('api.telegram.worker.state');
+});
+
+// The ingest half, for hosted accounts. Deliberately the same controller the self-hosted
+// collector posts to: idempotency on chat plus message id, the channel switch, and the
+// parse pipeline are all things there must only ever be one of.
+Route::prefix('v1/telegram/worker/accounts/{account}')
+    ->middleware(['worker.auth', 'worker.account'])
+    ->group(function () {
+        Route::get('channels', [CollectorController::class, 'index'])->name('api.telegram.worker.channels');
+        Route::post('channels', [CollectorController::class, 'announce'])->name('api.telegram.worker.announce');
+        Route::post('messages', [CollectorController::class, 'store'])->name('api.telegram.worker.messages');
+    });

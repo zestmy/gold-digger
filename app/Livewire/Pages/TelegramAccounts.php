@@ -61,19 +61,33 @@ class TelegramAccounts extends Component
     {
         $this->validate();
 
-        [$plaintext, $token] = BotToken::generate(Auth::user(), "Collector: {$this->label}");
+        $hosted = (bool) config('telegram.hosted_by_default');
+
+        // A hosted account has no collector of its own, so it needs no token. Issuing one
+        // anyway would put a credential on screen that nothing consumes, and the surest
+        // way to teach somebody to ignore a secret is to show them one that does nothing.
+        $token = null;
+        $plaintext = null;
+
+        if (! $hosted) {
+            [$plaintext, $token] = BotToken::generate(Auth::user(), "Collector: {$this->label}");
+        }
 
         $account = TelegramAccount::create([
             'user_id' => Auth::id(),
             'label' => $this->label,
-            'bot_token_id' => $token->id,
+            'bot_token_id' => $token?->id,
+            'is_hosted' => $hosted,
         ]);
+
 
         $this->issuedToken = $plaintext;
         $this->issuedFor = $account->id;
         $this->label = '';
 
-        $this->dispatch('notify', message: 'Account added. Copy the token now - it cannot be shown again.', type: 'success');
+        $this->dispatch('notify', message: $hosted
+            ? 'Account added. Sign in with your phone number below.'
+            : 'Account added. Copy the token now - it cannot be shown again.', type: 'success');
     }
 
     /**
@@ -84,6 +98,13 @@ class TelegramAccounts extends Component
         $account = TelegramAccount::where('user_id', Auth::id())->find($id);
 
         if ($account === null) {
+            return;
+        }
+
+        // Nothing authenticates as a hosted account: the platform's worker speaks for it
+        // with a credential of its own. Issuing a token here would produce a secret that
+        // opens nothing, which is worse than no button at all.
+        if ($account->is_hosted) {
             return;
         }
 
@@ -130,6 +151,16 @@ class TelegramAccounts extends Component
         }
 
         $this->validate(['phone' => ['required', 'string', 'max:32']]);
+
+        // A hosted account with no worker behind it would sit on "asking Telegram for a
+        // code" for ever, because nothing is listening. Saying so is the difference
+        // between a misconfigured deployment and one that looks broken to its customers.
+        if ($account->is_hosted && ! self::hostedReady()) {
+            $this->dispatch('notify', type: 'error', message:
+                'Hosted sign-in is not configured on this deployment. Nothing would answer this request.');
+
+            return;
+        }
 
         // Only the number is stored, and only so the page can say which one is being signed
         // in. It is not a secret and is not usable on its own.
@@ -190,6 +221,20 @@ class TelegramAccounts extends Component
         $this->phone = $this->code = $this->password = '';
     }
 
+    /**
+     * Can this deployment sign anybody in itself?
+     *
+     * All three or none: the worker cannot connect to Telegram without an application,
+     * and cannot reach the dashboard without its token. Checked before a sign-in rather
+     * than after, because the failure it prevents is silent.
+     */
+    public static function hostedReady(): bool
+    {
+        return filled(config('telegram.app_id'))
+            && filled(config('telegram.app_hash'))
+            && filled(config('telegram.worker_token'));
+    }
+
     private function find(int $id): ?TelegramAccount
     {
         return TelegramAccount::where('user_id', Auth::id())->find($id);
@@ -209,6 +254,7 @@ class TelegramAccounts extends Component
                 'channels as enabled_channels_count' => fn ($q) => $q->where('is_enabled', true),
             ])->where('user_id', Auth::id())->orderBy('id')->get(),
             'baseUrl' => rtrim((string) config('app.url'), '/'),
+            'hostedReady' => self::hostedReady(),
             // Polled only while a conversation is under way, so an idle page is not
             // refetching every few seconds for nothing.
             'awaiting' => TelegramAccount::where('user_id', Auth::id())

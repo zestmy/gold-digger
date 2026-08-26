@@ -28,6 +28,12 @@ class TelegramAccountsTest extends TestCase
     {
         parent::setUp();
         $this->user = User::factory()->create();
+
+        // This class is about the collector a tenant runs themselves: the token it
+        // authenticates with, and what revoking that token stops. Hosted accounts have no
+        // collector and no token, so the path under test has to be asked for by name now
+        // that it is no longer the default. See HostedSignInTest for the other one.
+        config(['telegram.hosted_by_default' => false]);
     }
 
     public function test_adding_an_account_issues_it_its_own_token(): void

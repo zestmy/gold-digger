@@ -10,14 +10,31 @@
     {{-- Polled only while a sign-in is under way, so an idle page is not refetching every
          few seconds for nothing. --}}
     <div class="space-y-6" @if($awaiting) wire:poll.3s @endif>
+        @if(!$hostedReady && config('telegram.hosted_by_default'))
+            {{-- The failure this replaces was a spinner that never resolved: a sign-in was
+                 requested and nothing existed to answer it. An operator problem should read
+                 as one rather than as a broken product. --}}
+            <div class="rounded-lg border border-amber-500/30 bg-amber-900/20 p-4">
+                <p class="text-sm text-amber-300">Hosted sign-in is not configured on this deployment.</p>
+                <p class="mt-1 text-xs text-amber-200/70">
+                    Adding an account will work, but signing one in cannot: it needs
+                    <code>TELEGRAM_APP_ID</code>, <code>TELEGRAM_APP_HASH</code> and
+                    <code>TELEGRAM_WORKER_TOKEN</code> set, and the session worker running.
+                    See <code>tools/telegram-worker/</code>.
+                </p>
+            </div>
+        @endif
+
         <div class="rounded-lg border border-gray-700 bg-gray-800/50 p-4">
             <p class="text-sm text-gray-300">
-                Sign in with your phone number. Each account runs its own collector.
+                Sign in with your phone number. Nothing to install.
             </p>
             <p class="mt-1 text-xs text-gray-500">
-                The code is relayed to that collector, which performs the sign-in and keeps the session on its
-                own machine. This dashboard ends up with a row saying &ldquo;signed in&rdquo;, never a
-                credential that can read your chats.
+                Telegram sends a code to your phone, you type it here, and that is the whole of it. Reading a
+                provider's channel means being signed in as a real Telegram account, so the session this
+                creates can read your chats and post as you &mdash; it is encrypted, never shown in a browser,
+                and revoked the moment you remove the account. If you would rather that credential never left
+                a machine of your own, an account can run its own collector instead.
             </p>
         </div>
 
@@ -52,6 +69,11 @@
 
                             @if($state === Acct::ACTIVE && $account->isConnected())
                                 <span class="rounded bg-green-900/40 px-2 py-0.5 text-xs text-green-400">CONNECTED</span>
+                            @elseif($state === Acct::ACTIVE && $account->is_hosted)
+                                {{-- Hosted: the tenant did nothing wrong and can do nothing
+                                     about it. Naming it as ours avoids sending them to look
+                                     for a machine of their own that was never involved. --}}
+                                <span class="rounded bg-amber-900/40 px-2 py-0.5 text-xs text-amber-400">SIGNED IN, READER DOWN</span>
                             @elseif($state === Acct::ACTIVE)
                                 <span class="rounded bg-amber-900/40 px-2 py-0.5 text-xs text-amber-400">SIGNED IN, NOT RUNNING</span>
                             @elseif($account->loggingIn())
@@ -63,6 +85,9 @@
 
                         <p class="mt-1 text-xs text-gray-500">
                             {{ $account->label }}
+                            @unless($account->is_hosted)
+                                &middot; <span class="text-gray-400">own collector</span>
+                            @endunless
                             @if($account->last_seen_at)
                                 {{-- "Never" and "an hour ago" are both not-connected and mean
                                      entirely different things. --}}
@@ -73,13 +98,17 @@
                     </div>
 
                     <div class="flex shrink-0 gap-2">
-                        <button type="button" wire:click="reissue({{ $account->id }})"
-                                wire:confirm="Issue a new token? The current one stops working immediately and that collector will need restarting."
-                                class="rounded-md bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-gray-600">
-                            New token
-                        </button>
+                        @unless($account->is_hosted)
+                            <button type="button" wire:click="reissue({{ $account->id }})"
+                                    wire:confirm="Issue a new token? The current one stops working immediately and that collector will need restarting."
+                                    class="rounded-md bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-gray-600">
+                                New token
+                            </button>
+                        @endunless
                         <button type="button" wire:click="remove({{ $account->id }})"
-                                wire:confirm="Remove this account and revoke its token? Its channels and their history are kept."
+                                wire:confirm="{{ $account->is_hosted
+                                    ? 'Remove this account? Its stored Telegram session is destroyed and this dashboard stops reading its channels. Channels and their history are kept.'
+                                    : 'Remove this account and revoke its token? Its channels and their history are kept.' }}"
                                 class="rounded-md px-3 py-1.5 text-xs text-red-400 hover:text-red-300">
                             Remove
                         </button>
@@ -91,7 +120,9 @@
                     <div class="mt-4 rounded-md border border-amber-500/30 bg-amber-900/20 p-4">
                         <p class="text-sm text-amber-300">This sign-in stalled.</p>
                         <p class="mt-1 text-xs text-amber-200/70">
-                            {{ $account->login_message ?: 'Nothing has moved for ten minutes. The code may have expired, or this account\'s collector may not be running.' }}
+                            {{ $account->login_message ?: ($account->is_hosted
+                                ? 'Nothing has moved for ten minutes. The code may have expired - start again and one will be sent fresh.'
+                                : 'Nothing has moved for ten minutes. The code may have expired, or this account\'s collector may not be running.') }}
                         </p>
                         <button type="button" wire:click="cancelLogin({{ $account->id }})"
                                 class="mt-3 rounded-md bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-gray-600">
@@ -152,8 +183,8 @@
                 @elseif($state === Acct::PASSWORD_NEEDED || $state === Acct::PASSWORD_SUBMITTED)
                     <div class="mt-4 rounded-md bg-gray-900/60 p-4">
                         <p class="text-xs text-gray-400">
-                            This account has two-step verification. The password is relayed to the collector and
-                            never stored here.
+                            This account has two-step verification. The password is passed straight through to
+                            Telegram, once, and is never written down &mdash; not in a column, not in a log.
                         </p>
 
                         <div class="mt-2 flex flex-wrap items-center gap-2">

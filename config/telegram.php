@@ -4,24 +4,60 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Signal sources
+    | Platform MTProto application
     |--------------------------------------------------------------------------
     |
-    | Chats the copier will accept signals from, and the account each trades for.
+    | One application, registered once at https://my.telegram.org, shared by every
+    | tenant. Asking each of them to register their own was the largest single drop-off
+    | in onboarding: it needs a Telegram account, a web form and a wait, all before the
+    | product has done anything for them.
     |
-    | This is a security boundary, not a convenience. A Telegram bot is publicly
-    | reachable - anyone who finds it can send it a message - so a copier that traded
-    | whatever arrived would be a remote trade-execution endpoint on a live account,
-    | authenticated by nothing.
+    | The trade is that Telegram rate-limits and bans per application, not per user. If
+    | this one is throttled, every tenant is throttled at once - so it is worth watching,
+    | and worth keeping the per-account override below as the escape hatch.
+    */
+
+    'app_id' => env('TELEGRAM_APP_ID'),
+
+    'app_hash' => env('TELEGRAM_APP_HASH'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Session worker credential
+    |--------------------------------------------------------------------------
     |
-    | Messages from any other chat are still recorded, because somebody talking to the
-    | bot is worth being able to see, but they are never parsed, reviewed or executed.
+    | The worker signs tenants in and holds their sessions, so this token reaches every
+    | hosted account at once. That makes it infrastructure - closer to the database
+    | password than to a bot token. It is set by whoever deploys the platform, is never
+    | issued through the dashboard, and is never shown to a user.
     |
-    | The operator's own alert chat (TELEGRAM_CHAT_ID) is accepted without appearing
-    | here, being the one chat already known to belong to them.
+    | Unset means no worker: the endpoints refuse everything rather than falling open.
+    */
+
+    'worker_token' => env('TELEGRAM_WORKER_TOKEN'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Hosting
+    |--------------------------------------------------------------------------
     |
-    | Shape: '-1001234567890' => 'you@example.com'
+    | Whether a newly added account is signed in by the platform's worker or by a
+    | collector the tenant runs themselves. Hosted is the SaaS path and the default;
+    | self-hosted remains for anyone unwilling to hand over a session, which is a
+    | reasonable thing to be unwilling to do.
+    */
+
+    'hosted_by_default' => (bool) env('TELEGRAM_HOSTED_BY_DEFAULT', true),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Bot API sources
+    |--------------------------------------------------------------------------
     |
+    | Chat id => the address a forwarded message must have come from, for the Bot API
+    | feeder. Unrelated to the MTProto settings above and read by SignalIngest, which
+    | defaults to an empty list - so this being empty means "accept none", not "accept
+    | all".
     */
 
     'sources' => [

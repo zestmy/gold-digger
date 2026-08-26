@@ -187,6 +187,41 @@ PYTHON_BOT_API_KEY=
 
 ---
 
+## Telegram session worker
+
+Adding a Telegram account is done in the browser, which means the platform signs tenants
+in and holds their sessions. A separate process does that work — see
+[`tools/telegram-worker/`](tools/telegram-worker/) for the systemd unit and the full
+argument for why it is built this way.
+
+Without it, tenants can add accounts but cannot sign them in: the page says so rather than
+spinning on a request nothing will answer.
+
+```env
+# One application from https://my.telegram.org, shared by every tenant. Telegram
+# rate-limits and bans per application, so a throttle here hits everyone at once.
+TELEGRAM_APP_ID=
+TELEGRAM_APP_HASH=
+
+# Must match the worker's. It reaches every tenant's session, so it belongs with the
+# database password, not on any dashboard page.
+TELEGRAM_WORKER_TOKEN=
+
+# false puts new accounts back on a collector the tenant runs themselves.
+TELEGRAM_HOSTED_BY_DEFAULT=true
+```
+
+Two things worth knowing before turning this on:
+
+- A stored session can read every chat on a tenant's account and post as them. It is
+  encrypted with `APP_KEY`, so **losing or rotating `APP_KEY` makes every stored session
+  unreadable** and every tenant has to sign in again.
+- The worker endpoints under `/api/v1/telegram/worker/` hand out those sessions. They are
+  guarded by the token above and should not be reachable from outside the network the
+  worker runs on.
+
+---
+
 ## Troubleshooting
 
 ### 500 Error

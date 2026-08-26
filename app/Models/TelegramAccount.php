@@ -41,14 +41,61 @@ class TelegramAccount extends Model
     protected $fillable = [
         'user_id', 'label', 'telegram_username', 'display_name', 'bot_token_id', 'last_seen_at',
         'login_state', 'login_phone', 'login_message', 'login_updated_at',
+        'session', 'is_hosted', 'ingest_state',
     ];
+
+    /**
+     * The session never leaves the server in a response a person can see.
+     *
+     * It is not a token that names an account: it can read every chat and post as the
+     * user. Hiding it here means a careless `toArray()` in a Livewire payload cannot
+     * put it in front of a browser, which is the way this sort of column usually leaks.
+     */
+    protected $hidden = ['session'];
 
     protected function casts(): array
     {
         return [
             'last_seen_at' => 'datetime',
             'login_updated_at' => 'datetime',
+            'is_hosted' => 'boolean',
+            'ingest_state' => 'array',
+            // APP_KEY, so a database dump on its own is not a set of working logins.
+            'session' => 'encrypted',
         ];
+    }
+
+    /**
+     * A new account follows the deployment's setting unless told otherwise.
+     *
+     * The column defaults to hosted so a direct insert lands on the supported path, but
+     * the configured answer has to win wherever a row is actually made - otherwise
+     * `hosted_by_default` means "hosted, except through the six other ways an account
+     * gets created", which is not a setting anyone can reason about.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (self $account) {
+            if ($account->is_hosted === null) {
+                $account->is_hosted = (bool) config('telegram.hosted_by_default', true);
+            }
+        });
+    }
+
+    /**
+     * Accounts the platform signs in and runs, as opposed to ones a tenant runs.
+     */
+    public function scopeHosted($query)
+    {
+        return $query->where('is_hosted', true);
+    }
+
+    /**
+     * Is this account's session established and usable?
+     */
+    public function isSignedIn(): bool
+    {
+        return $this->login_state === self::ACTIVE && filled($this->session);
     }
 
     /**

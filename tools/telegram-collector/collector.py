@@ -186,7 +186,7 @@ async def cmd_login() -> None:
         print(f"Session stored at {SESSION}.session - treat it as a password.")
 
 
-async def announce(tg: TelegramClient) -> int:
+async def announce(tg: TelegramClient, call=None) -> int:
     """
     Report every dialog this account can see, so channels can be picked from a list.
 
@@ -219,7 +219,7 @@ async def announce(tg: TelegramClient) -> int:
 
     me = await tg.get_me()
 
-    result = api("POST", "channels", {
+    result = (call or api)("POST", "channels", {
         "channels": channels,
         # So the dashboard can show which account this is rather than a row of labels
         # somebody typed. It identifies, it does not authenticate - the token does that.
@@ -240,8 +240,10 @@ async def cmd_announce() -> None:
         await announce(tg)
 
 
-async def forward(tg: TelegramClient, state: dict, chat_id: str, messages) -> int:
+async def forward(tg: TelegramClient, state: dict, chat_id: str, messages, call=None, save=None) -> int:
     """Post a batch and advance the checkpoint only if it landed."""
+    call = call or api
+    save = save or save_state
     batch = []
 
     for message in messages:
@@ -285,12 +287,12 @@ async def forward(tg: TelegramClient, state: dict, chat_id: str, messages) -> in
     if not batch:
         return 0
 
-    result = api("POST", "messages", {"messages": batch})
+    result = call("POST", "messages", {"messages": batch})
 
     # Only now. The dashboard is idempotent on chat + message id, so a message posted
     # twice is harmless; one never posted because the checkpoint moved first is lost.
     state["seen"][chat_id] = max(m["message_id"] for m in batch)
-    save_state(state)
+    save(state)
 
     print(f"[{chat_id}] forwarded {result['stored']}, parsed {result['parsed']}")
 
@@ -319,7 +321,7 @@ async def resolve(tg: TelegramClient, watch: set[str]) -> dict:
     return found
 
 
-async def catch_up(tg: TelegramClient, state: dict, watch: list[str]) -> None:
+async def catch_up(tg: TelegramClient, state: dict, watch: list[str], call=None, save=None) -> None:
     """Fetch what arrived while this was not running."""
     entities = await resolve(tg, set(watch))
 
@@ -336,10 +338,10 @@ async def catch_up(tg: TelegramClient, state: dict, watch: list[str]) -> None:
         ]
 
         if messages:
-            await forward(tg, state, chat_id, reversed(messages))
+            await forward(tg, state, chat_id, reversed(messages), call=call, save=save)
 
 
-async def report(state: str, message: str | None = None, me=None) -> None:
+async def report(state: str, message: str | None = None, me=None, call=None) -> None:
     """Tell the dashboard how the sign-in went."""
     payload = {"state": state, "message": message}
 
@@ -348,12 +350,12 @@ async def report(state: str, message: str | None = None, me=None) -> None:
         payload["name"] = " ".join(filter(None, [me.first_name, me.last_name])) or None
 
     try:
-        api("POST", "login", payload)
+        (call or api)("POST", "login", payload)
     except requests.RequestException as error:
         print(f"could not report login state: {error}")
 
 
-async def serve_login(tg: TelegramClient) -> bool:
+async def serve_login(tg: TelegramClient, call=None) -> bool:
     """
     Carry out whatever step of a sign-in the dashboard is waiting on.
 
@@ -366,7 +368,7 @@ async def serve_login(tg: TelegramClient) -> bool:
     that has already been spent.
     """
     try:
-        work = api("GET", "login")
+        work = (call or api)("GET", "login")
     except requests.RequestException:
         return await tg.is_user_authorized()
 
@@ -378,18 +380,18 @@ async def serve_login(tg: TelegramClient) -> bool:
     try:
         if action == "send_code":
             await tg.send_code_request(work["phone"])
-            await report("code_sent")
+            await report("code_sent", call=call)
             print("Code requested; waiting for it to be entered in the dashboard.")
 
         elif action == "sign_in":
             code = work.get("code")
 
             if not code:
-                await report("failed", "The code was not delivered. Start again.")
+                await report("failed", "The code was not delivered. Start again.", call=call)
                 return False
 
             await tg.sign_in(phone=work["phone"], code=code)
-            await report("active", me=await tg.get_me())
+            await report("active", me=await tg.get_me(), call=call)
             print("Signed in.")
             return True
 
@@ -397,24 +399,24 @@ async def serve_login(tg: TelegramClient) -> bool:
             password = work.get("password")
 
             if not password:
-                await report("failed", "The password was not delivered. Start again.")
+                await report("failed", "The password was not delivered. Start again.", call=call)
                 return False
 
             await tg.sign_in(password=password)
-            await report("active", me=await tg.get_me())
+            await report("active", me=await tg.get_me(), call=call)
             print("Signed in.")
             return True
 
     except SessionPasswordNeededError:
         # Two-step verification. Asked for separately so the password is only ever
         # requested when it is genuinely required.
-        await report("password_needed")
+        await report("password_needed", call=call)
         print("Two-step verification is on; waiting for the password.")
 
     except Exception as error:  # noqa: BLE001 - Telegram's message is the useful part
         # Reported verbatim: "wrong code" and "this number is banned" need entirely
         # different responses, and "failed" sends people to the wrong one.
-        await report("failed", str(error)[:200])
+        await report("failed", str(error)[:200], call=call)
         print(f"Sign-in failed: {error}")
 
     return False
