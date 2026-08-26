@@ -127,6 +127,11 @@ final class PositionReconciler
             'entry_price' => $position['entry_price'],
             // 0.0 from MT5 means "no level set", which is not the same as a level at zero.
             'sl_price' => $this->level($position['sl'] ?? null),
+            // The best available reading of what this position risked, and an honest one
+            // only if nothing has moved its stop since it opened - which is unknowable for
+            // a position this system is meeting for the first time. Recorded because the
+            // alternative is null, and null is not more true.
+            'initial_sl_price' => $this->level($position['sl'] ?? null),
             'tp1_price' => $this->level($position['tp'] ?? null),
             'tp2_price' => null,
             'tp3_price' => null,

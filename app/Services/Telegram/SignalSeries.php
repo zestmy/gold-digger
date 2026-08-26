@@ -172,6 +172,29 @@ final class SignalSeries
         return $value === null ? null : (float) $value;
     }
 
+    /**
+     * The freshest close for an account's instrument, named directly.
+     *
+     * The signal-shaped `lastClose()` above cannot serve callers holding a position rather
+     * than a message. Same rule: the newest bar on any of the instrument's series, because
+     * one bar is not an arithmetic over a mixture.
+     */
+    public function closeFor(?int $account, string $symbol): ?float
+    {
+        if ($account === null) {
+            return null;
+        }
+
+        $close = Candle::query()
+            ->where('broker_account_id', $account)
+            ->where('symbol', $symbol)
+            ->orderByDesc('open_time')
+            ->orderByDesc('id')
+            ->value('close');
+
+        return $close === null ? null : (float) $close;
+    }
+
     private function newest(TelegramSignal $signal): ?Candle
     {
         $context = $this->for($signal);

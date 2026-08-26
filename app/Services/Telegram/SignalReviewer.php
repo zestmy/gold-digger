@@ -457,7 +457,11 @@ final class SignalReviewer
         if ($settings->copier_trail_distance_r !== null && (float) $settings->copier_trail_distance_r > 0.0) {
             $steps[] = sprintf('the stop trails %.2fR behind the best price', (float) $settings->copier_trail_distance_r);
         } elseif ($settings->copier_breakeven) {
-            $steps[] = 'the stop moves to break-even';
+            $offset = $settings->copier_breakeven_offset_pips;
+
+            $steps[] = ($offset !== null && (float) $offset > 0.0)
+                ? sprintf('the stop moves to break-even plus %s pips of costs', rtrim(rtrim(number_format((float) $offset, 2, '.', ''), '0'), '.'))
+                : 'the stop moves to break-even';
         }
 
         if ($steps === []) {

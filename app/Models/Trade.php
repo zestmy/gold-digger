@@ -38,6 +38,7 @@ class Trade extends Model
         'remaining_lot_size',
         'entry_price',
         'sl_price',
+        'initial_sl_price',
         'tp1_price',
         'tp2_price',
         'tp3_price',
@@ -71,6 +72,7 @@ class Trade extends Model
             // Prices - 5 decimal places for gold (XAUUSD)
             'entry_price' => 'decimal:5',
             'sl_price' => 'decimal:5',
+            'initial_sl_price' => 'decimal:5',
             'tp1_price' => 'decimal:5',
             'tp2_price' => 'decimal:5',
             'tp3_price' => 'decimal:5',

@@ -119,6 +119,11 @@ class FillController extends Controller
                 'remaining_lot_size' => $data['volume'],
                 'entry_price' => $data['price'],
                 'sl_price' => $data['sl'] ?? $payload['sl_price'] ?? 0,
+                // The risk this position was opened with, written once and never revised.
+                // `sl_price` above is live - PositionReconciler overwrites it with the
+                // terminal's actual stop - so it stops being the opening risk the moment
+                // anything moves the stop, and R is measured against this instead.
+                'initial_sl_price' => $data['sl'] ?? $payload['sl_price'] ?? null,
                 'tp1_price' => $data['tp1'] ?? $payload['tp1_price'] ?? null,
                 'tp2_price' => $data['tp2'] ?? $payload['tp2_price'] ?? null,
                 'tp3_price' => $data['tp3'] ?? $payload['tp3_price'] ?? null,

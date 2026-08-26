@@ -35,7 +35,15 @@ use App\Services\Strategy\SymbolResolver;
  * times the stop on the second, so a pip trigger cannot be right for both. One times what
  * this trade risked means the same thing on every signal from every provider, which is the
  * only unit under which one setting is correct across all of them.
-
+ *
+ * R is the risk the position *opened* with, and it is fixed for the life of the trade. It
+ * has to come from `initial_sl_price`, because `sl_price` is live: the reconciler writes
+ * the terminal's current stop back onto the row, so the moment this class moves a stop it
+ * would otherwise be measuring R against its own last decision. A break-even move made R
+ * zero and dropped the position out of management for good - a configured trailing stop
+ * moved once and then froze - and a trail landing past the entry made every subsequent
+ * distance drift from the multiple that was configured. Neither reported anything.
+ *
  * ## It can only ever reduce risk
  *
  * Stops move toward the entry and never away, partials reduce the position and never add
@@ -100,7 +108,13 @@ final class PositionManager
      */
     private function actionsFor(Trade $trade, BotSettings $settings, BotHeartbeat $heartbeat, float $trigger): array
     {
-        $risk = abs((float) $trade->entry_price - (float) $trade->sl_price);
+        // Positions opened before `initial_sl_price` existed fall back to the live stop,
+        // which is what every position used until now. For those the old drift remains
+        // until they close; there is no honest way to recover an opening risk that was
+        // never recorded.
+        $opening = $trade->initial_sl_price ?? $trade->sl_price;
+
+        $risk = $opening === null ? 0.0 : abs((float) $trade->entry_price - (float) $opening);
         $best = $this->bestPriceSince($trade, $heartbeat);
 
         // No stop, or no bars since entry: there is no R to measure against and no reading
@@ -145,7 +159,7 @@ final class PositionManager
 
             $target = $isBuy ? $best - $distance : $best + $distance;
         } elseif ($settings->copier_breakeven) {
-            $target = (float) $trade->entry_price;
+            $target = $this->breakEvenPrice($trade, $settings, $heartbeat, $isBuy, $best);
         }
 
         if ($target !== null && $this->improves($trade, $target, $isBuy)) {
@@ -161,6 +175,68 @@ final class PositionManager
         }
 
         return $actions;
+    }
+
+    /**
+     * Where a break-even stop actually goes.
+     *
+     * The entry plus `copier_breakeven_offset_pips` in the profitable direction. Closing at
+     * the entry exactly is not breaking even - the position has already paid the spread it
+     * crossed to get in, and it still owes commission both ways. On a five-point gold stop
+     * against a two-point spread that is a large share of 1R booked as a loss on every
+     * trade this protection rescues, which is the opposite of what it was turned on for.
+     *
+     * The offset is in pips, alone among these settings. Everything else here is in R
+     * because a copied stop is a stranger's choice and no pip figure could be right across
+     * providers. This is not about the trade: it is what the broker charges to hold the
+     * instrument, the same size whether the provider risked five points or forty. In R it
+     * would shrink exactly where the cost bites hardest.
+     *
+     * Unconfigured, or with no pip size to place it in price, the stop goes to the entry -
+     * which is what this did before the setting existed.
+     */
+    private function breakEvenPrice(
+        Trade $trade,
+        BotSettings $settings,
+        BotHeartbeat $heartbeat,
+        bool $isBuy,
+        float $best,
+    ): float {
+        $entry = (float) $trade->entry_price;
+        $offset = $settings->copier_breakeven_offset_pips;
+
+        if ($offset === null || (float) $offset <= 0.0) {
+            return $entry;
+        }
+
+        $spec = app(SymbolResolver::class)->for($heartbeat->broker_account_id, $trade->symbol, $heartbeat);
+        $pipSize = $spec['pip_size'];
+
+        if ($pipSize === null || $pipSize <= 0.0) {
+            // Refusing to place a level in a unit the account has not reported, the same
+            // rule the sizing path follows.
+            return $entry;
+        }
+
+        $padded = $entry + (($isBuy ? 1.0 : -1.0) * (float) $offset * $pipSize);
+
+        // A padded stop has to stay behind the market on both readings that exist: the best
+        // price the position ever saw, and the last price it is at now. Past either one it
+        // is a stop on the wrong side of price, which the broker refuses outright or fills
+        // as an immediate exit - turning a protective move into a close.
+        //
+        // Both are needed. The best price alone misses a position that has run far and
+        // retraced; the last close alone misses one whose padding was never earned. The
+        // trigger keeps this rare, but rare and closes-the-position is worth the check.
+        $last = $this->series->closeFor($heartbeat->broker_account_id, (string) $trade->symbol);
+
+        $limit = $last === null
+            ? $best
+            : ($isBuy ? min($best, $last) : max($best, $last));
+
+        $beyondTheMarket = $isBuy ? $padded >= $limit : $padded <= $limit;
+
+        return $beyondTheMarket ? $entry : $padded;
     }
 
     /**

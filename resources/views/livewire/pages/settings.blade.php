@@ -317,8 +317,14 @@
                     provider chose, five points on one signal and forty on the next, so a pip trigger
                     cannot be right for both. Leave the trigger blank to leave positions alone.
                 </p>
+                <p class="mt-1 text-xs text-gray-500">
+                    The one exception is the break-even offset, which is in pips. Closing at the entry
+                    exactly is not breaking even &mdash; the spread crossed on the way in is already paid
+                    and commission is still owed &mdash; and that cost is a fact about the instrument,
+                    the same size whether the provider risked five points or forty.
+                </p>
 
-                <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
                     <div>
                         <label for="copier_protect_at_r" class="block text-sm font-medium text-gray-300">Act at</label>
                         <input type="number" step="0.1" min="0.1" id="copier_protect_at_r" wire:model="copier_protect_at_r"
@@ -335,6 +341,15 @@
                                    class="rounded border-gray-600 bg-gray-700 text-yellow-500 focus:ring-yellow-500">
                             Move the stop to entry
                         </label>
+                    </div>
+
+                    <div>
+                        <label for="copier_breakeven_offset_pips" class="block text-sm font-medium text-gray-300">Clear costs by</label>
+                        <input type="number" step="0.1" min="0" id="copier_breakeven_offset_pips" wire:model="copier_breakeven_offset_pips"
+                               placeholder="0"
+                               class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm">
+                        <p class="mt-1 text-xs text-gray-500">pips past entry</p>
+                        @error('copier_breakeven_offset_pips') <p class="mt-1 text-xs text-red-400">{{ $message }}</p> @enderror
                     </div>
 
                     <div>

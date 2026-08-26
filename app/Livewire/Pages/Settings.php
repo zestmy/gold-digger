@@ -70,6 +70,14 @@ class Settings extends Component
     #[Validate('boolean')]
     public bool $copier_breakeven = false;
 
+    /**
+     * In pips, alone among these. See PositionManager::breakEvenPrice - this is the cost of
+     * holding the instrument, not a property of the trade, so R would shrink it exactly
+     * where it matters most.
+     */
+    #[Validate('nullable|numeric|min:0|max:500')]
+    public ?string $copier_breakeven_offset_pips = null;
+
     #[Validate('nullable|integer|min:1|max:90')]
     public ?string $copier_profit_lock_pct = null;
 
@@ -134,6 +142,8 @@ class Settings extends Component
             $this->copier_protect_at_r = $settings->copier_protect_at_r === null
                 ? null : (string) $settings->copier_protect_at_r;
             $this->copier_breakeven = (bool) $settings->copier_breakeven;
+            $this->copier_breakeven_offset_pips = $settings->copier_breakeven_offset_pips === null
+                ? null : (string) $settings->copier_breakeven_offset_pips;
             $this->copier_profit_lock_pct = $settings->copier_profit_lock_pct === null
                 ? null : (string) $settings->copier_profit_lock_pct;
             $this->copier_trail_distance_r = $settings->copier_trail_distance_r === null
@@ -177,6 +187,8 @@ class Settings extends Component
             'copier_protect_at_r' => ($this->copier_protect_at_r === null || $this->copier_protect_at_r === '')
                 ? null : (float) $this->copier_protect_at_r,
             'copier_breakeven' => $this->copier_breakeven,
+            'copier_breakeven_offset_pips' => ($this->copier_breakeven_offset_pips === null || $this->copier_breakeven_offset_pips === '')
+                ? null : (float) $this->copier_breakeven_offset_pips,
             'copier_profit_lock_pct' => ($this->copier_profit_lock_pct === null || $this->copier_profit_lock_pct === '')
                 ? null : (int) $this->copier_profit_lock_pct,
             'copier_trail_distance_r' => ($this->copier_trail_distance_r === null || $this->copier_trail_distance_r === '')
