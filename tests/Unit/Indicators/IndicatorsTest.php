@@ -193,6 +193,239 @@ class IndicatorsTest extends TestCase
     }
 
     // =====================================================================
+    // SMA
+    // =====================================================================
+
+    public function test_sma_averages_its_window_and_warms_up_like_everything_else(): void
+    {
+        $sma = Indicators::sma([1, 2, 3, 4, 5], 3);
+
+        $this->assertSame([null, null], array_slice($sma, 0, 2));
+        $this->assertEqualsWithDelta(2.0, $sma[2], 1e-9);
+        $this->assertEqualsWithDelta(3.0, $sma[3], 1e-9);
+        $this->assertEqualsWithDelta(4.0, $sma[4], 1e-9);
+    }
+
+    /**
+     * The running total is maintained incrementally rather than re-summing each window, so
+     * this checks it has not drifted over a long series - the failure mode of that
+     * optimisation is a slow accumulation of float error, not a wrong first value.
+     */
+    public function test_sma_does_not_drift_over_a_long_series(): void
+    {
+        $values = range(1, 500);
+        $sma = Indicators::sma($values, 200);
+
+        // Window 301..500 has mean 400.5.
+        $this->assertEqualsWithDelta(400.5, $sma[499], 1e-9);
+    }
+
+    // =====================================================================
+    // RSI
+    // =====================================================================
+
+    /**
+     * Wilder's own worked example from *New Concepts in Technical Trading Systems*.
+     *
+     * These two numbers are the reason to prefer a published fixture over a snapshot of
+     * this code: they are independent of the implementation, so a refactor that changes
+     * the smoothing fails here instead of silently moving every momentum reading.
+     */
+    public function test_rsi_matches_wilders_published_worked_example(): void
+    {
+        $closes = [
+            44.34, 44.09, 44.15, 43.61, 44.33, 44.83, 45.10, 45.42, 45.84, 46.08,
+            45.89, 46.03, 45.61, 46.28, 46.28, 46.00, 46.03, 46.41, 46.22, 45.64,
+        ];
+
+        $rsi = Indicators::rsi($closes, 14);
+
+        $this->assertEqualsWithDelta(70.46, $rsi[14], 0.01);
+        $this->assertEqualsWithDelta(66.25, $rsi[15], 0.01);
+    }
+
+    /**
+     * The first close has no change before it, so the first defined RSI is at index
+     * `period`, not `period - 1`. Getting this wrong reads momentum from the wrong bar.
+     */
+    public function test_rsi_warms_up_one_bar_later_than_a_moving_average(): void
+    {
+        $rsi = Indicators::rsi(range(1, 30), 14);
+
+        $this->assertNull($rsi[13]);
+        $this->assertNotNull($rsi[14]);
+        $this->assertCount(30, $rsi);
+    }
+
+    public function test_rsi_is_one_hundred_when_nothing_has_fallen(): void
+    {
+        // Not a division by zero: a period with no losses genuinely has infinite relative
+        // strength, and 100 is what that maps to.
+        $rsi = Indicators::rsi(range(1, 30), 14);
+
+        $this->assertEqualsWithDelta(100.0, $rsi[14], 1e-9);
+    }
+
+    public function test_rsi_is_zero_when_nothing_has_risen(): void
+    {
+        $rsi = Indicators::rsi(array_reverse(range(1, 30)), 14);
+
+        $this->assertEqualsWithDelta(0.0, $rsi[14], 1e-9);
+    }
+
+    public function test_rsi_of_a_flat_series_is_neither_extreme(): void
+    {
+        $rsi = Indicators::rsi(array_fill(0, 30, 5.0), 14);
+
+        $this->assertEqualsWithDelta(50.0, $rsi[14], 1e-9);
+    }
+
+    // =====================================================================
+    // MACD
+    // =====================================================================
+
+    /**
+     * On a series rising by exactly one per bar, both EMAs settle into a constant lag and
+     * their difference stops moving - so the signal line converges onto the MACD line and
+     * the histogram goes to zero. Any residual histogram means one of the two EMAs is
+     * still drifting, which is what a seeding bug looks like.
+     */
+    public function test_macd_histogram_settles_to_zero_on_a_constant_slope(): void
+    {
+        $result = Indicators::macd(range(1, 120));
+
+        $this->assertEqualsWithDelta(0.0, $result['histogram'][119], 1e-6);
+        $this->assertEqualsWithDelta(7.0, $result['macd'][119], 1e-6);
+    }
+
+    /**
+     * The signal line averages the MACD line, which does not exist through the slow EMA's
+     * warm-up. If those nulls were averaged as zeros the first signal values would be
+     * dragged toward the axis - so the offsets are pinned here explicitly.
+     */
+    public function test_macd_and_its_signal_line_warm_up_at_the_right_bars(): void
+    {
+        $result = Indicators::macd(range(1, 60), 12, 26, 9);
+
+        $this->assertNull($result['macd'][24]);
+        $this->assertNotNull($result['macd'][25]);
+
+        $this->assertNull($result['signal'][32]);
+        $this->assertNotNull($result['signal'][33]);
+
+        $this->assertCount(60, $result['macd']);
+        $this->assertCount(60, $result['signal']);
+        $this->assertCount(60, $result['histogram']);
+    }
+
+    public function test_macd_rejects_a_fast_period_that_is_not_faster(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        Indicators::macd(range(1, 60), 26, 12);
+    }
+
+    // =====================================================================
+    // STOCHASTIC
+    // =====================================================================
+
+    public function test_stochastic_reads_one_hundred_at_the_top_of_the_range(): void
+    {
+        $highs = array_fill(0, 20, 10.0);
+        $lows = array_fill(0, 20, 0.0);
+        $closes = array_fill(0, 20, 10.0);
+
+        $result = Indicators::stochastic($highs, $lows, $closes, 14, 1, 1);
+
+        $this->assertEqualsWithDelta(100.0, $result['k'][19], 1e-9);
+    }
+
+    public function test_stochastic_reads_zero_at_the_bottom_of_the_range(): void
+    {
+        $highs = array_fill(0, 20, 10.0);
+        $lows = array_fill(0, 20, 0.0);
+        $closes = array_fill(0, 20, 0.0);
+
+        $result = Indicators::stochastic($highs, $lows, $closes, 14, 1, 1);
+
+        $this->assertEqualsWithDelta(0.0, $result['k'][19], 1e-9);
+    }
+
+    /**
+     * A window whose high equals its low has no range for the close to sit inside. 50 is
+     * the honest reading - neither extreme - and it keeps the series continuous through a
+     * dead session instead of punching a null into the middle of it.
+     */
+    public function test_a_flat_window_reads_mid_range_rather_than_dividing_by_zero(): void
+    {
+        $flat = array_fill(0, 20, 7.0);
+
+        $result = Indicators::stochastic($flat, $flat, $flat, 14, 1, 1);
+
+        $this->assertEqualsWithDelta(50.0, $result['k'][19], 1e-9);
+    }
+
+    public function test_stochastic_smoothing_does_not_average_across_the_warm_up(): void
+    {
+        $highs = array_fill(0, 30, 10.0);
+        $lows = array_fill(0, 30, 0.0);
+        $closes = array_fill(0, 30, 10.0);
+
+        $result = Indicators::stochastic($highs, $lows, $closes, 14, 3, 3);
+
+        // Raw %K is 100 from bar 13 onward. Smoothed twice by 3, the first fully-formed
+        // %D is still exactly 100 - not something less, which is what averaging leading
+        // nulls as zeros would produce.
+        $this->assertEqualsWithDelta(100.0, $result['d'][29], 1e-9);
+        $this->assertNull($result['k'][12]);
+    }
+
+    // =====================================================================
+    // BOLLINGER BANDS
+    // =====================================================================
+
+    public function test_bollinger_bands_sit_symmetrically_around_the_simple_average(): void
+    {
+        $closes = [2, 4, 4, 4, 4, 4, 4, 4];
+
+        $result = Indicators::bollinger($closes, 8, 2.0);
+
+        // Mean 3.75, population SD 0.661437...
+        $this->assertEqualsWithDelta(3.75, $result['middle'][7], 1e-9);
+        $this->assertEqualsWithDelta(5.072876, $result['upper'][7], 1e-5);
+        $this->assertEqualsWithDelta(2.427124, $result['lower'][7], 1e-5);
+    }
+
+    public function test_bollinger_bands_collapse_onto_the_mean_with_no_variance(): void
+    {
+        $result = Indicators::bollinger(array_fill(0, 25, 6.0), 20);
+
+        $this->assertEqualsWithDelta(6.0, $result['upper'][24], 1e-9);
+        $this->assertEqualsWithDelta(6.0, $result['lower'][24], 1e-9);
+    }
+
+    /**
+     * `bandwidth()` already existed and is used by the squeeze factor. The bands added
+     * later must describe the same distribution, or the chart draws one thing and the
+     * gate measures another.
+     */
+    public function test_the_bands_agree_with_the_bandwidth_already_used_by_the_squeeze(): void
+    {
+        $closes = [];
+
+        for ($i = 0; $i < 40; $i++) {
+            $closes[] = 100 + sin($i / 3) * 5;
+        }
+
+        $bands = Indicators::bollinger($closes, 20, 2.0);
+        $bandwidth = Indicators::bandwidth($closes, 20, 2.0);
+
+        $width = $bands['upper'][39] - $bands['lower'][39];
+
+        $this->assertEqualsWithDelta($bandwidth[39], $width / abs($bands['middle'][39]), 1e-9);
+    }
+
+    // =====================================================================
     // GUARDS
     // =====================================================================
 

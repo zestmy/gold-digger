@@ -327,6 +327,292 @@ final class Indicators
         ];
     }
 
+    /**
+     * Simple moving average.
+     *
+     * Here because SMA 50 and SMA 200 are the two lines nearly every chart commentary
+     * refers to, so an analysis that cannot say which side of them price is on is talking
+     * about a different chart from the one the reader is looking at.
+     *
+     * @param  array<int, float>  $values
+     * @return array<int, float|null>
+     */
+    public static function sma(array $values, int $period): array
+    {
+        self::guardPeriod($period);
+
+        $count = count($values);
+        $out = array_fill(0, $count, null);
+        $running = 0.0;
+
+        for ($i = 0; $i < $count; $i++) {
+            $running += $values[$i];
+
+            if ($i >= $period) {
+                $running -= $values[$i - $period];
+            }
+
+            if ($i >= $period - 1) {
+                $out[$i] = $running / $period;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Relative Strength Index.
+     *
+     * Wilder smoothing, for the same reason ATR and ADX use it: this must agree with the
+     * number on the trader's own MetaTrader chart. An RSI computed with a 2/(n+1) alpha
+     * reads several points away from iRSI in a trend, which is exactly the situation where
+     * somebody is deciding whether 68 counts as overbought.
+     *
+     * ## On "overbought"
+     *
+     * It is a momentum reading, not a sell signal. RSI sits above 70 for the whole of a
+     * strong trend, and every system that treats that as a reason to fade has discovered
+     * the same thing expensively. It is offered here as one factor among several.
+     *
+     * @param  array<int, float>  $closes
+     * @return array<int, float|null> 0..100, null through the warm-up
+     */
+    public static function rsi(array $closes, int $period = 14): array
+    {
+        self::guardPeriod($period);
+
+        $count = count($closes);
+        $out = array_fill(0, $count, null);
+
+        if ($count <= $period) {
+            return $out;
+        }
+
+        $gain = 0.0;
+        $loss = 0.0;
+
+        // Seed on a simple average of the first `period` changes, which is where Wilder's
+        // recursion starts. Note the first close has no change, so the seed lands on index
+        // `period` rather than `period - 1`.
+        for ($i = 1; $i <= $period; $i++) {
+            $change = $closes[$i] - $closes[$i - 1];
+            $change >= 0 ? $gain += $change : $loss -= $change;
+        }
+
+        $avgGain = $gain / $period;
+        $avgLoss = $loss / $period;
+        $out[$period] = self::rsiFrom($avgGain, $avgLoss);
+
+        for ($i = $period + 1; $i < $count; $i++) {
+            $change = $closes[$i] - $closes[$i - 1];
+            $up = $change > 0 ? $change : 0.0;
+            $down = $change < 0 ? -$change : 0.0;
+
+            $avgGain = (($avgGain * ($period - 1)) + $up) / $period;
+            $avgLoss = (($avgLoss * ($period - 1)) + $down) / $period;
+
+            $out[$i] = self::rsiFrom($avgGain, $avgLoss);
+        }
+
+        return $out;
+    }
+
+    /**
+     * A period with no losses at all is 100 by definition rather than a division by zero.
+     */
+    private static function rsiFrom(float $avgGain, float $avgLoss): float
+    {
+        if ($avgLoss == 0.0) {
+            return $avgGain == 0.0 ? 50.0 : 100.0;
+        }
+
+        return 100.0 - (100.0 / (1.0 + ($avgGain / $avgLoss)));
+    }
+
+    /**
+     * MACD: the distance between two EMAs, and a smoothing of that distance.
+     *
+     * ## The signal line is an SMA, and that is deliberate
+     *
+     * Appel's original definition smooths the MACD line with an EMA, and most textbooks
+     * and most charting libraries follow it. MetaTrader's own `iMACD` uses a **simple**
+     * moving average instead, and that is the histogram the people configuring this system
+     * are looking at while they do it.
+     *
+     * This file has already made that choice once - Wilder smoothing for ATR and ADX,
+     * because a stop at "1.5 ATR" has to land where the trader's chart says it does. The
+     * same reasoning applies to a histogram that has just crossed zero: agreeing with the
+     * screen matters more than agreeing with the paper.
+     *
+     * @param  array<int, float>  $closes
+     * @return array{macd: array<int, float|null>, signal: array<int, float|null>, histogram: array<int, float|null>}
+     */
+    public static function macd(array $closes, int $fast = 12, int $slow = 26, int $signal = 9): array
+    {
+        self::guardPeriod($fast);
+        self::guardPeriod($slow);
+        self::guardPeriod($signal);
+
+        if ($fast >= $slow) {
+            throw new InvalidArgumentException("MACD fast period must be shorter than slow, got {$fast} and {$slow}.");
+        }
+
+        $count = count($closes);
+        $fastEma = self::ema($closes, $fast);
+        $slowEma = self::ema($closes, $slow);
+
+        $macd = array_fill(0, $count, null);
+
+        for ($i = 0; $i < $count; $i++) {
+            if ($fastEma[$i] === null || $slowEma[$i] === null) {
+                continue;
+            }
+
+            $macd[$i] = $fastEma[$i] - $slowEma[$i];
+        }
+
+        // The signal line averages the MACD line, which does not exist through the slow
+        // EMA's warm-up. Averaging over the nulls would quietly treat them as zero and
+        // drag the first several signal values toward the axis, so the defined tail is
+        // averaged on its own and written back at the right offset.
+        $defined = array_values(array_filter($macd, fn (?float $v) => $v !== null));
+        $signalTail = self::sma($defined, $signal);
+
+        $signalLine = array_fill(0, $count, null);
+        $offset = $count - count($defined);
+
+        foreach ($signalTail as $i => $value) {
+            $signalLine[$offset + $i] = $value;
+        }
+
+        $histogram = array_fill(0, $count, null);
+
+        for ($i = 0; $i < $count; $i++) {
+            if ($macd[$i] === null || $signalLine[$i] === null) {
+                continue;
+            }
+
+            $histogram[$i] = $macd[$i] - $signalLine[$i];
+        }
+
+        return ['macd' => $macd, 'signal' => $signalLine, 'histogram' => $histogram];
+    }
+
+    /**
+     * Stochastic oscillator: where the close sits within the recent high-low range.
+     *
+     * Defaults are 14/3/3 rather than MetaTrader's own 5/3/3, because the fast default is
+     * noise on the timeframes this system trades and every published description of the
+     * indicator uses 14. Both are configurable; neither is a signal on its own.
+     *
+     * `slowing` averages the raw %K before %D averages it again - this is the "slow"
+     * stochastic. Setting it to 1 gives the fast one.
+     *
+     * @param  array<int, float>  $highs
+     * @param  array<int, float>  $lows
+     * @param  array<int, float>  $closes
+     * @return array{k: array<int, float|null>, d: array<int, float|null>}
+     */
+    public static function stochastic(array $highs, array $lows, array $closes, int $period = 14, int $slowing = 3, int $dPeriod = 3): array
+    {
+        self::guardSameLength($highs, $lows, $closes);
+        self::guardPeriod($period);
+        self::guardPeriod($slowing);
+        self::guardPeriod($dPeriod);
+
+        $count = count($closes);
+        $raw = array_fill(0, $count, null);
+
+        for ($i = $period - 1; $i < $count; $i++) {
+            $highest = max(array_slice($highs, $i - $period + 1, $period));
+            $lowest = min(array_slice($lows, $i - $period + 1, $period));
+            $range = $highest - $lowest;
+
+            // A flat window has no "position within the range". 50 is the honest answer -
+            // neither extreme - and it keeps the series continuous through a dead session
+            // rather than punching a hole in it.
+            $raw[$i] = $range == 0.0 ? 50.0 : (($closes[$i] - $lowest) / $range) * 100.0;
+        }
+
+        $k = self::smoothDefined($raw, $slowing);
+        $d = self::smoothDefined($k, $dPeriod);
+
+        return ['k' => $k, 'd' => $d];
+    }
+
+    /**
+     * Bollinger Bands.
+     *
+     * `bandwidth()` above already computes the width as a comparable ratio, which is what
+     * the squeeze factor needs. This returns the bands themselves, because a chart has to
+     * draw them and an analysis has to be able to say price is riding the upper one.
+     *
+     * Population standard deviation over the window, matching `bandwidth()` and matching
+     * how the bands are conventionally drawn.
+     *
+     * @param  array<int, float>  $closes
+     * @return array{upper: array<int, float|null>, middle: array<int, float|null>, lower: array<int, float|null>}
+     */
+    public static function bollinger(array $closes, int $period = 20, float $deviations = 2.0): array
+    {
+        self::guardPeriod($period);
+
+        $count = count($closes);
+        $middle = self::sma($closes, $period);
+        $upper = array_fill(0, $count, null);
+        $lower = array_fill(0, $count, null);
+
+        for ($i = $period - 1; $i < $count; $i++) {
+            $mean = $middle[$i];
+            $variance = 0.0;
+
+            foreach (array_slice($closes, $i - $period + 1, $period) as $value) {
+                $variance += ($value - $mean) ** 2;
+            }
+
+            $sd = sqrt($variance / $period);
+
+            $upper[$i] = $mean + ($deviations * $sd);
+            $lower[$i] = $mean - ($deviations * $sd);
+        }
+
+        return ['upper' => $upper, 'middle' => $middle, 'lower' => $lower];
+    }
+
+    /**
+     * Moving-average a series that has nulls at the front, keeping index alignment.
+     *
+     * Used by the stochastic, where %K smooths raw %K and %D smooths %K again. Averaging
+     * across the leading nulls would read them as zero and pull the first values of every
+     * smoothed series toward the floor.
+     *
+     * @param  array<int, float|null>  $series
+     * @return array<int, float|null>
+     */
+    private static function smoothDefined(array $series, int $period): array
+    {
+        if ($period === 1) {
+            return $series;
+        }
+
+        $count = count($series);
+        $defined = array_values(array_filter($series, fn (?float $v) => $v !== null));
+
+        if ($defined === []) {
+            return array_fill(0, $count, null);
+        }
+
+        $smoothed = self::sma($defined, $period);
+        $out = array_fill(0, $count, null);
+        $offset = $count - count($defined);
+
+        foreach ($smoothed as $i => $value) {
+            $out[$offset + $i] = $value;
+        }
+
+        return $out;
+    }
+
     public static function last(array $series): ?float
     {
         for ($i = count($series) - 1; $i >= 0; $i--) {

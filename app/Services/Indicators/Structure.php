@@ -65,9 +65,16 @@ final class Structure
         $pivotLows = self::pivots($lows, false);
 
         $levels = self::cluster(array_merge($pivotHighs, $pivotLows), $atr);
+        $sequence = self::sequence($highs, $lows, $closes);
 
         return [
             'levels' => $levels,
+            // The labelled swing sequence and the breaks of it. Additive keys: everything
+            // that read this array before still reads the same things.
+            'swings' => $sequence['swings'],
+            'events' => $sequence['events'],
+            'bias' => $sequence['bias'],
+            'last_event' => $sequence['last_event'],
             // The most recent confirmed turn in each direction, which is what "the last
             // swing" means when somebody says it.
             'swing_high' => empty($pivotHighs) ? null : end($pivotHighs)['price'],
@@ -76,6 +83,168 @@ final class Structure
             'range_low' => min($lows),
             'structure' => self::describe($pivotHighs, $pivotLows),
         ];
+    }
+
+    /**
+     * The swing sequence, and the moments price broke it.
+     *
+     * ## The vocabulary, defined rather than assumed
+     *
+     * Everyone means something slightly different by these, so this is what they mean here:
+     *
+     * - **HH / HL / LH / LL** label each confirmed swing against the previous swing of the
+     *   same kind. They describe the sequence, not the price.
+     * - **Bias** is rising when the last two highs are higher and the last two lows are
+     *   higher, falling on the mirror image, and ranging whenever the two disagree.
+     * - **BOS** - break of structure - is a close beyond the most recent confirmed swing
+     *   *in the direction the bias already pointed*. It is continuation.
+     * - **CHoCH** - change of character - is a close beyond the most recent confirmed swing
+     *   *against* the prevailing bias. It is the first evidence that a trend has stopped.
+     *
+     * The distinction between the last two is the entire point of computing this. They are
+     * the same arithmetic; what differs is what the market was doing beforehand, which is
+     * why a bare "price broke a level" reading is not worth much.
+     *
+     * ## Confirmation lag, which is where this goes wrong if it goes wrong
+     *
+     * A pivot is not a pivot until `WING` further bars have printed - that is what makes it
+     * a turn rather than a bar that happens to be high. So a swing formed at bar `i` is not
+     * knowable until bar `i + WING`, and a break of it can only be recorded from that bar
+     * onwards.
+     *
+     * Skipping that is lookahead bias: the series would show structure being broken using
+     * levels that were not yet established, every backtest over it would improve, and the
+     * improvement would be entirely fictional. It is the same reasoning that makes
+     * `CandleController` reject bars the terminal has not marked closed.
+     *
+     * @param  array<int, float>  $highs
+     * @param  array<int, float>  $lows
+     * @param  array<int, float>  $closes
+     * @return array{
+     *     swings: array<int, array{index: int, price: float, kind: string, label: string|null}>,
+     *     events: array<int, array{index: int, type: string, direction: string, level: float, close: float}>,
+     *     bias: string,
+     *     last_event: array{index: int, type: string, direction: string, level: float, close: float}|null
+     * }
+     */
+    public static function sequence(array $highs, array $lows, array $closes): array
+    {
+        $swings = self::labelled(self::pivots($highs, true), self::pivots($lows, false));
+
+        $events = [];
+        $bias = 'ranging';
+
+        // Walked bar by bar rather than evaluated at the end, because "what was the bias
+        // before this break" is a question about the past and cannot be answered from the
+        // finished series.
+        $confirmedHighs = [];
+        $confirmedLows = [];
+        $cursor = 0;
+        $lastBrokenHigh = null;
+        $lastBrokenLow = null;
+
+        foreach ($closes as $i => $close) {
+            // Take in every swing that has become knowable as of this bar.
+            while ($cursor < count($swings) && $swings[$cursor]['index'] + self::WING <= $i) {
+                $swing = $swings[$cursor];
+                $swing['kind'] === 'high' ? $confirmedHighs[] = $swing : $confirmedLows[] = $swing;
+                $cursor++;
+            }
+
+            $bias = self::biasOf($confirmedHighs, $confirmedLows);
+
+            $high = $confirmedHighs === [] ? null : end($confirmedHighs);
+            $low = $confirmedLows === [] ? null : end($confirmedLows);
+
+            // Each swing is broken once. Without this a trend that keeps running prints an
+            // event on every bar, and the list stops meaning "here is where it happened".
+            if ($high !== null && $close > $high['price'] && $lastBrokenHigh !== $high['index']) {
+                $lastBrokenHigh = $high['index'];
+                $events[] = [
+                    'index' => $i,
+                    'type' => $bias === 'bearish' ? 'CHoCH' : 'BOS',
+                    'direction' => 'bullish',
+                    'level' => $high['price'],
+                    'close' => $close,
+                ];
+            }
+
+            if ($low !== null && $close < $low['price'] && $lastBrokenLow !== $low['index']) {
+                $lastBrokenLow = $low['index'];
+                $events[] = [
+                    'index' => $i,
+                    'type' => $bias === 'bullish' ? 'CHoCH' : 'BOS',
+                    'direction' => 'bearish',
+                    'level' => $low['price'],
+                    'close' => $close,
+                ];
+            }
+        }
+
+        return [
+            'swings' => $swings,
+            'events' => $events,
+            'bias' => $bias,
+            'last_event' => $events === [] ? null : end($events),
+        ];
+    }
+
+    /**
+     * Label each swing against the previous one of its own kind, then interleave them back
+     * into time order - which is how they have to be consumed, one bar at a time.
+     *
+     * @param  array<int, array{price: float, index: int, kind: string}>  $highs
+     * @param  array<int, array{price: float, index: int, kind: string}>  $lows
+     * @return array<int, array{index: int, price: float, kind: string, label: string|null}>
+     */
+    private static function labelled(array $highs, array $lows): array
+    {
+        $out = [];
+
+        foreach ($highs as $n => $pivot) {
+            $out[] = [
+                'index' => $pivot['index'],
+                'price' => $pivot['price'],
+                'kind' => 'high',
+                // The first swing of each kind has nothing to be higher or lower than.
+                'label' => $n === 0 ? null : ($pivot['price'] > $highs[$n - 1]['price'] ? 'HH' : 'LH'),
+            ];
+        }
+
+        foreach ($lows as $n => $pivot) {
+            $out[] = [
+                'index' => $pivot['index'],
+                'price' => $pivot['price'],
+                'kind' => 'low',
+                'label' => $n === 0 ? null : ($pivot['price'] > $lows[$n - 1]['price'] ? 'HL' : 'LL'),
+            ];
+        }
+
+        usort($out, fn (array $a, array $b) => $a['index'] <=> $b['index']);
+
+        return $out;
+    }
+
+    /**
+     * Rising, falling, or neither, from the swings known so far.
+     *
+     * @param  array<int, array{index: int, price: float, kind: string, label: string|null}>  $highs
+     * @param  array<int, array{index: int, price: float, kind: string, label: string|null}>  $lows
+     */
+    private static function biasOf(array $highs, array $lows): string
+    {
+        if (count($highs) < 2 || count($lows) < 2) {
+            return 'ranging';
+        }
+
+        $higherHigh = $highs[count($highs) - 1]['price'] > $highs[count($highs) - 2]['price'];
+        $higherLow = $lows[count($lows) - 1]['price'] > $lows[count($lows) - 2]['price'];
+
+        return match (true) {
+            $higherHigh && $higherLow => 'bullish',
+            ! $higherHigh && ! $higherLow => 'bearish',
+            default => 'ranging',
+        };
     }
 
     /**
