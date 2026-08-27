@@ -29,6 +29,7 @@ class ChartAnalysis extends Model
         'bar_open_time',
         'bias',
         'plan',
+        'setup_type',
         'headline',
         'structure',
         'reasoning',

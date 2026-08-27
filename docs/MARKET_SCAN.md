@@ -185,6 +185,40 @@ Every overlay is built server-side from numbers this system computed. A browser 
 own pivots would eventually disagree with the list the model was shown, and two sets of
 levels on one page is worse than none.
 
+### What kind of setup it is
+
+[`SetupClassifier`](../app/Services/Analysis/SetupClassifier.php) measures which of seven
+patterns the conditions support — trend continuation, pullback, breakout, breakout and
+retest, support/resistance rejection, range, reversal — and the model chooses among the
+candidates rather than naming one.
+
+That distinction is the point. Ask a language model *"what kind of setup is this?"* and it
+answers with a setup type, because that is what the question wants and the vocabulary is
+what it has. It will find a pullback in a range and a reversal in a pullback, fluently, and
+state both with the same confidence. So the conditions are arithmetic here and the model's
+job becomes choosing — the same arrangement `Structure` already imposes on price levels.
+
+Each type declares its own conditions with weights, and scores the fraction of its own
+definition the market actually meets. Below two thirds it is not offered at all: **a pattern
+with half its requirements missing is not a weak example of that pattern, it is a different
+market wearing the name.** Every candidate carries its `met` and `missing` conditions, so a
+support figure never travels without the evidence behind it.
+
+**Nothing wins by default.** A market between levels with no trend, no break and no
+rejection matches nothing, `classify()` returns an empty list, and the brief says so
+plainly. That is the common case and it is the answer — a classifier that always names a
+type is a vocabulary, not a measurement. The stored `setup_type` is nullable for the same
+reason, and a null there is a real reading rather than a gap.
+
+Two details worth knowing:
+
+- **A retest is measured against the broken level itself**, not against "somewhere near".
+  A retest that is not at the level is just a pullback, and the two differ only in where
+  price is now.
+- **A range names no direction from the middle.** It offers `buy` at the low and `sell` at
+  the high and nothing in between, because naming a side from the middle is how a range
+  trade becomes a guess.
+
 ### The readings are kept
 
 Every reading is written to `chart_analyses` — see the migration for the full argument. In

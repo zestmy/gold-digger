@@ -6,6 +6,7 @@ use App\Models\Candle;
 use App\Models\ChartAnalysis as ChartAnalysisRecord;
 use App\Models\CotReport;
 use App\Models\Strategy;
+use App\Services\Analysis\SetupClassifier;
 use App\Services\Analysis\TimeframeSummary;
 use App\Services\Indicators\Indicators;
 use App\Services\Indicators\Structure;
@@ -60,6 +61,7 @@ final class ChartAnalyst
         private readonly OpenRouter $router = new OpenRouter,
         private readonly MarketContext $context = new MarketContext(new StrategyEvaluator),
         private readonly TimeframeSummary $ladder = new TimeframeSummary,
+        private readonly SetupClassifier $setups = new SetupClassifier,
     ) {}
 
     /**
@@ -127,11 +129,21 @@ final class ChartAnalyst
         // the page whether or not the model is asked anything about it.
         $ladder = $this->ladder->of($strategy, $brokerAccountId, $symbol);
 
-        $reading = Cache::remember($key, now()->addMinutes($this->cacheMinutes()), function () use ($symbol, $timeframe, $market, $structure, $bars, $ladder) {
+        // Which kinds of setup the conditions actually support. Measured here so the model
+        // chooses among candidates rather than naming one - asked "what kind of setup is
+        // this", a model answers with a setup type, because that is what the question
+        // wants and the vocabulary is what it has.
+        $candidates = $this->setups->classify(
+            $structure,
+            $market,
+            $bars->map(fn (Candle $c) => (float) $c->close)->all(),
+        );
+
+        $reading = Cache::remember($key, now()->addMinutes($this->cacheMinutes()), function () use ($symbol, $timeframe, $market, $structure, $bars, $ladder, $candidates) {
             $result = $this->router->structured(
                 model: (string) config('ai.model'),
                 system: $this->systemPrompt(),
-                brief: $this->brief($symbol, $timeframe, $market, $structure, $bars, $ladder),
+                brief: $this->brief($symbol, $timeframe, $market, $structure, $bars, $ladder, $candidates),
                 schemaName: 'chart_analysis',
                 schema: $this->schema(),
                 callSite: 'chart_analyst',
@@ -240,6 +252,10 @@ final class ChartAnalyst
                     'levels' => $structure['levels'],
                     'timeframes' => $ladder['timeframes'] ?? [],
                     'events' => $structure['events'] ?? [],
+                    // Null is a real answer: no pattern met enough of its own definition,
+                    // or the model declined to claim one. Storing it is what makes
+                    // "which kinds of setup actually worked" answerable later.
+                    'setup_type' => $reading['setup_type'] ?? null,
                     'model' => $reading['model'] ?? null,
                     'prompt_version' => ChartAnalysisRecord::PROMPT_VERSION,
                 ],
@@ -324,6 +340,13 @@ final class ChartAnalyst
         them by number. You cannot write a price, and should not try - a level not in the
         list is not a level anybody found.
 
+        The setup types are measured the same way. The brief lists which ones the conditions
+        actually support, with the percentage of each pattern's own definition that is
+        present and what is missing. Choose one of the keys offered, or null. Do not name a
+        type that was not offered, and do not reach for the closest-sounding one: an empty
+        list means no pattern here meets enough of its own definition, and null is the
+        correct answer to that.
+
         Say what the structure is doing, which levels matter and why, and then either
         propose a plan or say plainly that there is not one worth taking. "Wait" is a
         legitimate and frequent answer; a market with mixed structure has no plan in it, and
@@ -345,7 +368,7 @@ final class ChartAnalyst
      * @param  array<string, mixed>  $structure
      * @param  Collection<int, Candle>  $bars
      */
-    private function brief(string $symbol, string $timeframe, array $market, array $structure, $bars, array $ladder = []): string
+    private function brief(string $symbol, string $timeframe, array $market, array $structure, $bars, array $ladder = [], array $candidates = []): string
     {
         // A measurement or a question mark, never an invented zero: a model shown `RSI 0`
         // will reason about an oversold extreme that does not exist.
@@ -414,6 +437,31 @@ final class ChartAnalyst
             }
         }
 
+        // Named by key so the model selects one rather than describing a category in
+        // prose. An empty list is the common answer and is left empty on purpose - a
+        // shortlist padded to be non-empty is a vocabulary, not a measurement.
+        if ($candidates !== []) {
+            $lines[] = '';
+            $lines[] = 'SETUP TYPES THE CONDITIONS SUPPORT, choose one key or none';
+
+            foreach ($candidates as $candidate) {
+                $lines[] = sprintf(
+                    '  %-18s %s%%%s  %s',
+                    $candidate['type'],
+                    $candidate['support'],
+                    $candidate['direction'] === null ? '' : ' '.strtoupper($candidate['direction']),
+                    implode('; ', $candidate['met']),
+                );
+
+                if ($candidate['missing'] !== []) {
+                    $lines[] = '                     missing: '.implode('; ', $candidate['missing']);
+                }
+            }
+        } else {
+            $lines[] = '';
+            $lines[] = 'SETUP TYPES: none. No pattern here meets enough of its own definition.';
+        }
+
         $lines[] = '';
         $lines[] = 'MEASURED LEVELS, choose by number';
 
@@ -464,6 +512,20 @@ final class ChartAnalyst
                     'enum' => ['buy', 'sell', 'wait'],
                     'description' => 'Wait is a legitimate and frequent answer.',
                 ],
+                'setup_type' => [
+                    'type' => ['string', 'null'],
+                    'enum' => [
+                        SetupClassifier::TREND_CONTINUATION,
+                        SetupClassifier::PULLBACK,
+                        SetupClassifier::BREAKOUT,
+                        SetupClassifier::BREAKOUT_RETEST,
+                        SetupClassifier::REJECTION,
+                        SetupClassifier::RANGE,
+                        SetupClassifier::REVERSAL,
+                        null,
+                    ],
+                    'description' => 'One of the keys offered in the brief, or null when none was offered or none fits. Never a key that was not offered.',
+                ],
                 'entry_level' => [
                     'type' => ['integer', 'null'],
                     'description' => 'Index into the measured levels. Null when waiting.',
@@ -485,7 +547,7 @@ final class ChartAnalyst
                     'description' => 'What would have to happen for this reading to be wrong.',
                 ],
             ],
-            'required' => ['headline', 'structure', 'bias', 'plan', 'entry_level', 'stop_level', 'target_level', 'reasoning', 'invalidation'],
+            'required' => ['headline', 'structure', 'bias', 'plan', 'setup_type', 'entry_level', 'stop_level', 'target_level', 'reasoning', 'invalidation'],
             'additionalProperties' => false,
         ];
     }
