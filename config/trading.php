@@ -91,6 +91,64 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Confluence weights
+    |--------------------------------------------------------------------------
+    |
+    | What each factor contributes to the agreement score. Deployment-wide rather than per
+    | tenant, deliberately: `ChannelPerformance` ranks providers across accounts, and a
+    | score meaning something different for each tenant would make that comparison useless
+    | without looking like it had.
+    |
+    | ## The floor is absolute, so changing a weight moves the bar
+    |
+    | `min_confluence` is a number of weighted factors - 3.0 of a possible 6.5 by default -
+    | not a percentage. Halving every weight here therefore makes a floor of 3.0
+    | unreachable, and doubling them makes it trivial. The assessment reports `possible`
+    | beside the score for exactly this reason; if you change these, revisit the floor.
+    |
+    | The percentage and letter grade are computed against whatever the weights add up to,
+    | so those stay comparable when this does not.
+    |
+    | ## Two of these are half for a reason, and it is not rounding
+    |
+    | `direction_di` is half because DI direction and the trend factors are close to the
+    | same measurement twice. Raising it to 1.0 does not make the score stricter - it makes
+    | one observation count twice, and it flatters exactly the trending market where a late
+    | entry hurts most.
+    |
+    | `volatility_squeeze` is half because a squeeze raises the odds of a move without
+    | saying which way. It can corroborate a direction that came from elsewhere; it cannot
+    | supply one.
+    |
+    | Counting agreement is only meaningful if the things agreeing could have disagreed.
+    | That is the property these numbers protect, and it is the one a careless edit breaks.
+    |
+    | ## Changing these is measurable
+    |
+    | `php artisan backtest` replays a change over the stored bars using the same evaluator
+    | that trades, so this is a setting to measure rather than argue about.
+    |
+    */
+
+    'confluence' => [
+        'weights' => [
+            // Directional: evidence about which way.
+            'trend_htf' => (float) env('WEIGHT_TREND_HTF', 1.0),
+            'trend_entry' => (float) env('WEIGHT_TREND_ENTRY', 1.0),
+            'direction_di' => (float) env('WEIGHT_DIRECTION_DI', 0.5),
+            'trend_present_adx' => (float) env('WEIGHT_TREND_PRESENT_ADX', 1.0),
+
+            // Ambient: permission to trade, rather than a reason to. These are why
+            // `min_directional` exists - they sum to the confluence floor on their own.
+            'session_open' => (float) env('WEIGHT_SESSION_OPEN', 1.0),
+            'news_clear' => (float) env('WEIGHT_NEWS_CLEAR', 1.0),
+            'volatility_squeeze' => (float) env('WEIGHT_VOLATILITY_SQUEEZE', 0.5),
+            'volatility_usable' => (float) env('WEIGHT_VOLATILITY_USABLE', 0.5),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Retention
     |--------------------------------------------------------------------------
     |

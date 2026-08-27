@@ -101,6 +101,42 @@ can be held to a stricter confluence bar again in `telegram_channels.min_conflue
 | `min_directional` | 1.5 | How much of that has to be about direction |
 | `min_reward_ratio` | none | Reward against risk, at the order's own target |
 
+#### What each factor is worth
+
+The score is weighted agreement, not a count. Weights live in `config/trading.php` under
+`confluence.weights` and are deployment-wide — per-tenant weights would make
+`ChannelPerformance`'s cross-account provider ranking meaningless without looking like it
+had.
+
+| Key | Default | |
+|---|---|---|
+| `trend_htf` | 1.0 | directional |
+| `trend_entry` | 1.0 | directional |
+| `direction_di` | **0.5** | directional |
+| `trend_present_adx` | 1.0 | directional |
+| `session_open` | 1.0 | ambient |
+| `news_clear` | 1.0 | ambient |
+| `volatility_squeeze` | **0.5** | ambient |
+| `volatility_usable` | 0.5 | ambient |
+
+Total 6.5, which is the scale `min_confluence` of 3.0 was chosen against. The assessment
+reports `possible` alongside the score for that reason — **the floor is an absolute number
+of weighted factors, not a percentage**, so halving every weight makes a floor of 3.0
+unreachable and doubling them makes it trivial. Change these and revisit the floor.
+
+`confidence` (0–100) and `grade` (A/B/C/D) are computed against whatever the weights total,
+so those stay comparable when the raw score does not. The grade uses fixed bands rather
+than a curve: an A has to mean the same thing next month as it did last.
+
+> **The two half-weights are not rounding.** `direction_di` is half because DI direction and
+> the trend factors are close to the same measurement twice — raising it to 1.0 does not
+> make the score stricter, it makes one observation count twice, and it flatters exactly the
+> trending market where a late entry hurts most. `volatility_squeeze` is half because a
+> squeeze raises the odds of a move without saying which way.
+>
+> Counting agreement is only meaningful if the things agreeing could have disagreed. That is
+> the property these numbers protect, and the one a careless edit breaks.
+
 **The reward floor is off by default, deliberately.** Switching one on would start refusing
 trades that currently execute, on a live copier, on the strength of a config change nobody
 read. Whether 1.5R is a sensible bar depends on a win rate this project has not measured —

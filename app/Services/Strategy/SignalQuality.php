@@ -75,6 +75,36 @@ final class SignalQuality
     public const RISK_HIGH = 'HIGH';
 
     /**
+     * What each factor is worth when nothing overrides it.
+     *
+     * Keyed by a stable identifier rather than by the display name, so a wording change on
+     * a card cannot silently reset a configured weight to its default.
+     *
+     * ## The two half-weights are not rounding
+     *
+     * `direction_di` is half because DI direction and the trend factors are close to the
+     * same measurement twice, and counting it whole flatters exactly the trending market
+     * where a late entry hurts most. `volatility_squeeze` is half because a squeeze raises
+     * the odds of a move without saying which way - corroboration, not evidence.
+     *
+     * Both survive being configured, which is the risk of making this settable at all: a
+     * deployment that raises `direction_di` to 1.0 has not made the score stricter, it has
+     * made one observation count twice. The config block says so.
+     *
+     * @var array<string, float>
+     */
+    private const DEFAULT_WEIGHTS = [
+        'trend_htf' => 1.0,
+        'trend_entry' => 1.0,
+        'direction_di' => 0.5,
+        'trend_present_adx' => 1.0,
+        'session_open' => 1.0,
+        'news_clear' => 1.0,
+        'volatility_squeeze' => 0.5,
+        'volatility_usable' => 0.5,
+    ];
+
+    /**
      * ADX above which a trend is present rather than merely sloped.
      *
      * 20 by convention. The measurements taken on this strategy said loosening it trades
@@ -111,6 +141,48 @@ final class SignalQuality
     public function minDirectional(?BotSettings $settings): float
     {
         return $this->floor($settings?->min_directional, 'trading.min_directional', self::MIN_DIRECTIONAL);
+    }
+
+    /**
+     * What one factor is worth on this deployment.
+     *
+     * Deployment-wide rather than per tenant, deliberately. `ChannelPerformance` compares
+     * providers across accounts, and a score that meant something different for each tenant
+     * would make that comparison meaningless without looking like it had.
+     *
+     * Negative weights are clamped to zero: a factor that subtracts from agreement when it
+     * is *met* is not a weight, it is a bug somebody typed.
+     */
+    public function weightFor(string $key): float
+    {
+        $configured = config("trading.confluence.weights.{$key}");
+
+        if (is_numeric($configured)) {
+            return max(0.0, (float) $configured);
+        }
+
+        return self::DEFAULT_WEIGHTS[$key] ?? 0.0;
+    }
+
+    /**
+     * The letter beside the percentage.
+     *
+     * Bands, not a curve: an A has to mean the same thing next month as it did last, and a
+     * grade computed against the current distribution would drift with the market rather
+     * than describe the setup.
+     *
+     * It grades *how much agreed*, which is not the same as how likely this is to work. A
+     * five-factor signal is better evidenced than a two-factor one; that is a statement
+     * about how much is known.
+     */
+    public function grade(int $confidence): string
+    {
+        return match (true) {
+            $confidence >= 85 => 'A',
+            $confidence >= 70 => 'B',
+            $confidence >= 55 => 'C',
+            default => 'D',
+        };
     }
 
     /**
@@ -205,6 +277,11 @@ final class SignalQuality
             // same numbers the verdict was written from.
             'min_confluence' => $minConfluence,
             'min_directional' => $minDirectional,
+            // The scale the score sits on. Weights are configurable, so "3.0 of a possible
+            // 6.5" and "3.0 of a possible 4.0" are very different verdicts wearing the same
+            // number - and a reader comparing two deployments needs the denominator.
+            'possible' => round($possible, 1),
+            'grade' => $this->grade($possible > 0.0 ? (int) round($confluence / $possible * 100) : 0),
             'tradeable' => $confluence >= $minConfluence
                 && $directional >= $minDirectional
                 && $status === self::ENTRY_NOW,
@@ -281,8 +358,9 @@ final class SignalQuality
         return [
             [
                 'name' => 'Higher-timeframe trend',
+                'key' => 'trend_htf',
                 'directional' => true,
-                'weight' => 1.0,
+                'weight' => $this->weightFor('trend_htf'),
                 'met' => $trendAgrees,
                 'note' => $market['trend'] === null
                     ? 'No trend reading available.'
@@ -292,8 +370,9 @@ final class SignalQuality
             ],
             [
                 'name' => 'Entry-timeframe bias',
+                'key' => 'trend_entry',
                 'directional' => true,
-                'weight' => 1.0,
+                'weight' => $this->weightFor('trend_entry'),
                 'met' => $market['entry_bias'] !== null && $market['entry_bias'] === $direction,
                 'note' => $market['entry_bias'] === null
                     ? 'No entry bias available.'
@@ -304,8 +383,9 @@ final class SignalQuality
                 // independent agreements, and double-counting it flatters exactly the
                 // trending market where a late entry hurts most.
                 'name' => 'Directional strength (DI)',
+                'key' => 'direction_di',
                 'directional' => true,
-                'weight' => 0.5,
+                'weight' => $this->weightFor('direction_di'),
                 'met' => $diFavours,
                 'note' => $market['plus_di'] === null
                     ? 'No DI reading.'
@@ -313,8 +393,9 @@ final class SignalQuality
             ],
             [
                 'name' => 'Trend is present (ADX)',
+                'key' => 'trend_present_adx',
                 'directional' => true,
-                'weight' => 1.0,
+                'weight' => $this->weightFor('trend_present_adx'),
                 'met' => $adx !== null && $adx >= self::ADX_PRESENT,
                 'note' => $adx === null
                     ? 'No ADX reading.'
@@ -322,8 +403,9 @@ final class SignalQuality
             ],
             [
                 'name' => 'Session open',
+                'key' => 'session_open',
                 'directional' => false,
-                'weight' => 1.0,
+                'weight' => $this->weightFor('session_open'),
                 'met' => $sessionOpen,
                 'note' => $sessionOpen
                     ? 'A liquid session is open.'
@@ -331,8 +413,9 @@ final class SignalQuality
             ],
             [
                 'name' => 'Clear of high-impact news',
+                'key' => 'news_clear',
                 'directional' => false,
-                'weight' => 1.0,
+                'weight' => $this->weightFor('news_clear'),
                 'met' => $newsObjection === null,
                 'note' => $newsObjection ?? 'No high-impact release nearby.',
             ],
@@ -340,8 +423,9 @@ final class SignalQuality
                 // Half-weight: it raises the odds of a move without saying anything about
                 // direction, so it is corroboration rather than evidence.
                 'name' => 'Volatility compressed (pre-mover)',
+                'key' => 'volatility_squeeze',
                 'directional' => false,
-                'weight' => 0.5,
+                'weight' => $this->weightFor('volatility_squeeze'),
                 'met' => $squeeze['squeezed'],
                 'note' => $squeeze['threshold'] === null
                     ? 'Not enough history to say what narrow means here.'
@@ -353,8 +437,9 @@ final class SignalQuality
             ],
             [
                 'name' => 'Volatility is usable',
+                'key' => 'volatility_usable',
                 'directional' => false,
-                'weight' => 0.5,
+                'weight' => $this->weightFor('volatility_usable'),
                 'met' => $atrPct !== null && $atrPct >= self::ATR_FLOOR && $atrPct <= self::ATR_CEILING,
                 'note' => $atrPct === null
                     ? 'No ATR reading.'
