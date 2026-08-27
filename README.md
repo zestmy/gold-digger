@@ -40,6 +40,10 @@ are picked up by [`docs/RECONCILIATION.md`](docs/RECONCILIATION.md).
 > 20,000 bars where the next deepest wanted 300. What decides a price still reads the
 > terminal's own series, and there is no setting that changes that.
 
+> **Building a client against this?** [`docs/ANALYSIS_API.md`](docs/ANALYSIS_API.md) - six
+> endpoints on the token the EA already uses, split so that reading structure costs
+> nothing and only asking a model does.
+
 > **More than one person using this?** [`docs/TENANCY.md`](docs/TENANCY.md) — isolation is
 > a property of the model now rather than 93 remembered `where` clauses, because the one
 > time it was forgotten every tenant could read, and delete, every other tenant's logs.

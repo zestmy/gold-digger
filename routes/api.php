@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Analysis\ChartAnalysisController;
 use App\Http\Controllers\Api\Bot\CandleController;
 use App\Http\Controllers\Api\Bot\CommandController;
 use App\Http\Controllers\Api\Bot\FillController;
@@ -48,6 +49,48 @@ Route::prefix('v1/bot')->middleware(['bot.auth', 'throttle:executor'])->group(fu
 
     // Push executor logs into bot_logs so /logs shows them.
     Route::post('logs', [LogController::class, 'store'])->name('api.bot.logs.store');
+});
+
+/*
+|--------------------------------------------------------------------------
+| Chart Analysis
+|--------------------------------------------------------------------------
+|
+| The analysis surfaces, for a client that is not this application's own Blade.
+|
+| Same bearer-token contract as everything else here, deliberately: `bot_tokens` are
+| already per-tenant, hashed and revocable, and `AuthenticateBot` names the tenant for the
+| rest of the request - so every model these controllers touch filters itself. A second
+| authentication system would be a second place for that to be wrong.
+|
+| Two throttles rather than one, because the two halves cost differently. `quick` is
+| arithmetic and can be polled; `analyze` and `refresh` each put a question to a model and
+| are metered against the tenant's daily allowance on top of this.
+|
+| Nothing here places an order. This is the analysis stage and it stops there.
+|
+*/
+
+Route::prefix('v1/analysis')->middleware('bot.auth')->group(function () {
+    Route::get('symbols', [ChartAnalysisController::class, 'symbols'])
+        ->middleware('throttle:analysis')->name('api.analysis.symbols');
+
+    Route::get('candles', [ChartAnalysisController::class, 'candles'])
+        ->middleware('throttle:analysis')->name('api.analysis.candles');
+
+    // Measured only: levels, structure, the timeframe ladder, the setup candidates.
+    Route::post('quick', [ChartAnalysisController::class, 'quick'])
+        ->middleware('throttle:analysis')->name('api.analysis.quick');
+
+    // The measured half plus one model call.
+    Route::post('/', [ChartAnalysisController::class, 'analyze'])
+        ->middleware('throttle:analysis-ai')->name('api.analysis.analyze');
+
+    Route::get('{analysis}', [ChartAnalysisController::class, 'show'])
+        ->middleware('throttle:analysis')->name('api.analysis.show');
+
+    Route::post('{analysis}/refresh', [ChartAnalysisController::class, 'refresh'])
+        ->middleware('throttle:analysis-ai')->name('api.analysis.refresh');
 });
 
 /*

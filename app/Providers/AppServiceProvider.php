@@ -69,6 +69,20 @@ class AppServiceProvider extends ServiceProvider
             ->by($this->credentialKey($request))
         );
 
+        // Reading a chart is cheap and pollable - levels, structure, the ladder, the setup
+        // candidates are all arithmetic. A client refreshing a chart every few seconds is
+        // doing nothing this box should mind.
+        RateLimiter::for('analysis', fn (Request $request) => Limit::perMinute(120)
+            ->by($this->credentialKey($request))
+        );
+
+        // Asking a model is neither. This is the coarse guard; the real bound is the
+        // tenant's daily AI allowance, which this sits in front of so a hot loop meets a
+        // 429 rather than silently spending a day's calls in a minute.
+        RateLimiter::for('analysis-ai', fn (Request $request) => Limit::perMinute(10)
+            ->by($this->credentialKey($request))
+        );
+
         // Infrastructure rather than a customer: one process serving every hosted session,
         // so its legitimate volume scales with the tenant count.
         RateLimiter::for('worker', fn (Request $request) => Limit::perMinute(600)

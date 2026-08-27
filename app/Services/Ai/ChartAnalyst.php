@@ -65,10 +65,86 @@ final class ChartAnalyst
     ) {}
 
     /**
+     * The half that costs nothing.
+     *
+     * Levels, structure, the timeframe ladder and the setup candidates - all arithmetic,
+     * all reproducible, none of it a model call. `analyse()` is this plus one question put
+     * to a model, and the split is public because it is worth being able to ask for the
+     * measured half on its own: it is the half that can be checked, and somebody who reads
+     * a confluence table themselves should not have to buy a paragraph about it.
+     *
+     * @return array{
+     *     ok: bool,
+     *     error: string|null,
+     *     symbol: string,
+     *     timeframe: string,
+     *     bars: Collection<int, Candle>|null,
+     *     market: array<string, mixed>|null,
+     *     levels: array<int, array<string, mixed>>,
+     *     events: array<int, array<string, mixed>>,
+     *     structure: string|null,
+     *     timeframes: array<string, mixed>,
+     *     setups: array<int, array<string, mixed>>
+     * }
+     */
+    public function measure(Strategy $strategy, ?int $brokerAccountId, string $symbol, string $timeframe): array
+    {
+        $empty = [
+            'ok' => false, 'error' => null, 'symbol' => $symbol, 'timeframe' => $timeframe,
+            'bars' => null, 'market' => null, 'levels' => [], 'events' => [],
+            'structure' => null, 'timeframes' => [], 'setups' => [],
+        ];
+
+        $market = $this->context->for($strategy, $brokerAccountId, $symbol);
+
+        if (! $market['warm'] || $market['atr'] === null) {
+            return array_merge($empty, ['error' => "Not enough {$symbol} history on {$timeframe} to read structure from."]);
+        }
+
+        $bars = Candle::query()
+            ->series($brokerAccountId, $symbol, $timeframe)
+            ->orderByDesc('open_time')
+            ->limit(self::BARS)
+            ->get()
+            ->reverse()
+            ->values();
+
+        if ($bars->count() < 30) {
+            return array_merge($empty, ['error' => "Only {$bars->count()} {$timeframe} bars stored for {$symbol}."]);
+        }
+
+        $closes = $bars->map(fn (Candle $c) => (float) $c->close)->all();
+
+        $structure = Structure::of(
+            $bars->map(fn (Candle $c) => (float) $c->high)->all(),
+            $bars->map(fn (Candle $c) => (float) $c->low)->all(),
+            $closes,
+            (float) $market['atr'],
+        );
+
+        return [
+            'ok' => true,
+            'error' => null,
+            'symbol' => $symbol,
+            'timeframe' => $timeframe,
+            'bars' => $bars,
+            'market' => $market,
+            'levels' => $structure['levels'],
+            'events' => $structure['events'],
+            'structure' => $structure['structure'],
+            'timeframes' => $this->ladder->of($strategy, $brokerAccountId, $symbol),
+            'setups' => $this->setups->classify($structure, $market, $closes),
+        ];
+    }
+
+    /**
+     * The measured half, plus one question put to a model.
+     *
      * @return array{
      *     ok: bool,
      *     error: string|null,
      *     levels: array<int, array<string, mixed>>,
+     *     events: array<int, array<string, mixed>>,
      *     structure: string|null,
      *     reading: array<string, mixed>|null
      * }
@@ -139,7 +215,13 @@ final class ChartAnalyst
             $bars->map(fn (Candle $c) => (float) $c->close)->all(),
         );
 
-        $reading = Cache::remember($key, now()->addMinutes($this->cacheMinutes()), function () use ($symbol, $timeframe, $market, $structure, $bars, $ladder, $candidates) {
+        // Carried out of the closure so the caller can say *why* there is no reading.
+        // "Allowance used up, it resets at midnight" and "the provider is down" send
+        // somebody to completely different places, and this class already argues that
+        // point about 401 against 402 - a generic failure here threw that away again.
+        $failure = null;
+
+        $reading = Cache::remember($key, now()->addMinutes($this->cacheMinutes()), function () use ($symbol, $timeframe, $market, $structure, $bars, $ladder, $candidates, &$failure) {
             $result = $this->router->structured(
                 model: (string) config('ai.model'),
                 system: $this->systemPrompt(),
@@ -156,6 +238,8 @@ final class ChartAnalyst
             // read. A missing field is a failed reading, and a failed reading already has
             // somewhere to go.
             if (! $result['ok'] || ! $this->complete($result['data'])) {
+                $failure = $result['error'] ?? 'The model returned a reading with fields missing.';
+
                 return null;
             }
 
@@ -168,7 +252,7 @@ final class ChartAnalyst
         if ($reading === null) {
             return [
                 'ok' => true,
-                'error' => 'The reading could not be produced; the measured levels are shown without it.',
+                'error' => $failure ?? 'The reading could not be produced; the measured levels are shown without it.',
                 'levels' => $structure['levels'],
                 'events' => $structure['events'],
                 'structure' => $structure['structure'],
