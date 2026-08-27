@@ -9,6 +9,7 @@ use App\Models\Trade;
 use App\Models\TradeCommand;
 use App\Models\User;
 use App\Services\Ai\AiFund;
+use App\Services\Strategy\RewardFloor;
 use App\Services\Strategy\SymbolResolver;
 
 /**
@@ -45,6 +46,7 @@ final class SignalExecutor
         private readonly AiFund $fund = new AiFund,
         private readonly SignalReviewer $reviewer = new SignalReviewer,
         private readonly SignalSeries $series = new SignalSeries,
+        private readonly RewardFloor $reward = new RewardFloor,
     ) {}
 
     /**
@@ -91,6 +93,20 @@ final class SignalExecutor
 
         if ($sizing['lots'] === null) {
             return $this->blocked($signal, $sizing['why']);
+        }
+
+        // Judged on the trade this account would actually hold, not on the one the provider
+        // described. `sizing` has already resolved whose levels apply and which target the
+        // order carries - the copier takes no partials at the intermediate rungs, so the
+        // position runs to the last one or to the stop, and that is the pair of distances
+        // worth dividing.
+        //
+        // Off unless a floor is configured. See RewardFloor for why that is the default.
+        if ($this->reward->objection($settings, $sizing['sl_pips'], $sizing['tp_pips']) !== null) {
+            return $this->blocked(
+                $signal,
+                'Not worth the risk. '.$this->reward->explain($settings, $sizing['sl_pips'], $sizing['tp_pips']),
+            );
         }
 
         // A signal naming an entry is asking to be filled there, not wherever the market

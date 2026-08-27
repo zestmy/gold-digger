@@ -53,6 +53,7 @@ class Signals extends Component
         'atr_below_threshold' => ['label' => 'Too quiet', 'help' => 'ATR was under the minimum in settings.'],
         'no_symbol_spec' => ['label' => 'No pip size', 'help' => 'The terminal has not reported the pip size, so no honest stop distance exists.'],
         'no_account_snapshot' => ['label' => 'No balance', 'help' => 'No heartbeat balance to size a position against.'],
+        'reward_below_floor' => ['label' => 'Not worth the risk', 'help' => 'The take-profit the order would carry was too close to the entry against the stop, for the reward floor in settings. Lower or clear that floor to take more of these.'],
         'max_trades_reached' => ['label' => 'Too many open', 'help' => 'Already at max concurrent trades.'],
         'daily_loss_limit' => ['label' => 'Daily loss limit', 'help' => "Today's realised losses passed the configured limit."],
         'lot_size_unavailable' => ['label' => 'Cannot size', 'help' => 'Pip value per lot is unknown, so no position size could be computed.'],

@@ -35,6 +35,9 @@ class BotSettings extends Model
         'max_concurrent_trades',
         'allowed_sessions',
         'min_atr_threshold',
+        'min_reward_ratio',
+        'min_confluence',
+        'min_directional',
         'news_filter_enabled',
         'news_blackout_before_minutes',
         'news_blackout_after_minutes',
@@ -88,6 +91,9 @@ class BotSettings extends Model
             'risk_percentage' => 'decimal:2',
             'max_daily_loss_percentage' => 'decimal:2',
             'min_atr_threshold' => 'decimal:2',
+            'min_reward_ratio' => 'decimal:2',
+            'min_confluence' => 'decimal:1',
+            'min_directional' => 'decimal:1',
 
             // JSON array for allowed trading sessions
             // Access as: $settings->allowed_sessions returns ['london', 'newyork']

@@ -84,9 +84,45 @@ objection is recorded: it is the gate that would have to change for the signal t
 | `atr_below_threshold` | Below `min_atr_threshold` |
 | `no_symbol_spec` | The terminal has not reported `pip_size` |
 | `no_account_snapshot` | No heartbeat balance to size against |
+| `reward_below_floor` | The order's own target was too close against its stop, for `min_reward_ratio` |
 | `max_trades_reached` | `max_concurrent_trades` already open |
 | `daily_loss_limit` | Realised losses today past `max_daily_loss_percentage` |
 | `lot_size_unavailable` | `pip_value_per_lot` unknown, so no honest size exists |
+
+### The floors an entry has to clear
+
+Three of them, and they resolve narrowest-first: the account's own setting in
+`bot_settings`, then the deployment's in `config/trading.php`, then a constant. A channel
+can be held to a stricter confluence bar again in `telegram_channels.min_confluence`.
+
+| Setting | Default | What it holds back |
+|---|---|---|
+| `min_confluence` | 3.0 | Weighted factors that must agree |
+| `min_directional` | 1.5 | How much of that has to be about direction |
+| `min_reward_ratio` | none | Reward against risk, at the order's own target |
+
+**The reward floor is off by default, deliberately.** Switching one on would start refusing
+trades that currently execute, on a live copier, on the strength of a config change nobody
+read. Whether 1.5R is a sensible bar depends on a win rate this project has not measured —
+a book winning 70% of the time is profitable at 0.6R and a floor would simply stop it
+trading. So the operator opts in.
+
+Two details in [`RewardFloor`](../app/Services/Strategy/RewardFloor.php) worth knowing
+before setting one:
+
+- **It measures to the take-profit the order actually carries**, not to an intermediate
+  rung. The copier takes no partials, so the position runs to the last target or to the
+  stop; judging a 1:3 signal on its first rung would pass trades on the strength of a level
+  the order never exits at. `SignalReviewer` already says exactly this in the brief it
+  writes, so measuring it any other way would put the gate and the explanation in
+  disagreement about the same trade.
+- **A signal with no target is refused, not waved through.** An unmeasurable reward is not
+  a passing one, or the floor would be enforced only against the signals that bothered to
+  state their case.
+
+The same floor gates the copier, in `SignalExecutor`, after sizing has resolved whose
+levels apply — so it judges the trade this account would hold rather than the one the
+provider described.
 
 ### Why rejected setups are still written down
 

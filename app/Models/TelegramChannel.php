@@ -180,7 +180,11 @@ class TelegramChannel extends Model
             'risk_percentage' => $this->risk_percentage ?? (float) ($settings?->ai_risk_percentage ?? 0.0),
             'copier_levels' => $this->copier_levels ?? (string) ($settings?->copier_levels ?? 'provider'),
             'max_trades_per_day' => $this->max_trades_per_day ?? $settings?->ai_max_trades_per_day,
-            'min_confluence' => $this->min_confluence ?? SignalQuality::MIN_CONFLUENCE,
+            // Falls back to the account's own bar rather than straight to the constant.
+            // A per-channel override existed while the account had no floor to state,
+            // which meant "stricter than usual for this provider" was expressible and
+            // "stricter than usual, everywhere" was not.
+            'min_confluence' => $this->min_confluence ?? app(SignalQuality::class)->minConfluence($settings),
             'read_images' => $this->read_images ?? true,
             'overridden' => $overridden,
         ];

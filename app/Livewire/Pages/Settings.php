@@ -33,6 +33,23 @@ class Settings extends Component
     #[Validate('required|numeric|min:0')]
     public string $min_atr_threshold = '0.50';
 
+    /**
+     * The three floors an entry has to clear.
+     *
+     * Strings rather than floats for the same reason the AI cap is: an empty box has to
+     * stay empty. "No floor set" and "a floor of zero" are the same trade in the end, but
+     * only one of them is a decision somebody made, and the page should not turn the first
+     * into the second by rendering it.
+     */
+    #[Validate('nullable|numeric|min:0|max:20')]
+    public ?string $min_reward_ratio = null;
+
+    #[Validate('nullable|numeric|min:0|max:10')]
+    public ?string $min_confluence = null;
+
+    #[Validate('nullable|numeric|min:0|max:10')]
+    public ?string $min_directional = null;
+
     #[Validate('boolean')]
     public bool $news_filter_enabled = true;
 
@@ -132,6 +149,9 @@ class Settings extends Component
             $this->max_concurrent_trades = $settings->max_concurrent_trades ?? 3;
             $this->allowed_sessions = $settings->allowed_sessions ?? [];
             $this->min_atr_threshold = $settings->min_atr_threshold ?? '0.50';
+            $this->min_reward_ratio = $settings->min_reward_ratio === null ? null : (string) $settings->min_reward_ratio;
+            $this->min_confluence = $settings->min_confluence === null ? null : (string) $settings->min_confluence;
+            $this->min_directional = $settings->min_directional === null ? null : (string) $settings->min_directional;
             $this->news_filter_enabled = $settings->news_filter_enabled ?? true;
             $this->news_blackout_before_minutes = (int) ($settings->news_blackout_before_minutes ?? 15);
             $this->news_blackout_after_minutes = (int) ($settings->news_blackout_after_minutes ?? 15);
@@ -172,6 +192,11 @@ class Settings extends Component
             'max_concurrent_trades' => $this->max_concurrent_trades,
             'allowed_sessions' => $this->allowed_sessions,
             'min_atr_threshold' => $this->min_atr_threshold,
+            // Blank means "follow the platform default", not zero. Blanking a floor has
+            // to be able to switch it off again, or a number typed once is permanent.
+            'min_reward_ratio' => $this->blankToNull($this->min_reward_ratio),
+            'min_confluence' => $this->blankToNull($this->min_confluence),
+            'min_directional' => $this->blankToNull($this->min_directional),
             'news_filter_enabled' => $this->news_filter_enabled,
             'news_blackout_before_minutes' => $this->news_blackout_before_minutes,
             'news_blackout_after_minutes' => $this->news_blackout_after_minutes,
@@ -225,6 +250,14 @@ class Settings extends Component
         )));
 
         return $symbols === [] ? null : $symbols;
+    }
+
+    /**
+     * An empty box is an unset floor, not a floor of nothing.
+     */
+    private function blankToNull(?string $value): ?string
+    {
+        return ($value === null || trim($value) === '') ? null : $value;
     }
 
     public function render()

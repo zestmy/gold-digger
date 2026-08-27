@@ -562,6 +562,68 @@ class SignalGenerationTest extends TestCase
     }
 
     // =====================================================================
+    // THE REWARD FLOOR
+    // =====================================================================
+
+    /**
+     * The default that matters most: an account that has not asked for a reward floor
+     * trades exactly as it did before one existed.
+     */
+    public function test_no_reward_floor_is_applied_unless_one_is_configured(): void
+    {
+        $this->seedBullishSetup();
+
+        // A ladder worth far less than the stop it sits behind - taken, because nobody
+        // asked for it not to be.
+        $this->strategy->update(['tp1_pips' => 1.0, 'tp2_pips' => 1.0, 'tp3_pips' => null]);
+
+        $signal = $this->generate();
+
+        $this->assertNull($signal->skip_reason);
+        $this->assertSame(1, TradeCommand::where('type', 'open')->count());
+    }
+
+    public function test_a_configured_floor_refuses_a_setup_that_does_not_pay_for_its_stop(): void
+    {
+        $this->seedBullishSetup();
+        $this->settings->update(['min_reward_ratio' => 2.0]);
+        $this->strategy->update(['tp1_pips' => 1.0, 'tp2_pips' => 1.0, 'tp3_pips' => null]);
+
+        $signal = $this->generate();
+
+        $this->assertSame('reward_below_floor', $signal->skip_reason);
+        $this->assertFalse($signal->was_executed);
+        $this->assertSame(0, TradeCommand::count(), 'A refused setup must not queue an order.');
+    }
+
+    /**
+     * Measured to the take-profit the order actually carries. A generous first rung does
+     * not rescue a setup whose final target is close, because the position runs to the
+     * last one or to the stop.
+     */
+    public function test_the_floor_judges_the_target_the_order_carries(): void
+    {
+        $this->seedBullishSetup();
+        $this->settings->update(['min_reward_ratio' => 2.0]);
+
+        $signal = $this->generate();
+
+        $this->assertNotNull($signal);
+
+        // Whatever the verdict, it was reached from the order's own target rather than
+        // from an intermediate rung - so the recorded stop and target agree with it.
+        $slPips = (float) $signal->features['sl_pips'];
+        $tpPips = (float) ($signal->features['order_tp_pips'] ?? 0.0);
+        $ratio = $slPips > 0.0 ? $tpPips / $slPips : 0.0;
+
+        $this->assertSame(
+            $ratio < 2.0 ? 'reward_below_floor' : null,
+            $signal->skip_reason,
+            sprintf('Offered %.2f : 1 against a floor of 2.', $ratio),
+        );
+    }
+
+    // =====================================================================
     // HELPERS
     // =====================================================================
 

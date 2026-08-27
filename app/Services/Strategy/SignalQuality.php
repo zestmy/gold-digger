@@ -43,7 +43,14 @@ use App\Services\News\NewsBlackout;
  */
 final class SignalQuality
 {
-    /** Below this, an entry is not taken. The SOP's "three confluences" rule. */
+    /**
+     * Below this, an entry is not taken. The SOP's "three confluences" rule.
+     *
+     * The last-resort default rather than the rule itself: `minConfluence()` reads the
+     * account's own setting, then the deployment's, then this. It stays a constant because
+     * a fallback that depends on config being loadable is one more thing that can be wrong
+     * at the moment a trade is being judged.
+     */
     public const MIN_CONFLUENCE = 3.0;
 
     /**
@@ -86,6 +93,43 @@ final class SignalQuality
         private readonly TradingSession $session = new TradingSession,
         private readonly NewsBlackout $news = new NewsBlackout,
     ) {}
+
+    /**
+     * The confluence bar this account holds entries to.
+     *
+     * Three layers, narrowest first: the account's own setting, the deployment's default,
+     * then the constant. `telegram_channels.min_confluence` sits above all of them for a
+     * single provider - which is the shape this method exists to complete, because a
+     * per-channel override was already possible while the account itself had no bar to
+     * state.
+     */
+    public function minConfluence(?BotSettings $settings): float
+    {
+        return $this->floor($settings?->min_confluence, 'trading.min_confluence', self::MIN_CONFLUENCE);
+    }
+
+    public function minDirectional(?BotSettings $settings): float
+    {
+        return $this->floor($settings?->min_directional, 'trading.min_directional', self::MIN_DIRECTIONAL);
+    }
+
+    /**
+     * Resolve one floor, refusing to let a nonsense value through.
+     *
+     * A negative floor is one every signal clears, which is indistinguishable from the
+     * gate being absent - and a gate that has silently stopped gating is worse than one
+     * that was never there. Clamped at zero, which at least means "no floor" out loud.
+     */
+    private function floor(mixed $configured, string $key, float $default): float
+    {
+        if (is_numeric($configured)) {
+            return max(0.0, (float) $configured);
+        }
+
+        $platform = config($key);
+
+        return is_numeric($platform) ? max(0.0, (float) $platform) : $default;
+    }
 
     /**
      * Score an entry.
@@ -142,7 +186,10 @@ final class SignalQuality
             $factors,
         ));
 
-        $status = $this->entryStatus($market, $confluence, $directional, $direction, $entryLow, $entryHigh);
+        $minConfluence = $this->minConfluence($settings);
+        $minDirectional = $this->minDirectional($settings);
+
+        $status = $this->entryStatus($market, $confluence, $directional, $minConfluence, $minDirectional, $direction, $entryLow, $entryHigh);
 
         return [
             'confluence' => round($confluence, 1),
@@ -150,13 +197,18 @@ final class SignalQuality
             // A ratio of what agreed to what could have. Recomputable from stored data,
             // which is the whole point of it.
             'confidence' => $possible > 0.0 ? (int) round($confluence / $possible * 100) : 0,
-            'risk' => $this->risk($confluence, $directional, $market),
+            'risk' => $this->risk($confluence, $directional, $minConfluence, $minDirectional, $market),
             'entry_status' => $status,
             'directional' => round($directional, 1),
-            'tradeable' => $confluence >= self::MIN_CONFLUENCE
-                && $directional >= self::MIN_DIRECTIONAL
+            // Reported alongside the score, so a caller enforcing this bar elsewhere -
+            // `TelegramChannel` holds one provider to its own - is comparing against the
+            // same numbers the verdict was written from.
+            'min_confluence' => $minConfluence,
+            'min_directional' => $minDirectional,
+            'tradeable' => $confluence >= $minConfluence
+                && $directional >= $minDirectional
                 && $status === self::ENTRY_NOW,
-            'why' => $this->why($factors, $confluence, $directional, $status),
+            'why' => $this->why($factors, $confluence, $directional, $minConfluence, $minDirectional, $status),
         ];
     }
 
@@ -320,9 +372,9 @@ final class SignalQuality
      *
      * @param  array<string, mixed>  $market
      */
-    private function entryStatus(array $market, float $confluence, float $directional, string $direction, ?float $entryLow, ?float $entryHigh): string
+    private function entryStatus(array $market, float $confluence, float $directional, float $minConfluence, float $minDirectional, string $direction, ?float $entryLow, ?float $entryHigh): string
     {
-        if ($confluence < self::MIN_CONFLUENCE || $directional < self::MIN_DIRECTIONAL) {
+        if ($confluence < $minConfluence || $directional < $minDirectional) {
             return self::ENTRY_CONFIRMATION;
         }
 
@@ -349,7 +401,7 @@ final class SignalQuality
     /**
      * @param  array<string, mixed>  $market
      */
-    private function risk(float $confluence, float $directional, array $market): string
+    private function risk(float $confluence, float $directional, float $minConfluence, float $minDirectional, array $market): string
     {
         // Volatility escalates risk independently of agreement: five factors agreeing
         // during a violent hour is still a violent hour, and the stop is what pays for it.
@@ -357,7 +409,7 @@ final class SignalQuality
 
         // A directionless signal is a high-risk one whatever the total says: the score
         // it reached describes the market being open, not the trade being good.
-        if ($wild || $confluence < self::MIN_CONFLUENCE || $directional < self::MIN_DIRECTIONAL) {
+        if ($wild || $confluence < $minConfluence || $directional < $minDirectional) {
             return self::RISK_HIGH;
         }
 
@@ -367,13 +419,13 @@ final class SignalQuality
     /**
      * @param  array<int, array{name: string, weight: float, met: bool, note: string}>  $factors
      */
-    private function why(array $factors, float $confluence, float $directional, string $status): string
+    private function why(array $factors, float $confluence, float $directional, float $minConfluence, float $minDirectional, string $status): string
     {
-        if ($directional < self::MIN_DIRECTIONAL && $status === self::ENTRY_CONFIRMATION) {
+        if ($directional < $minDirectional && $status === self::ENTRY_CONFIRMATION) {
             return sprintf(
                 'Nothing much agrees about direction (%.1f of a required %.1f). The rest of the score is the market being open and quiet, which is permission to trade rather than a reason to.',
                 $directional,
-                self::MIN_DIRECTIONAL,
+                $minDirectional,
             );
         }
 
@@ -383,10 +435,10 @@ final class SignalQuality
             return 'Price has already left the entry zone in the trade\'s own direction. Taking it here is a worse trade than the one that was published.';
         }
 
-        if ($confluence < self::MIN_CONFLUENCE) {
+        if ($confluence < $minConfluence) {
             $names = implode(', ', array_map(fn (array $f) => strtolower($f['name']), array_slice($missing, 0, 3)));
 
-            return sprintf('Only %.1f factors agree, against a floor of %.0f. Missing: %s.', $confluence, self::MIN_CONFLUENCE, $names);
+            return sprintf('Only %.1f factors agree, against a floor of %.1f. Missing: %s.', $confluence, $minConfluence, $names);
         }
 
         return sprintf('%.1f factors agree.%s', $confluence, $missing === []

@@ -182,6 +182,67 @@ class AutonomousCopierTest extends TestCase
     }
 
     // =====================================================================
+    // THE REWARD FLOOR
+    // =====================================================================
+
+    /**
+     * The fixture risks 5.00 to make 30.00 - six to one. Nothing about that changes when
+     * no floor is configured, which is the default and the point.
+     */
+    public function test_a_generous_signal_is_taken_when_no_floor_is_set(): void
+    {
+        $this->artisan('telegram:execute')->assertSuccessful();
+
+        $this->assertSame(1, TradeCommand::count());
+    }
+
+    public function test_a_signal_that_does_not_pay_for_its_stop_is_refused(): void
+    {
+        $this->settings->update(['min_reward_ratio' => 2.0]);
+
+        // Entry 2650, stop 2645, target 2652: risking 5.00 to make 2.00.
+        TelegramSignal::first()->update(['tp_prices' => [2652.0]]);
+
+        $this->artisan('telegram:execute')->assertSuccessful();
+
+        $signal = TelegramSignal::first()->fresh();
+
+        $this->assertSame(0, TradeCommand::count(), 'A refused signal must not queue an order.');
+        $this->assertSame(TelegramSignal::EXEC_BLOCKED, $signal->execution_status);
+        $this->assertStringContainsString('Not worth the risk', (string) $signal->execution_note);
+    }
+
+    /**
+     * The note has to name both numbers. "Blocked" on a card tells somebody nothing about
+     * whether the floor is wrong or the signal was.
+     */
+    public function test_the_refusal_says_what_was_offered_against_what_was_required(): void
+    {
+        $this->settings->update(['min_reward_ratio' => 2.0]);
+        TelegramSignal::first()->update(['tp_prices' => [2652.0]]);
+
+        $this->artisan('telegram:execute')->assertSuccessful();
+
+        $note = (string) TelegramSignal::first()->fresh()->execution_note;
+
+        $this->assertStringContainsString('0.4', $note, 'what the signal offered');
+        $this->assertStringContainsString('2', $note, 'what the account required');
+    }
+
+    /**
+     * The same signal, unchanged, with the floor set below what it offers.
+     */
+    public function test_a_floor_it_clears_does_not_get_in_the_way(): void
+    {
+        $this->settings->update(['min_reward_ratio' => 2.0]);
+
+        $this->artisan('telegram:execute')->assertSuccessful();
+
+        $this->assertSame(1, TradeCommand::count());
+        $this->assertSame(TelegramSignal::EXEC_QUEUED, TelegramSignal::first()->fresh()->execution_status);
+    }
+
+    // =====================================================================
     // HELPERS
     // =====================================================================
 

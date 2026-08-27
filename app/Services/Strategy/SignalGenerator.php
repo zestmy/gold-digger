@@ -56,6 +56,7 @@ final class SignalGenerator
         private readonly TradingSession $sessions = new TradingSession,
         private readonly SymbolResolver $symbols = new SymbolResolver,
         private readonly NewsBlackout $news = new NewsBlackout,
+        private readonly RewardFloor $reward = new RewardFloor,
     ) {}
 
     /**
@@ -322,6 +323,23 @@ final class SignalGenerator
 
         if ($heartbeat === null || $heartbeat->balance === null) {
             return 'no_account_snapshot';
+        }
+
+        // After the stop distance is known and before anything is sized, because the
+        // question is about the trade rather than about the account. Measured to
+        // `order_tp_pips` - the take-profit the order actually carries - and not to an
+        // intermediate rung the position never exits at.
+        //
+        // Off unless a floor is configured, so this changes nothing for a deployment that
+        // has not asked for it. See RewardFloor for why that is the default.
+        $rewardObjection = $this->reward->objection(
+            $settings,
+            $levels['sl_pips'],
+            $levels['order_tp_pips'],
+        );
+
+        if ($rewardObjection !== null) {
+            return $rewardObjection;
         }
 
         $openTrades = Trade::where('user_id', $strategy->user_id)

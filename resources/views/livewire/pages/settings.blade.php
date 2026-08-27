@@ -138,6 +138,71 @@
                     <p class="mt-1 text-xs text-gray-500">Minimum volatility required to enter trades</p>
                 </div>
 
+                {{-- The reward floor. Blank is the default and blank means off: switching
+                     one on starts refusing trades that currently execute, so it is a
+                     decision somebody makes rather than one that happens to them. --}}
+                <div>
+                    <label for="min_reward_ratio" class="block text-sm font-medium text-gray-300">Minimum reward : risk</label>
+                    <input
+                        type="number"
+                        id="min_reward_ratio"
+                        wire:model="min_reward_ratio"
+                        step="0.1"
+                        min="0"
+                        placeholder="No floor"
+                        class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white shadow-sm focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm"
+                    >
+                    @error('min_reward_ratio') <p class="mt-1 text-sm text-red-400">{{ $message }}</p> @enderror
+                    <p class="mt-1 text-xs text-gray-500">
+                        Measured to the take-profit the order actually carries, not to an intermediate
+                        target the position never exits at. Leave blank for no floor. A signal with no
+                        target is refused when this is set, because an unmeasurable reward is not a
+                        passing one.
+                    </p>
+                </div>
+
+                {{-- The two confluence floors. Blank follows the platform default, which is
+                     the SOP's three-confluences rule and the directional half of it - so an
+                     untouched account trades exactly as it did before these existed. --}}
+                <div>
+                    <label for="min_confluence" class="block text-sm font-medium text-gray-300">Minimum confluence</label>
+                    <input
+                        type="number"
+                        id="min_confluence"
+                        wire:model="min_confluence"
+                        step="0.5"
+                        min="0"
+                        placeholder="{{ \App\Services\Strategy\SignalQuality::MIN_CONFLUENCE }} (default)"
+                        class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white shadow-sm focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm"
+                    >
+                    @error('min_confluence') <p class="mt-1 text-sm text-red-400">{{ $message }}</p> @enderror
+                    <p class="mt-1 text-xs text-gray-500">
+                        Weighted factors that must agree before an entry is taken. Half-steps are real:
+                        several factors count half because they are half an observation. A channel can
+                        still be held to a stricter bar of its own.
+                    </p>
+                </div>
+
+                <div>
+                    <label for="min_directional" class="block text-sm font-medium text-gray-300">Of which, directional</label>
+                    <input
+                        type="number"
+                        id="min_directional"
+                        wire:model="min_directional"
+                        step="0.5"
+                        min="0"
+                        placeholder="{{ \App\Services\Strategy\SignalQuality::MIN_DIRECTIONAL }} (default)"
+                        class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white shadow-sm focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm"
+                    >
+                    @error('min_directional') <p class="mt-1 text-sm text-red-400">{{ $message }}</p> @enderror
+                    <p class="mt-1 text-xs text-gray-500">
+                        How much of that agreement has to be about direction. Without this, an open
+                        session with no news due and ordinary volatility reaches the confluence floor in
+                        a market where nothing agrees which way to trade &mdash; permission to trade
+                        rather than a reason to.
+                    </p>
+                </div>
+
                 <!-- News Filter -->
                 <div class="flex items-start space-x-3 pt-6">
                     <input
