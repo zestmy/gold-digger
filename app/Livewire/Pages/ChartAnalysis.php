@@ -4,10 +4,12 @@ namespace App\Livewire\Pages;
 
 use App\Models\BotHeartbeat;
 use App\Models\Candle;
+use App\Models\ChartAnalysis as StoredReading;
 use App\Models\Strategy;
 use App\Services\Ai\ChartAnalyst;
 use App\Services\Ai\ScanAnalyst;
 use App\Services\Analysis\MarketScanner;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -42,6 +44,9 @@ use Livewire\Component;
 #[Title('Chart Analysis - FXSignalPro')]
 class ChartAnalysis extends Component
 {
+    /** Past readings shown beneath. Enough to see a change of mind, few enough to scan. */
+    private const HISTORY = 10;
+
     /** 'scan' across everything, or 'focus' on one instrument. */
     #[Url]
     public string $mode = 'scan';
@@ -66,6 +71,36 @@ class ChartAnalysis extends Component
      * should not have to pay for a paragraph about it.
      */
     public bool $withModel = true;
+
+    /**
+     * What the chart draws on top of the candles.
+     *
+     * Toggles rather than everything at once, because these overlays answer different
+     * questions and stacking all of them turns a chart into a diagram. Structure and the
+     * proposed plan are on by default - they are what the page is for. Every measured
+     * level is off, because on a busy instrument that is a dozen horizontal lines and the
+     * three that matter stop being findable among them.
+     *
+     * @var array<string, bool>
+     */
+    public array $overlays = [
+        'levels' => false,
+        'structure' => true,
+        'plan' => true,
+    ];
+
+    /**
+     * Candles for the chart, in the shape Lightweight Charts wants.
+     *
+     * @var array<int, array<string, mixed>>
+     */
+    public array $candles = [];
+
+    /** @var array<int, array<string, mixed>> */
+    public array $chartLevels = [];
+
+    /** @var array<int, array<string, mixed>> */
+    public array $chartMarkers = [];
 
     public function mount(): void
     {
@@ -202,6 +237,8 @@ class ChartAnalysis extends Component
                 ->get()
                 ->reverse()
                 ->values();
+
+            $this->paint($bars, $analysis);
         }
 
         return view('livewire.pages.chart-analysis', [
@@ -212,6 +249,123 @@ class ChartAnalysis extends Component
             'analysis' => $analysis,
             'bars' => $bars,
             'hasStrategy' => $strategy !== null,
+            'history' => $this->history(),
         ]);
+    }
+
+    /**
+     * Turn the bars and the reading into something the chart can draw.
+     *
+     * ## Why the overlays are built here and not in JavaScript
+     *
+     * The same reason the levels themselves are measured in PHP: everything drawn on this
+     * chart has to be a number this system computed, and a browser that derives its own
+     * pivots would eventually disagree with the list the model was shown. One source, one
+     * set of lines.
+     *
+     * @param  Collection<int, Candle>  $bars
+     * @param  array<string, mixed>|null  $analysis
+     */
+    private function paint(Collection $bars, ?array $analysis): void
+    {
+        $this->candles = $bars->map(fn (Candle $c) => [
+            // Lightweight Charts wants a UTC epoch in seconds for an intraday series.
+            'time' => $c->open_time->getTimestamp(),
+            'open' => (float) $c->open,
+            'high' => (float) $c->high,
+            'low' => (float) $c->low,
+            'close' => (float) $c->close,
+        ])->all();
+
+        $levels = [];
+        $markers = [];
+
+        if ($analysis === null) {
+            $this->chartLevels = [];
+            $this->chartMarkers = [];
+
+            return;
+        }
+
+        // Every price this instrument turned at. Off by default: on a busy chart this is a
+        // dozen lines, and the three the plan actually uses stop being findable among them.
+        if ($this->overlays['levels']) {
+            foreach ($analysis['levels'] ?? [] as $i => $level) {
+                $levels[] = [
+                    'price' => (float) $level['price'],
+                    'title' => sprintf('[%d] %sx', $i, $level['touches']),
+                    // Weight by evidence: a level tested four times is drawn brighter than
+                    // one touched once, because that difference is the entire reason the
+                    // touch count is computed.
+                    'color' => $level['touches'] >= 3 ? '#a78bfa' : 'rgba(167, 139, 250, 0.45)',
+                    'style' => 'dotted',
+                ];
+            }
+        }
+
+        $reading = $analysis['reading'] ?? null;
+
+        // The proposed trade. Only when all three are real - a half-drawn ladder reads as
+        // a trade that was never proposed, which is the failure the null prices exist to
+        // prevent everywhere else.
+        if ($this->overlays['plan'] && $reading !== null && ($reading['plan'] ?? 'wait') !== 'wait') {
+            foreach ([
+                ['entry_price', 'Entry', '#e5e7eb', 'solid'],
+                ['stop_price', 'Stop', '#ef4444', 'dashed'],
+                ['target_price', 'Target', '#22c55e', 'dotted'],
+            ] as [$field, $label, $colour, $style]) {
+                if (($reading[$field] ?? null) !== null) {
+                    $levels[] = ['price' => (float) $reading[$field], 'title' => $label, 'color' => $colour, 'style' => $style];
+                }
+            }
+        }
+
+        // Where structure broke, and which kind of break it was. BOS and CHoCH mean
+        // different things and the marker says which - a chart that showed both as "break"
+        // would throw away the distinction the detection exists to make.
+        if ($this->overlays['structure']) {
+            foreach ($analysis['events'] ?? [] as $event) {
+                $bar = $bars->get($event['index']);
+
+                if ($bar === null) {
+                    continue;
+                }
+
+                $bullish = $event['direction'] === 'bullish';
+
+                $markers[] = [
+                    'time' => $bar->open_time->getTimestamp(),
+                    'position' => $bullish ? 'belowBar' : 'aboveBar',
+                    'color' => $event['type'] === 'CHoCH' ? '#f59e0b' : ($bullish ? '#22c55e' : '#ef4444'),
+                    'shape' => $bullish ? 'arrowUp' : 'arrowDown',
+                    'text' => $event['type'],
+                ];
+            }
+        }
+
+        $this->chartLevels = $levels;
+        $this->chartMarkers = $markers;
+    }
+
+    /**
+     * What this account has been told before.
+     *
+     * Shown whether or not anything has been analysed this visit, because the most common
+     * reason to open this page is to find something read yesterday - and a reading that
+     * only existed while its tab was open was the state of things before
+     * `chart_analyses` existed.
+     *
+     * Scoped to the focused instrument when there is one: on a page about gold, a list of
+     * readings about everything else is noise.
+     *
+     * @return Collection<int, StoredReading>
+     */
+    private function history(): Collection
+    {
+        return StoredReading::query()
+            ->when($this->mode === 'focus' && $this->symbol !== '', fn ($q) => $q->forSymbol($this->symbol))
+            ->orderByDesc('bar_open_time')
+            ->limit(self::HISTORY)
+            ->get();
     }
 }

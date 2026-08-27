@@ -131,6 +131,74 @@ what it does: the full level table for that instrument, and a plan in which the 
 levels by their number in the list. Opening a row is free; reading it is a model call and
 waits to be asked for.
 
+### The timeframe ladder
+
+The brief the model is handed now carries the same instrument read on several timeframes,
+from [`TimeframeSummary`](../app/Services/Analysis/TimeframeSummary.php). A model shown one
+chart will describe that chart; shown the ladder it can say the thing actually worth saying,
+which is whether this timeframe is trading with the regime above it or against it.
+
+Three decisions in there worth not re-litigating:
+
+- **The rungs are derived, not fixed.** They are built around the strategy's own
+  `timeframe_trend` and `timeframe_entry`, one step wider for regime and one finer for
+  timing. An M1 scalper and an H4 swing trader get ladders that mean something to each,
+  rather than both getting D1/H4/H1/M15 because that is what the articles use.
+- **A timeframe with no bars is omitted, not called neutral.** "We have not got that chart"
+  and "that chart is undecided" are different facts, and rendering the first as a grey pill
+  beside three real readings invites somebody to trade an alignment that was never measured.
+- **`trend` reuses `StrategyEvaluator`'s own EMA definition.** Three definitions of
+  "bullish" in one product is three chances to contradict yourself in front of a customer.
+
+Readings are cached per rung on that rung's newest bar, so a daily reading survives a
+five-minute refresh instead of being recomputed with the fast one.
+
+### Breaks of structure
+
+[`Structure::sequence()`](../app/Services/Indicators/Structure.php) labels each confirmed
+swing HH / HL / LH / LL and reports where price broke one. The distinction it exists to
+draw:
+
+| | |
+|---|---|
+| **BOS** | A close beyond the most recent swing **in the direction the bias already pointed**. Continuation. |
+| **CHoCH** | A close beyond it **against** the prevailing bias. The first evidence a trend has stopped. |
+
+Same arithmetic; what differs is what the market was doing beforehand, which is why a bare
+"price broke a level" reading is not worth much.
+
+**A swing is not knowable until `WING` further bars confirm it**, so a break of it can only
+be recorded from that bar onwards. Skipping that is lookahead bias: every backtest over the
+series would improve, fictionally. There is a test that fails if it creeps back in.
+
+Note that a CHoCH does not by itself flip the bias — the swing sequence is still HH/HL until
+the new leg prints a confirmed swing of its own. Character changed; structure has not yet.
+
+### What the chart draws
+
+The focused view renders the candles with overlays the reader controls: structure breaks and
+the proposed plan on by default, every measured level off. That last default is deliberate —
+on a busy instrument it is a dozen horizontal lines, and the three the plan actually uses
+stop being findable among them.
+
+Every overlay is built server-side from numbers this system computed. A browser deriving its
+own pivots would eventually disagree with the list the model was shown, and two sets of
+levels on one page is worse than none.
+
+### The readings are kept
+
+Every reading is written to `chart_analyses` — see the migration for the full argument. In
+short: a reading that lived in a cache for fifteen minutes and then stopped existing made
+"was the analyst any good" unanswerable and "what did it say on Tuesday" impossible.
+
+**The refusals are kept as carefully as the plans.** An analyst that declined all week during
+a week that went nowhere was right, and there is no way to see that from the trades it did
+not cause. A `wait` is stored with null prices rather than dropped, and never with something
+plausible in place of them.
+
+One row per bar: asking twice within one bar is the same question, which is already why the
+cache key is built that way.
+
 ---
 
 ## What this is not

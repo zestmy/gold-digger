@@ -10,8 +10,16 @@ import { createChart, CandlestickSeries, LineStyle, createSeriesMarkers } from '
  *
  * Lightweight Charts v5 API — `chart.addSeries(CandlestickSeries, …)`, not v4's
  * `chart.addCandlestickSeries()`.
+ *
+ * @param {object} sources Livewire property names to read from, when a component holds
+ *   its overlays under different names. The dashboard card uses the defaults; the analysis
+ *   page keeps `levels` for the measured list it renders as a table, so its chart overlays
+ *   live under their own names. Parameterising is cheaper than either page renaming a
+ *   property it uses elsewhere, or a second copy of this file drifting from the first.
  */
-export default function priceChart() {
+export default function priceChart(sources = {}) {
+    const keys = { candles: 'candles', levels: 'levels', markers: 'markers', ...sources };
+
     return {
         chart: null,
         series: null,
@@ -22,9 +30,11 @@ export default function priceChart() {
             this.build();
 
             // $wire.$watch fires after Livewire round-trips, which is what repaints the
-            // chart when the poll brings a new bar or a position closes.
-            this.$watch('$wire.candles', () => this.repaint());
-            this.$watch('$wire.levels', () => this.drawLevels());
+            // chart when the poll brings a new bar, a position closes, or an overlay is
+            // switched on.
+            this.$watch(`$wire.${keys.candles}`, () => this.repaint());
+            this.$watch(`$wire.${keys.levels}`, () => this.drawLevels());
+            this.$watch(`$wire.${keys.markers}`, () => this.drawMarkers());
 
             this.$el._resize = new ResizeObserver(() => {
                 if (this.chart) {
@@ -86,7 +96,7 @@ export default function priceChart() {
         repaint() {
             if (!this.series) return;
 
-            const candles = this.$wire.candles ?? [];
+            const candles = this.$wire[keys.candles] ?? [];
             if (!candles.length) return;
 
             this.series.setData(candles);
@@ -110,7 +120,7 @@ export default function priceChart() {
                 dotted: LineStyle.Dotted,
             };
 
-            (this.$wire.levels ?? []).forEach((level) => {
+            (this.$wire[keys.levels] ?? []).forEach((level) => {
                 this.priceLines.push(
                     this.series.createPriceLine({
                         price: level.price,
@@ -127,7 +137,7 @@ export default function priceChart() {
         drawMarkers() {
             if (!this.series) return;
 
-            const markers = this.$wire.markers ?? [];
+            const markers = this.$wire[keys.markers] ?? [];
 
             if (!this.markersPlugin) {
                 this.markersPlugin = createSeriesMarkers(this.series, markers);

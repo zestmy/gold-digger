@@ -100,6 +100,52 @@
                 </div>
             </div>
 
+            {{-- The chart, with what is drawn on it under the reader's control. Structure
+                 and the plan are on by default because they are what the page is for;
+                 every measured level is off, because on a busy instrument that is a dozen
+                 horizontal lines and the three that matter stop being findable. --}}
+            @if($candles)
+                <div class="rounded-lg bg-gray-800 p-6">
+                    <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+                        <h3 class="text-sm font-medium text-gray-400">{{ $symbol }} <span class="text-gray-500">{{ $timeframe }}</span></h3>
+
+                        <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+                            <label class="flex cursor-pointer items-center gap-1.5 text-gray-400 hover:text-gray-200">
+                                <input type="checkbox" wire:model.live="overlays.structure"
+                                       class="h-3.5 w-3.5 rounded border-gray-600 bg-gray-900 text-yellow-500 focus:ring-yellow-500">
+                                Structure breaks
+                            </label>
+                            <label class="flex cursor-pointer items-center gap-1.5 text-gray-400 hover:text-gray-200">
+                                <input type="checkbox" wire:model.live="overlays.plan"
+                                       class="h-3.5 w-3.5 rounded border-gray-600 bg-gray-900 text-yellow-500 focus:ring-yellow-500">
+                                Proposed plan
+                            </label>
+                            <label class="flex cursor-pointer items-center gap-1.5 text-gray-400 hover:text-gray-200">
+                                <input type="checkbox" wire:model.live="overlays.levels"
+                                       class="h-3.5 w-3.5 rounded border-gray-600 bg-gray-900 text-yellow-500 focus:ring-yellow-500">
+                                All measured levels
+                            </label>
+                        </div>
+                    </div>
+
+                    {{-- wire:ignore so Livewire never replaces the canvas Alpine drew into.
+                         The overlays are pushed through $wire watchers instead - see
+                         resources/js/price-chart.js, which is shared with the dashboard
+                         card so both charts behave the same way. --}}
+                    <div
+                        wire:ignore
+                        x-data="priceChart({ levels: 'chartLevels', markers: 'chartMarkers' })"
+                        class="w-full"
+                    >
+                        <div x-ref="canvas" class="w-full"></div>
+                    </div>
+
+                    @if($analysis && ! $overlays['structure'] && ! $overlays['plan'] && ! $overlays['levels'])
+                        <p class="mt-3 text-center text-xs text-gray-600">Nothing is being drawn on the candles.</p>
+                    @endif
+                </div>
+            @endif
+
             @if($analysis)
                 @if($analysis['error'])
                     <div class="rounded-lg border border-amber-500/30 bg-amber-900/20 p-4">
@@ -451,5 +497,83 @@
                 </p>
             </div>
         @endif
+
+        {{-- Everything it has said before. A reading used to live in a cache for fifteen
+             minutes and then stop existing, which made "was it any good" unanswerable and
+             "what did it say on Tuesday" impossible. The refusals are listed beside the
+             plans on purpose: an analyst that declined all week during a week that went
+             nowhere was right, and that is invisible from the trades it did not cause. --}}
+        @if($history->isNotEmpty())
+            <div class="rounded-lg bg-gray-800 p-6">
+                <div class="flex flex-wrap items-baseline justify-between gap-2">
+                    <h2 class="text-lg font-semibold text-white">
+                        Earlier readings{{ $mode === 'focus' && $symbol !== '' ? ' — '.$symbol : '' }}
+                    </h2>
+                    <p class="text-xs text-gray-500">Newest first, one per bar.</p>
+                </div>
+
+                <div class="mt-4 space-y-3">
+                    @foreach($history as $past)
+                        <div class="rounded-md border border-gray-700 bg-gray-900 p-4">
+                            <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                <span class="font-mono text-sm text-gray-300">{{ $past->symbol }}</span>
+                                <span class="text-xs text-gray-500">{{ $past->timeframe }}</span>
+
+                                @php($planColour = ['buy' => 'bg-green-500/10 text-green-400', 'sell' => 'bg-red-500/10 text-red-400'][$past->plan] ?? 'bg-gray-700 text-gray-400')
+
+                                <span class="rounded px-2 py-0.5 text-xs font-semibold uppercase tracking-wide {{ $planColour }}">
+                                    {{ $past->plan === 'wait' ? 'no setup' : $past->plan }}
+                                </span>
+
+                                <span class="text-xs text-gray-500">bias {{ $past->bias }}</span>
+
+                                <span class="ml-auto font-mono text-xs text-gray-500"
+                                      title="{{ $past->bar_open_time->toDayDateTimeString() }} UTC">
+                                    {{ $past->bar_open_time->diffForHumans() }}
+                                </span>
+                            </div>
+
+                            <p class="mt-2 text-sm text-gray-300">{{ $past->headline }}</p>
+
+                            {{-- Only rendered when the reading actually named all three. A
+                                 plan whose chosen level fell outside the measured list
+                                 resolves to null rather than to a price, and showing a
+                                 half-filled ladder would read as a trade it never proposed. --}}
+                            @if($past->isComplete())
+                                <div class="mt-3 flex flex-wrap gap-x-6 gap-y-1 border-t border-gray-800 pt-3 font-mono text-xs">
+                                    <span class="text-gray-400">entry <span class="text-gray-200">{{ rtrim(rtrim($past->entry_price, '0'), '.') }}</span></span>
+                                    <span class="text-gray-400">stop <span class="text-red-400">{{ rtrim(rtrim($past->stop_price, '0'), '.') }}</span></span>
+                                    <span class="text-gray-400">target <span class="text-green-400">{{ rtrim(rtrim($past->target_price, '0'), '.') }}</span></span>
+                                    @if($past->reward_ratio)
+                                        <span class="text-gray-400">R:R <span class="text-gray-200">1 : {{ rtrim(rtrim($past->reward_ratio, '0'), '.') }}</span></span>
+                                    @endif
+                                </div>
+                            @endif
+
+                            <details class="mt-3">
+                                <summary class="cursor-pointer text-xs text-gray-500 hover:text-gray-300">Why, and what would make it wrong</summary>
+                                <p class="mt-2 text-xs leading-relaxed text-gray-400">{{ $past->reasoning }}</p>
+                                <p class="mt-2 text-xs leading-relaxed text-gray-500">
+                                    <span class="uppercase tracking-wide">Invalidated by</span> &mdash; {{ $past->invalidation }}
+                                </p>
+                                @if($past->model)
+                                    <p class="mt-2 font-mono text-[11px] text-gray-600">{{ $past->model }}</p>
+                                @endif
+                            </details>
+                        </div>
+                    @endforeach
+                </div>
+            </div>
+        @endif
+
+        {{-- Said once, at the bottom, on the page that gives opinions. Not a modal and not
+             a checkbox: this is a statement of what the page is, and burying it behind a
+             dismissal would be the opposite of making it. --}}
+        <p class="text-center text-xs leading-relaxed text-gray-600">
+            Everything above is analysis, not advice, and none of it is a forecast. Readings are produced
+            from stored bars by indicators and a language model; markets are not obliged to agree with
+            either. Nothing on this page places an order. Trading leveraged instruments can lose more than
+            the amount deposited, and the decisions remain yours.
+        </p>
     </div>
 </div>

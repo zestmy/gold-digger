@@ -3,14 +3,18 @@
 namespace App\Services\Ai;
 
 use App\Models\Candle;
+use App\Models\ChartAnalysis as ChartAnalysisRecord;
 use App\Models\CotReport;
 use App\Models\Strategy;
+use App\Services\Analysis\TimeframeSummary;
 use App\Services\Indicators\Indicators;
 use App\Services\Indicators\Structure;
 use App\Services\Strategy\MarketContext;
 use App\Services\Strategy\StrategyEvaluator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Chart Analyst
@@ -55,6 +59,7 @@ final class ChartAnalyst
     public function __construct(
         private readonly OpenRouter $router = new OpenRouter,
         private readonly MarketContext $context = new MarketContext(new StrategyEvaluator),
+        private readonly TimeframeSummary $ladder = new TimeframeSummary,
     ) {}
 
     /**
@@ -104,6 +109,7 @@ final class ChartAnalyst
                 'ok' => true,
                 'error' => 'No OPENROUTER_API_KEY is configured, so only the measured levels are shown.',
                 'levels' => $structure['levels'],
+                'events' => $structure['events'],
                 'structure' => $structure['structure'],
                 'reading' => null,
             ];
@@ -117,13 +123,18 @@ final class ChartAnalyst
             Cache::forget($key);
         }
 
-        $reading = Cache::remember($key, now()->addMinutes($this->cacheMinutes()), function () use ($symbol, $timeframe, $market, $structure, $bars) {
+        // Read once, outside the cached closure, because it is arithmetic worth having on
+        // the page whether or not the model is asked anything about it.
+        $ladder = $this->ladder->of($strategy, $brokerAccountId, $symbol);
+
+        $reading = Cache::remember($key, now()->addMinutes($this->cacheMinutes()), function () use ($symbol, $timeframe, $market, $structure, $bars, $ladder) {
             $result = $this->router->structured(
                 model: (string) config('ai.model'),
                 system: $this->systemPrompt(),
-                brief: $this->brief($symbol, $timeframe, $market, $structure, $bars),
+                brief: $this->brief($symbol, $timeframe, $market, $structure, $bars, $ladder),
                 schemaName: 'chart_analysis',
                 schema: $this->schema(),
+                callSite: 'chart_analyst',
             );
 
             // Checked before it is cached, not after. `strict` json_schema means a
@@ -132,7 +143,14 @@ final class ChartAnalyst
             // reading a missing key, which is a 500 on a page whose whole job is to be
             // read. A missing field is a failed reading, and a failed reading already has
             // somewhere to go.
-            return ($result['ok'] && $this->complete($result['data'])) ? $result['data'] : null;
+            if (! $result['ok'] || ! $this->complete($result['data'])) {
+                return null;
+            }
+
+            // Carried alongside the reading rather than fetched later: OpenRouter may route
+            // to a different model than the one asked for, and when a stored reading looks
+            // unlike its neighbours the first question is which model wrote it.
+            return $result['data'] + ['model' => $result['model']];
         });
 
         if ($reading === null) {
@@ -140,18 +158,99 @@ final class ChartAnalyst
                 'ok' => true,
                 'error' => 'The reading could not be produced; the measured levels are shown without it.',
                 'levels' => $structure['levels'],
+                'events' => $structure['events'],
                 'structure' => $structure['structure'],
                 'reading' => null,
             ];
         }
 
+        $resolved = $this->resolve($reading, $structure['levels']);
+
+        $this->keep($strategy, $brokerAccountId, $symbol, $timeframe, $bars, $structure, $ladder, $resolved);
+
         return [
             'ok' => true,
             'error' => null,
             'levels' => $structure['levels'],
+            'events' => $structure['events'],
             'structure' => $structure['structure'],
-            'reading' => $this->resolve($reading, $structure['levels']),
+            'reading' => $resolved,
         ];
+    }
+
+    /**
+     * Write the reading down.
+     *
+     * ## Why the refusals are kept as carefully as the plans
+     *
+     * A reading whose plan is `wait` is stored with null prices rather than being dropped.
+     * It is the more common outcome and it is the half that makes the history worth having:
+     * an analyst that declined all week during a week that went nowhere was right, and
+     * there is no way to see that from the trades it did not cause.
+     *
+     * ## One row per bar, overwritten by a refresh
+     *
+     * The unique key is (owner, symbol, timeframe, bar). Asking twice within one bar is the
+     * same question - which is already why the cache key is built this way - so a repeated
+     * request updates rather than appending. Refresh deliberately falls into the same path:
+     * it is the same question asked again, and a history that recorded both would look like
+     * a change of mind that never happened.
+     *
+     * ## Storing this must never break the page
+     *
+     * The reading has already been produced and paid for by the time this runs. A unique
+     * collision from two concurrent requests, or a column that will not take a value, is
+     * not a reason to fail a page whose whole job is to show what the model said - so the
+     * failure is logged and swallowed.
+     *
+     * @param  array<string, mixed>  $structure
+     * @param  array<string, mixed>  $ladder
+     * @param  array<string, mixed>  $reading
+     */
+    private function keep(
+        Strategy $strategy,
+        ?int $brokerAccountId,
+        string $symbol,
+        string $timeframe,
+        Collection $bars,
+        array $structure,
+        array $ladder,
+        array $reading,
+    ): void {
+        try {
+            ChartAnalysisRecord::updateOrCreate(
+                [
+                    'user_id' => $strategy->user_id,
+                    'symbol' => $symbol,
+                    'timeframe' => $timeframe,
+                    'bar_open_time' => $bars->last()->open_time,
+                ],
+                [
+                    'broker_account_id' => $brokerAccountId,
+                    'bias' => $reading['bias'],
+                    'plan' => $reading['plan'],
+                    'headline' => mb_substr((string) $reading['headline'], 0, 500),
+                    'structure' => (string) $reading['structure'],
+                    'reasoning' => (string) $reading['reasoning'],
+                    'invalidation' => (string) $reading['invalidation'],
+                    'entry_price' => $reading['entry_price'],
+                    'stop_price' => $reading['stop_price'],
+                    'target_price' => $reading['target_price'],
+                    'reward_ratio' => $reading['reward_ratio'],
+                    'levels' => $structure['levels'],
+                    'timeframes' => $ladder['timeframes'] ?? [],
+                    'events' => $structure['events'] ?? [],
+                    'model' => $reading['model'] ?? null,
+                    'prompt_version' => ChartAnalysisRecord::PROMPT_VERSION,
+                ],
+            );
+        } catch (Throwable $e) {
+            Log::warning('Chart analysis could not be stored.', [
+                'symbol' => $symbol,
+                'timeframe' => $timeframe,
+                'exception' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
@@ -246,10 +345,15 @@ final class ChartAnalyst
      * @param  array<string, mixed>  $structure
      * @param  Collection<int, Candle>  $bars
      */
-    private function brief(string $symbol, string $timeframe, array $market, array $structure, $bars): string
+    private function brief(string $symbol, string $timeframe, array $market, array $structure, $bars, array $ladder = []): string
     {
+        // A measurement or a question mark, never an invented zero: a model shown `RSI 0`
+        // will reason about an oversold extreme that does not exist.
+        $show = fn (?float $value, int $places): string => $value === null ? '?' : (string) round($value, $places);
+
         $closes = $bars->map(fn (Candle $c) => (float) $c->close)->all();
         $squeeze = Indicators::squeeze($closes, 20, self::BARS);
+        $macd = Indicators::macd($closes);
 
         $lines = [
             "{$symbol} on {$timeframe}",
@@ -261,9 +365,57 @@ final class ChartAnalyst
             '  '.$structure['structure'],
             sprintf('  Window high %s, low %s', $structure['range_high'], $structure['range_low']),
             '  Bollinger width is '.($squeeze['squeezed'] ? 'compressed.' : 'not compressed.'),
-            '',
-            'MEASURED LEVELS, choose by number',
+            sprintf('  RSI %s, MACD histogram %s',
+                $show(Indicators::last(Indicators::rsi($closes, 14)), 1),
+                $show(Indicators::last($macd['histogram']), 5)),
         ];
+
+        // The ladder, before the levels. A model handed one chart will describe that chart;
+        // handed the ladder it can say the thing that is actually worth saying, which is
+        // whether this timeframe is trading with the regime above it or against it.
+        if (($ladder['timeframes'] ?? []) !== []) {
+            $lines[] = '';
+            $lines[] = 'TIMEFRAMES, coarsest first';
+
+            foreach ($ladder['timeframes'] as $rung => $reading) {
+                $lines[] = sprintf(
+                    '  %-4s %-16s %-9s strength %s, structure %s%s',
+                    $rung,
+                    '('.$reading['role'].')',
+                    $reading['trend'],
+                    $reading['strength'] ?? '?',
+                    $reading['structure'],
+                    $reading['last_event'] === null
+                        ? ''
+                        : sprintf(', last %s %s', $reading['last_event_direction'], $reading['last_event']),
+                );
+            }
+
+            $lines[] = '  '.$ladder['agreement'];
+        }
+
+        // Breaks of structure on the timeframe being read. Named events rather than a
+        // description, because BOS and CHoCH mean specific things and the difference
+        // between them is what the reader is trying to establish.
+        $events = array_slice($structure['events'] ?? [], -3);
+
+        if ($events !== []) {
+            $lines[] = '';
+            $lines[] = 'RECENT STRUCTURE EVENTS on this timeframe';
+
+            foreach ($events as $event) {
+                $lines[] = sprintf(
+                    '  %s %s through %s (%d bars ago)',
+                    $event['direction'],
+                    $event['type'],
+                    $event['level'],
+                    max(0, $bars->count() - 1 - $event['index']),
+                );
+            }
+        }
+
+        $lines[] = '';
+        $lines[] = 'MEASURED LEVELS, choose by number';
 
         foreach ($structure['levels'] as $i => $level) {
             $lines[] = sprintf(
@@ -343,6 +495,6 @@ final class ChartAnalyst
      */
     private function fail(string $error): array
     {
-        return ['ok' => false, 'error' => $error, 'levels' => [], 'structure' => null, 'reading' => null];
+        return ['ok' => false, 'error' => $error, 'levels' => [], 'events' => [], 'structure' => null, 'reading' => null];
     }
 }

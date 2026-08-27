@@ -6,6 +6,7 @@ use App\Livewire\Pages\ChartAnalysis;
 use App\Models\BotHeartbeat;
 use App\Models\BrokerAccount;
 use App\Models\Candle;
+use App\Models\ChartAnalysis as StoredReading;
 use App\Models\Strategy;
 use App\Models\User;
 use App\Services\Ai\ChartAnalyst;
@@ -190,6 +191,212 @@ class ChartAnalysisTest extends TestCase
 
         $this->assertFalse($result['ok']);
         $this->assertSame([], $result['levels']);
+    }
+
+    // =====================================================================
+    // THE READING IS KEPT
+    // =====================================================================
+
+    /**
+     * A reading used to live in a cache for fifteen minutes and then stop existing, which
+     * makes "was the analyst any good" unanswerable and "what did it say on Tuesday"
+     * impossible. Both are questions a product has to be able to answer.
+     */
+    public function test_a_reading_is_written_down_with_the_evidence_behind_it(): void
+    {
+        $this->bars();
+
+        // Levels 0 and 1: the oscillating fixture produces exactly two, so a third index
+        // would resolve to null and the reading would be incomplete for a reason that has
+        // nothing to do with what is being tested here.
+        $this->reads('buy', 0, 1, 1);
+
+        (new ChartAnalyst)->analyse($this->strategy, $this->account->id, 'XAUUSD', 'M5');
+
+        $stored = StoredReading::acrossTenants()->sole();
+
+        $this->assertSame($this->user->id, $stored->user_id);
+        $this->assertSame('XAUUSD', $stored->symbol);
+        $this->assertSame('M5', $stored->timeframe);
+        $this->assertSame('buy', $stored->plan);
+        $this->assertSame('bullish', $stored->bias);
+        $this->assertSame('test-model', $stored->model);
+
+        // The measured half, stored beside the opinion it produced. Without it a historical
+        // reading cannot be re-read: the levels it named would have to be recomputed from
+        // bars that have since scrolled out of the window.
+        $this->assertNotEmpty($stored->levels);
+        $this->assertNotNull($stored->entry_price);
+        $this->assertTrue($stored->isComplete());
+    }
+
+    /**
+     * The refusals are the half that makes the history worth having. An analyst that
+     * declined all week during a week that went nowhere was right, and that is invisible
+     * from the trades it did not cause.
+     */
+    public function test_a_refusal_is_kept_too_and_invents_no_prices(): void
+    {
+        $this->bars();
+        $this->reads('wait', null, null, null);
+
+        (new ChartAnalyst)->analyse($this->strategy, $this->account->id, 'XAUUSD', 'M5');
+
+        $stored = StoredReading::acrossTenants()->sole();
+
+        $this->assertSame('wait', $stored->plan);
+        $this->assertNull($stored->entry_price);
+        $this->assertNull($stored->stop_price);
+        $this->assertNull($stored->target_price);
+        $this->assertFalse($stored->isComplete());
+    }
+
+    /**
+     * Asking twice within one bar is the same question - which is already why the cache
+     * key is built this way. A history that recorded both would look like a change of mind
+     * that never happened.
+     */
+    public function test_asking_again_within_the_same_bar_does_not_add_a_second_row(): void
+    {
+        $this->bars();
+        $this->reads('buy', 0, 1, 2);
+
+        $analyst = new ChartAnalyst;
+        $analyst->analyse($this->strategy, $this->account->id, 'XAUUSD', 'M5');
+
+        // Past the cache, so the model is asked again - and it is still the same bar.
+        $analyst->analyse($this->strategy, $this->account->id, 'XAUUSD', 'M5', fresh: true);
+
+        $this->assertSame(1, StoredReading::acrossTenants()->count());
+    }
+
+    public function test_a_failed_reading_stores_nothing(): void
+    {
+        $this->bars();
+        Http::fake(['openrouter.ai/*' => Http::response([], 500)]);
+
+        (new ChartAnalyst)->analyse($this->strategy, $this->account->id, 'XAUUSD', 'M5');
+
+        // There was no opinion, so there is nothing to keep. A row here would be a reading
+        // nobody made.
+        $this->assertSame(0, StoredReading::acrossTenants()->count());
+    }
+
+    public function test_the_history_belongs_to_the_tenant_it_was_read_for(): void
+    {
+        $this->bars();
+        $this->reads('buy', 0, 1, 2);
+
+        (new ChartAnalyst)->analyse($this->strategy, $this->account->id, 'XAUUSD', 'M5');
+
+        $stranger = User::factory()->create();
+
+        Livewire::actingAs($stranger)
+            ->test(ChartAnalysis::class)
+            ->assertViewHas('history', fn ($history) => $history->isEmpty());
+    }
+
+    public function test_earlier_readings_are_shown_on_the_page(): void
+    {
+        $this->bars();
+        $this->reads('sell', 0, 1, 2);
+
+        (new ChartAnalyst)->analyse($this->strategy, $this->account->id, 'XAUUSD', 'M5');
+
+        Livewire::actingAs($this->user)
+            ->test(ChartAnalysis::class)
+            ->assertSee('Earlier readings')
+            ->assertSee('Range-bound above support.');
+    }
+
+    // =====================================================================
+    // WHAT THE CHART DRAWS
+    // =====================================================================
+
+    /**
+     * Everything drawn on the chart is a number this system computed. A browser deriving
+     * its own pivots would eventually disagree with the list the model was shown, and two
+     * sets of levels on one page is worse than none.
+     */
+    public function test_the_proposed_plan_is_drawn_as_entry_stop_and_target(): void
+    {
+        $this->bars();
+        $this->reads('buy', 0, 1, 1);
+
+        $component = Livewire::actingAs($this->user)
+            ->test(ChartAnalysis::class)
+            ->set('timeframe', 'M5')
+            ->set('mode', 'focus')
+            ->set('symbol', 'XAUUSD')
+            ->call('analyse');
+
+        $titles = array_column($component->get('chartLevels'), 'title');
+
+        $this->assertContains('Entry', $titles);
+        $this->assertContains('Stop', $titles);
+        $this->assertContains('Target', $titles);
+        $this->assertNotEmpty($component->get('candles'));
+    }
+
+    /**
+     * A refusal has no levels to draw. Drawing a half-filled ladder would render a trade
+     * that was never proposed - the same failure the null prices exist to prevent.
+     */
+    public function test_a_refusal_draws_no_plan_lines(): void
+    {
+        $this->bars();
+        $this->reads('wait', null, null, null);
+
+        $component = Livewire::actingAs($this->user)
+            ->test(ChartAnalysis::class)
+            ->set('timeframe', 'M5')
+            ->set('mode', 'focus')
+            ->set('symbol', 'XAUUSD')
+            ->call('analyse');
+
+        $titles = array_column($component->get('chartLevels'), 'title');
+
+        $this->assertNotContains('Entry', $titles);
+        $this->assertNotContains('Stop', $titles);
+    }
+
+    public function test_turning_the_plan_overlay_off_removes_its_lines(): void
+    {
+        $this->bars();
+        $this->reads('buy', 0, 1, 1);
+
+        $component = Livewire::actingAs($this->user)
+            ->test(ChartAnalysis::class)
+            ->set('timeframe', 'M5')
+            ->set('mode', 'focus')
+            ->set('symbol', 'XAUUSD')
+            ->call('analyse')
+            ->set('overlays.plan', false);
+
+        $this->assertNotContains('Entry', array_column($component->get('chartLevels'), 'title'));
+    }
+
+    /**
+     * Off by default: on a busy instrument this is a dozen horizontal lines, and the three
+     * the plan actually uses stop being findable among them.
+     */
+    public function test_every_measured_level_is_drawn_only_when_asked_for(): void
+    {
+        $this->bars();
+        $this->reads('buy', 0, 1, 1);
+
+        $component = Livewire::actingAs($this->user)
+            ->test(ChartAnalysis::class)
+            ->set('timeframe', 'M5')
+            ->set('mode', 'focus')
+            ->set('symbol', 'XAUUSD')
+            ->call('analyse');
+
+        $before = count($component->get('chartLevels'));
+
+        $component->set('overlays.levels', true);
+
+        $this->assertGreaterThan($before, count($component->get('chartLevels')));
     }
 
     // =====================================================================
