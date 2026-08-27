@@ -4,6 +4,7 @@ namespace App\Livewire\Pages;
 
 use App\Models\Strategy;
 use App\Services\Ai\AiFund;
+use App\Services\Ai\AiSpend;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -242,6 +243,11 @@ class Settings extends Component
                 Auth::user()?->botSettings,
                 (int) Auth::id(),
             ),
+            // What the fund does not cover. The fund bounds what AI trading may lose from
+            // this account; this bounds how many times a model may be asked anything at
+            // all. Shown beside each other because "the AI stopped" has two possible
+            // causes and they need different remedies.
+            'allowance' => app(AiSpend::class)->allowance((int) Auth::id()),
         ]);
     }
 }

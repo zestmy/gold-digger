@@ -75,6 +75,7 @@ final class ImageSignalReader
             schemaName: 'image_signal',
             schema: $this->schema(),
             imageDataUri: 'data:'.$mime.';base64,'.base64_encode($binary),
+            callSite: 'image_signal_reader',
         );
 
         if (! $result['ok']) {

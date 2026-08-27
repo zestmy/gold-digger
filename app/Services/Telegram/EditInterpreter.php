@@ -75,6 +75,7 @@ final class EditInterpreter
             brief: $this->brief($signal, $before, $after),
             schemaName: 'signal_edit',
             schema: $this->schema(),
+            callSite: 'edit_interpreter',
         );
 
         if (! $result['ok']) {

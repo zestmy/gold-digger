@@ -184,6 +184,50 @@
             </div>
         </div>
 
+        {{-- Sits above the fund deliberately. Both can stop the AI, and when one of them
+             does, the first question is which - so they are read together. The fund is
+             your money in your broker account; this is how many times a model may be
+             asked anything at all, which is the platform's cost rather than yours. --}}
+        <div class="rounded-lg border border-gray-700 bg-gray-800 p-6">
+            <h3 class="text-lg font-semibold text-white">AI Requests Today</h3>
+
+            <p class="mt-1 text-sm text-gray-400">
+                Chart analysis, market scans, signal review and the strategy improver all ask a
+                model something. This is how many of those you have left today.
+            </p>
+
+            <div class="mt-4 rounded-md bg-gray-900 p-4">
+                <div class="flex flex-wrap items-baseline gap-x-8 gap-y-2">
+                    <div>
+                        <p class="text-xs uppercase tracking-wide text-gray-500">Remaining</p>
+                        <p class="font-mono text-lg {{ $allowance['exhausted'] ? 'text-red-400' : 'text-gray-100' }}">
+                            {{ number_format($allowance['remaining']) }}
+                            <span class="text-xs text-gray-500">of {{ number_format($allowance['limit']) }}</span>
+                        </p>
+                    </div>
+                    <div>
+                        <p class="text-xs uppercase tracking-wide text-gray-500">Used</p>
+                        <p class="font-mono text-lg text-gray-100">{{ number_format($allowance['used']) }}</p>
+                    </div>
+                </div>
+
+                @if($allowance['exhausted'])
+                    {{-- Says what still works, because most of the product does. The measured
+                         half of every analysis surface is arithmetic and costs nothing. --}}
+                    <p class="mt-3 border-t border-gray-800 pt-3 text-xs text-red-400">
+                        Today's requests are used up; they reset at midnight UTC. Measured readings
+                        &mdash; levels, structure, confluence and the market scan ranking &mdash; are
+                        arithmetic and keep working. Only the written analysis is paused.
+                    </p>
+                @else
+                    <p class="mt-3 border-t border-gray-800 pt-3 text-xs text-gray-500">
+                        Repeated requests for the same bar are served from cache and are not counted,
+                        so leaving a page open does not spend this.
+                    </p>
+                @endif
+            </div>
+        </div>
+
         <!-- AI Trading Fund -->
         <div class="rounded-lg border border-amber-500/20 bg-gray-800 p-6">
             <h3 class="text-lg font-semibold text-white">AI Trading Fund</h3>

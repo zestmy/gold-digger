@@ -62,6 +62,7 @@ final class StrategyProposer
             brief: $this->brief($strategy, $evidence),
             schemaName: 'strategy_proposals',
             schema: $this->schema(),
+            callSite: 'strategy_proposer',
         );
 
         if (! $result['ok']) {

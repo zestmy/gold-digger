@@ -66,6 +66,7 @@ final class FollowUpInterpreter
             brief: $this->brief($followUp, $parent),
             schemaName: 'follow_up_instruction',
             schema: $this->schema(),
+            callSite: 'follow_up_interpreter',
         );
 
         if (! $result['ok']) {

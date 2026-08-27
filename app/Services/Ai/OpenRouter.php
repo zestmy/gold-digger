@@ -54,10 +54,26 @@ final class OpenRouter
     /**
      * @param  string|null  $imageDataUri  A data: URI, when the brief is about a picture
      */
-    public function structured(string $model, string $system, string $brief, string $schemaName, array $schema, ?string $imageDataUri = null): array
+    public function structured(string $model, string $system, string $brief, string $schemaName, array $schema, ?string $imageDataUri = null, string $callSite = 'unattributed'): array
     {
         if (! $this->configured()) {
             return $this->failure('No OPENROUTER_API_KEY is configured.');
+        }
+
+        // Every call in the application funnels through here, which is the only reason
+        // metering can be one piece of code rather than nine. Resolved before the request
+        // rather than passed in, so a caller cannot forget to declare whose spend it is.
+        $spend = app(AiSpend::class);
+        $tenant = $spend->currentTenant();
+
+        if (! $spend->permits($tenant)) {
+            $allowance = $spend->allowance($tenant);
+
+            // Not recorded as usage: nothing was sent, so nothing was charged. Counting
+            // refusals would make the allowance shrink by being enforced.
+            return $this->failure(
+                "Daily AI allowance used up ({$allowance['used']} of {$allowance['limit']} calls). It resets at midnight UTC."
+            );
         }
 
         // Sent inline as a data URI rather than as a link. A URL would have to be publicly
@@ -97,11 +113,21 @@ final class OpenRouter
                             'schema' => $schema,
                         ],
                     ],
+                    // Ask the gateway to price the call in its own response. Gateways that
+                    // do not understand this field ignore it, and the cost column stays
+                    // null while the token counts still land - which is why nothing here
+                    // depends on it being honoured.
+                    'usage' => ['include' => true],
                 ]);
         } catch (Throwable $e) {
+            // A connection that never completed was never billed, so this is a failure to
+            // report rather than usage to record.
             return $this->failure('Request to OpenRouter failed: '.$e->getMessage());
         }
 
+        // Neither of these two reached a model, so neither was billed. Recording them
+        // would make a wrong API key look like consumption and eat an allowance nothing
+        // was spent from.
         if ($response->status() === 401) {
             return $this->failure('OpenRouter rejected the API key.');
         }
@@ -112,25 +138,43 @@ final class OpenRouter
             return $this->failure('OpenRouter reports insufficient credit for this request.');
         }
 
+        // Everything from here down may have been generated, and therefore charged - see
+        // the note at the top of this class on why status codes are not retried.
+        $usage = (array) ($response->json('usage') ?? []);
+        $served = $response->json('model') ?? $model;
+
+        $meter = function (bool $ok, ?string $failure) use ($spend, $tenant, $callSite, $model, $served, $usage): void {
+            $spend->record($tenant, $callSite, $model, $served, $ok, $failure, $usage);
+        };
+
         if (! $response->successful()) {
             $detail = (string) ($response->json('error.message') ?? $response->body());
+            $message = "OpenRouter returned HTTP {$response->status()}: ".mb_substr($detail, 0, 200);
 
-            return $this->failure("OpenRouter returned HTTP {$response->status()}: ".mb_substr($detail, 0, 200));
+            $meter(false, $message);
+
+            return $this->failure($message);
         }
 
         $content = $response->json('choices.0.message.content');
 
         if (! is_string($content) || trim($content) === '') {
+            $meter(false, 'empty response');
+
             return $this->failure('The model returned an empty response.');
         }
 
         $decoded = json_decode($content, true);
 
         if (! is_array($decoded)) {
+            $meter(false, 'response was not JSON');
+
             // Some models ignore the schema and answer in prose. Say that rather than
             // showing a JSON parse error, which reads like the dashboard is broken.
             return $this->failure('The model did not return JSON matching the requested shape.');
         }
+
+        $meter(true, null);
 
         return [
             'ok' => true,
@@ -139,7 +183,7 @@ final class OpenRouter
             // The model that actually served it: OpenRouter may route elsewhere when the
             // requested one is unavailable, and a surprising answer is worth being able
             // to attribute.
-            'model' => $response->json('model') ?? $model,
+            'model' => $served,
         ];
     }
 

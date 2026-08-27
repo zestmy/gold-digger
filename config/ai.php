@@ -86,4 +86,32 @@ return [
 
     'cache_minutes' => (int) env('AI_CACHE_MINUTES', 15),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Spend limits
+    |--------------------------------------------------------------------------
+    |
+    | Every model call in this application is made on one platform API key, so every
+    | tenant's analysis is billed to whoever runs the deployment. For one operator that
+    | is simply their own bill. For a product it is unbounded cost of goods, and this is
+    | the ceiling on it.
+    |
+    | Counted per tenant per day, and per request rather than per dollar - a call's price
+    | is not knowable until after the model has decided how much to write, which is too
+    | late to refuse it. The recorded cost in `ai_usage` is what turns these counts into
+    | money afterwards; see App\Services\Ai\AiSpend.
+    |
+    | A tenant can be given their own ceiling in `bot_settings.ai_daily_call_limit`, which
+    | is where a paid plan's entitlement belongs. This is the default for everyone else.
+    |
+    | Sizing note: the copier's reviewer is the hungry one. It runs on every captured
+    | signal, on a per-minute schedule, so a tenant following several busy channels can
+    | reach three figures in a day without ever opening the dashboard.
+    |
+    */
+
+    'limits' => [
+        'daily_calls' => (int) env('AI_DAILY_CALL_LIMIT', 200),
+    ],
+
 ];

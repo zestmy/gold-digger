@@ -112,6 +112,7 @@ final class AutonomousTrader
             brief: $this->brief($symbol, $market, $strategy, $heartbeat?->broker_account_id),
             schemaName: 'autonomous_decision',
             schema: $this->schema(),
+            callSite: 'autonomous_trader',
         );
 
         if (! $verdict['ok']) {

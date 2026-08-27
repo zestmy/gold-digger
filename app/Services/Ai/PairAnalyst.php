@@ -61,6 +61,7 @@ final class PairAnalyst
             brief: $this->brief($context, $situation),
             schemaName: 'pair_analysis',
             schema: PairAnalysis::schema(),
+            callSite: 'pair_analyst',
         );
 
         if (! $result['ok']) {

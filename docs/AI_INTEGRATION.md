@@ -119,6 +119,43 @@ individually would be twenty calls answering a question that is comparative — 
 these" cannot be answered by twenty opinions that never saw each other. The cheap shape and
 the correct shape agree here.
 
+### Who pays, and how much they may spend
+
+All nine call sites run on **one platform API key**. For a single operator that is simply
+their own OpenRouter bill. As a product it is unbounded, unattributed cost of goods: a
+tenant who never places a trade can run chart analyses, market scans and the strategy
+improver without limit, and until recently nothing recorded that they had.
+
+So every call is metered. `AiSpend` gates on a per-tenant daily request count and
+`ai_usage` records what each one cost.
+
+| | |
+|---|---|
+| Default ceiling | `AI_DAILY_CALL_LIMIT`, 200 calls per tenant per day |
+| Per-tenant override | `bot_settings.ai_daily_call_limit` — where a paid plan's entitlement belongs |
+| Zero | A real setting meaning *no AI at all*, not an unset one |
+| Where a tenant sees it | Settings → **AI Requests Today** |
+
+Three decisions worth not re-litigating:
+
+- **Counts gate, costs inform.** A currency budget would be more accurate, but enforcing
+  one means knowing a call's price *before* making it, and completion length is the model's
+  decision. A request count is enforceable at the moment the decision has to be made; the
+  `cost_usd` column is what turns it into a price afterwards.
+- **Attempts are recorded, not successes.** OpenRouter bills per request that reaches a
+  model, so a 5xx that arrived after generation is a charge — which is the same premise
+  behind not retrying status codes. A meter that counted only successes would under-report
+  worst on the days something was broken, which is exactly when somebody looks.
+- **A refusal is not consumption.** Being turned away does not write a row. If it did, the
+  allowance would shrink every time it was enforced and could never recover within the day.
+  A 401 or 402 is likewise not counted: neither reached a model.
+
+`AiSpend` is deliberately **not** `AiFund`. The fund bounds what autonomous trading may
+*lose* — the tenant's money, in their broker account, recoverable by closing a position.
+This bounds what inference may *spend* — the platform's money, unrecoverable. A tenant can
+have a healthy fund and no calls left, or the reverse, and each says something different
+about what to do next.
+
 ---
 
 ## Model routing

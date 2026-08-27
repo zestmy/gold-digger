@@ -99,6 +99,7 @@ final class SignalReviewer
             brief: $this->brief($signal, $settings),
             schemaName: 'signal_review',
             schema: $this->schema(),
+            callSite: 'signal_reviewer',
         );
 
         if (! $result['ok']) {

@@ -100,6 +100,7 @@ final class ScanAnalyst
                 brief: $this->brief($shortlist, $timeframe),
                 schemaName: 'scan_ranking',
                 schema: $this->schema(),
+                callSite: 'scan_analyst',
             );
 
             return $result['ok'] ? ['data' => $result['data'], 'model' => $result['model']] : null;
