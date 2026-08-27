@@ -50,10 +50,14 @@ class MonitoringTest extends TestCase
         // rather than a real request.
         Http::preventStrayRequests();
 
+        // The token is the platform's; the destination is the tenant's. `chat_id` here is
+        // now the operator's own address and is deliberately never used for a customer's
+        // incident, so the user below carries the chat these tests assert against - which
+        // is also the configuration a real tenant ends up with.
         config()->set('alerts.telegram.token', 'test-token');
-        config()->set('alerts.telegram.chat_id', '4242');
+        config()->set('alerts.telegram.chat_id', '9999-operator');
 
-        $this->user = User::factory()->create();
+        $this->user = User::factory()->create(['telegram_chat_id' => '4242']);
 
         $this->account = BrokerAccount::create([
             'user_id' => $this->user->id,

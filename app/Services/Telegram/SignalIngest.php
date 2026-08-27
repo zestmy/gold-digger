@@ -439,6 +439,10 @@ final class SignalIngest
                         'edit_risk' => $reading['risk'],
                         'edit_action' => $reading['action'],
                     ],
+                    // The tenant holding the position a provider has just rewritten the
+                    // terms of. This is the most time-critical message the copier sends,
+                    // so it is the worst one to deliver to the wrong inbox.
+                    $signal->user_id,
                 );
             }
 

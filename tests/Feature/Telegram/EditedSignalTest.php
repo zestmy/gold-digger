@@ -39,7 +39,9 @@ class EditedSignalTest extends TestCase
 
         Http::fake(['api.telegram.org/*' => Http::response(['ok' => true], 200)]);
 
-        $this->user = User::factory()->create();
+        // An edit to a position already open is the copier's most time-critical message,
+        // so it goes to the tenant holding the position rather than to the operator.
+        $this->user = User::factory()->create(['telegram_chat_id' => '316745398']);
         [$this->token] = BotToken::generate($this->user, 'Collector');
 
         TelegramChannel::create([

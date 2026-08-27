@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -20,12 +21,18 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class BotLog extends Model
 {
+    use BelongsToTenant;
+
     /**
      * The attributes that are mass assignable.
      *
      * @var array<int, string>
      */
     protected $fillable = [
+        // Whose log this is. Nullable, because rows written before bot_logs had an owner
+        // cannot all be attributed - see the migration. An unattributed row is visible to
+        // nobody, which is the safe direction.
+        'user_id',
         'level',
         'source',
         'message',

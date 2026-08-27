@@ -90,7 +90,7 @@ class StrategyImproverPageTest extends TestCase
     {
         Queue::fake();
         $other = User::factory()->create();
-        $theirs = Strategy::where('user_id', $other->id)->firstOrFail();
+        $theirs = Strategy::acrossTenants()->where('user_id', $other->id)->firstOrFail();
 
         Livewire::test(StrategyImprover::class)
             ->set('strategyId', $theirs->id)

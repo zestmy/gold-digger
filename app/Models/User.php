@@ -35,6 +35,8 @@ class User extends Authenticatable implements FilamentUser
         'name',
         'email',
         'timezone',
+        'telegram_chat_id',
+        'alerts_enabled',
         'password',
     ];
 
@@ -58,6 +60,7 @@ class User extends Authenticatable implements FilamentUser
         return [
             'email_verified_at' => 'datetime',
             'is_admin' => 'boolean',
+            'alerts_enabled' => 'boolean',
             'password' => 'hashed',
         ];
     }

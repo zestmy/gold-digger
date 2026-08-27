@@ -160,7 +160,7 @@ class SignalsAndTradesPageTest extends TestCase
     public function test_another_users_position_cannot_be_closed(): void
     {
         $other = User::factory()->create();
-        $otherStrategy = Strategy::where('user_id', $other->id)->firstOrFail();
+        $otherStrategy = Strategy::acrossTenants()->where('user_id', $other->id)->firstOrFail();
 
         $trade = $this->openTrade([
             'user_id' => $other->id,
@@ -361,7 +361,7 @@ class SignalsAndTradesPageTest extends TestCase
     public function test_the_signals_page_only_shows_this_users_signals(): void
     {
         $other = User::factory()->create();
-        $otherStrategy = Strategy::where('user_id', $other->id)->firstOrFail();
+        $otherStrategy = Strategy::acrossTenants()->where('user_id', $other->id)->firstOrFail();
 
         Signal::create([
             'strategy_id' => $otherStrategy->id,

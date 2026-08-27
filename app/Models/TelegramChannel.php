@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToTenant;
 use App\Services\Strategy\SignalQuality;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -20,6 +21,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class TelegramChannel extends Model
 {
+    use BelongsToTenant;
+
     /** Read by the Telegram Bot API, in chats the bot itself was added to. */
     public const SOURCE_BOT = 'bot_api';
 

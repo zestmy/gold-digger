@@ -101,6 +101,9 @@ class ExecuteTelegramSignals extends Command
                 'direction' => $signal->direction,
                 'channel' => $signal->channel?->label(),
             ],
+            // Whose position this is. Without it the message lands in the operator's
+            // channel and the person whose account just took a trade hears nothing.
+            $signal->user_id,
         );
     }
 }

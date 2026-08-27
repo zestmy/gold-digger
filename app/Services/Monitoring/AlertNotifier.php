@@ -4,6 +4,8 @@ namespace App\Services\Monitoring;
 
 use App\Models\Alert;
 use App\Models\BotLog;
+use App\Models\User;
+use App\Notifications\TradingAlert;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -30,9 +32,16 @@ use Throwable;
  */
 final class AlertNotifier
 {
+    /**
+     * Is there any channel at all through which an alert could leave this server?
+     *
+     * The token is platform-wide; the destination is not. So this answers "is Telegram
+     * usable", and `destinationFor()` answers "usable by whom" - which is the distinction
+     * that was missing when every tenant's incidents arrived in one operator's chat.
+     */
     public function configured(): bool
     {
-        return filled(config('alerts.telegram.token')) && filled(config('alerts.telegram.chat_id'));
+        return filled(config('alerts.telegram.token'));
     }
 
     /**
@@ -42,15 +51,13 @@ final class AlertNotifier
     {
         $this->record($alert, resolution: false);
 
-        if (! $this->configured()) {
-            return false;
-        }
-
         $icon = $alert->level === 'critical' ? '🔴' : '🟠';
 
-        $sent = $this->deliver(
-            $icon.' *'.$this->escape($alert->title).'*'."\n\n"
-            .$this->escape($alert->body)
+        $sent = $this->dispatch(
+            $alert->user,
+            $icon.' *'.$this->escape($alert->title).'*'."\n\n".$this->escape($alert->body),
+            $alert->title,
+            $alert->body,
         );
 
         if ($sent) {
@@ -73,7 +80,7 @@ final class AlertNotifier
     {
         $this->record($alert, resolution: true);
 
-        if ($alert->notify_count === 0 || ! $this->configured()) {
+        if ($alert->notify_count === 0) {
             // Still mark it, so a later sweep does not keep reconsidering it.
             $alert->update(['resolution_notified' => true]);
 
@@ -82,9 +89,11 @@ final class AlertNotifier
 
         $lasted = $alert->first_seen_at?->diffForHumans($alert->resolved_at ?? now(), syntax: Carbon::DIFF_ABSOLUTE) ?? 'a while';
 
-        $sent = $this->deliver(
-            '🟢 *'.$this->escape('Resolved: '.$alert->title).'*'."\n\n"
-            .$this->escape("Cleared after {$lasted}.")
+        $sent = $this->dispatch(
+            $alert->user,
+            '🟢 *'.$this->escape('Resolved: '.$alert->title).'*'."\n\n".$this->escape("Cleared after {$lasted}."),
+            'Resolved: '.$alert->title,
+            "Cleared after {$lasted}.",
         );
 
         if ($sent) {
@@ -108,32 +117,99 @@ final class AlertNotifier
      *
      * @param  array<string, mixed>  $context
      */
-    public function announce(string $title, string $body, string $icon = 'ℹ️', array $context = []): bool
+    public function announce(string $title, string $body, string $icon = 'ℹ️', array $context = [], int|User|null $owner = null): bool
     {
+        $user = $owner instanceof User ? $owner : ($owner === null ? null : User::find($owner));
+
         // Logged first and unconditionally: the record is the point, and it has to survive
         // Telegram being unreachable exactly like an incident does.
         BotLog::create([
+            'user_id' => $user?->id,
             'level' => 'info',
             'source' => 'copier',
             'message' => $title,
             'context' => $context,
         ]);
 
-        if (! $this->configured()) {
+        return $this->dispatch(
+            $user,
+            $icon.' *'.$this->escape($title).'*'."\n\n".$this->escape($body),
+            $title,
+            $body,
+        );
+    }
+
+    /**
+     * Get a message to whoever it concerns, by whatever route reaches them.
+     *
+     * Telegram when the tenant has connected it, because it is immediate and it is what
+     * somebody watching a live account actually reads. Email when they have not, because
+     * a customer who signed up an hour ago still needs to be told their bot stopped, and
+     * silence is the failure this whole subsystem exists to prevent.
+     *
+     * ## Email is the fallback for "no channel", not for "channel failed"
+     *
+     * A configured chat that refuses the message is a delivery failure, and delivery
+     * failures already have an answer here: `notified_at` stays null and the next sweep
+     * tries again. Emailing instead would convert a transient Telegram outage into a
+     * permanent switch to a worse channel, and would mark an incident notified on the
+     * strength of a route the tenant did not ask for. The incident is on `/logs` either
+     * way, which is what makes waiting for the retry safe.
+     *
+     * A null user means the incident belongs to the platform rather than to a customer,
+     * and only then does the operator's own configured chat come into it.
+     */
+    private function dispatch(?User $user, string $markdown, string $subject, string $body): bool
+    {
+        if ($user !== null && ! $user->alerts_enabled) {
             return false;
         }
 
-        return $this->deliver(
-            $icon.' *'.$this->escape($title).'*'.'
+        $chat = $this->destinationFor($user);
 
-'.$this->escape($body)
-        );
+        if ($chat !== null) {
+            return $this->configured() && $this->deliver($chat, $markdown);
+        }
+
+        // Only a real tenant has an inbox. A platform incident with nowhere to go is
+        // reported as undelivered rather than mailed into a void.
+        if ($user === null) {
+            return false;
+        }
+
+        try {
+            $user->notify(new TradingAlert($subject, $body));
+
+            return true;
+        } catch (Throwable $e) {
+            Log::warning('Alert email failed.', ['user' => $user->id, 'exception' => $e->getMessage()]);
+
+            return false;
+        }
+    }
+
+    /**
+     * The Telegram chat this message belongs in, or null if there isn't one.
+     *
+     * `TELEGRAM_CHAT_ID` is the platform's own address, and it is deliberately never used
+     * for a tenant's incident. Falling back to it would put one customer's trading in
+     * front of whoever reads the operator's channel - which is the bug this closes.
+     */
+    private function destinationFor(?User $user): ?string
+    {
+        if ($user === null) {
+            $platform = (string) (config('alerts.telegram.chat_id') ?? '');
+
+            return $platform === '' ? null : $platform;
+        }
+
+        return filled($user->telegram_chat_id) ? (string) $user->telegram_chat_id : null;
     }
 
     /**
      * POST to Telegram. Returns whether it was accepted.
      */
-    private function deliver(string $markdown): bool
+    private function deliver(string $chatId, string $markdown): bool
     {
         $token = (string) config('alerts.telegram.token');
 
@@ -141,7 +217,7 @@ final class AlertNotifier
             $response = Http::timeout((int) config('alerts.timeout', 8))
                 ->asJson()
                 ->post("https://api.telegram.org/bot{$token}/sendMessage", [
-                    'chat_id' => (string) config('alerts.telegram.chat_id'),
+                    'chat_id' => $chatId,
                     'text' => $markdown,
                     'parse_mode' => 'MarkdownV2',
                     'disable_web_page_preview' => true,
@@ -170,6 +246,9 @@ final class AlertNotifier
     private function record(Alert $alert, bool $resolution): void
     {
         BotLog::create([
+            // The incident already knows whose it is; the log row has to say so too, or
+            // /logs shows one tenant the diagnosis of another tenant's outage.
+            'user_id' => $alert->user_id,
             'level' => $resolution ? 'info' : ($alert->level === 'critical' ? 'critical' : 'warning'),
             'source' => 'monitor',
             'message' => ($resolution ? 'Resolved: ' : '').$alert->title,

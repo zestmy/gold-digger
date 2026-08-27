@@ -9,6 +9,28 @@ use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
 
+/**
+ * Bot Logs
+ *
+ * Everything the executor, the monitor and the copier had to say, for this account.
+ *
+ * ## "For this account" is new, and it is the whole point of this file
+ *
+ * `bot_logs` had no owner column, so none of the queries below had anywhere to filter.
+ * This page therefore showed every tenant every other tenant's executor output, deleted
+ * any row whose id was posted to it without checking whose it was, and offered a button
+ * that truncated the table for the entire platform.
+ *
+ * The filter is no longer written here. `BotLog` carries `BelongsToTenant`, so the scope
+ * is applied by the model to reads, deletes and counts alike - including `find()`, which
+ * is what closes the delete-by-id hole rather than an ownership check bolted onto the
+ * action. Written out, that means: a row belonging to somebody else does not fail to
+ * delete, it fails to be found, which is the same answer this page would give for an id
+ * that never existed.
+ *
+ * Rows the backfill could not attribute have a null owner and match nobody. They are
+ * reachable only from the admin panel, which is the correct place for them.
+ */
 #[Layout('layouts.app')]
 #[Title('Bot Logs - FXSignalPro')]
 class BotLogs extends Component

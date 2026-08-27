@@ -6,6 +6,7 @@ use App\Models\TelegramSignal;
 use App\Services\Monitoring\AlertNotifier;
 use App\Services\Telegram\FollowUpExecutor;
 use App\Services\Telegram\FollowUpInterpreter;
+use App\Support\Tenancy\Tenant;
 use Illuminate\Console\Command;
 
 /**
@@ -44,7 +45,9 @@ class ManageTelegramFollowUps extends Command
         $acted = 0;
 
         foreach ($pending as $followUp) {
-            $reading = $interpreter->interpret($followUp);
+            // Interpretation is a model call, so it runs as the tenant whose position the
+            // instruction concerns - putting it on their allowance rather than on nobody's.
+            $reading = Tenant::for($followUp->user_id, fn () => $interpreter->interpret($followUp));
 
             $followUp->update([
                 'follow_up_action' => $reading['action'],
@@ -109,6 +112,8 @@ class ManageTelegramFollowUps extends Command
                 'action' => $reading['action'],
                 'parent_signal_id' => $followUp->parent_signal_id,
             ],
+            // Whose position was just moved - see the note in ExecuteTelegramSignals.
+            $followUp->user_id,
         );
     }
 }

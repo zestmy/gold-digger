@@ -32,8 +32,12 @@ are picked up by [`docs/RECONCILIATION.md`](docs/RECONCILIATION.md).
 > stale rather than trading through one unseen.
 
 > **Wondering what the AI is allowed to do?** [`docs/AI_INTEGRATION.md`](docs/AI_INTEGRATION.md)
-> — nine call sites behind one key, bounded by a fund cap, and a single rule: the model
-> never produces a number that becomes a price.
+> — nine call sites behind one key, bounded by a fund cap and a daily request allowance,
+> and a single rule: the model never produces a number that becomes a price.
+
+> **More than one person using this?** [`docs/TENANCY.md`](docs/TENANCY.md) — isolation is
+> a property of the model now rather than 93 remembered `where` clauses, because the one
+> time it was forgotten every tenant could read, and delete, every other tenant's logs.
 
 > **Running it unattended?** [`docs/MONITORING.md`](docs/MONITORING.md) covers the health checks
 > and Telegram alerting. A dashboard only helps somebody who is looking at it.

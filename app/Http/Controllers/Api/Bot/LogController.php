@@ -57,6 +57,9 @@ class LogController extends Controller
 
         foreach ($entries as $entry) {
             BotLog::create([
+                // The token names the account, and the account names the tenant. Without
+                // this the row belongs to nobody and appears on everybody's /logs.
+                'user_id' => $token->user_id,
                 'level' => $entry['level'],
                 'source' => $entry['source'] ?? 'mql5_ea',
                 'message' => $entry['message'],

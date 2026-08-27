@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\TelegramSignal;
 use App\Services\Telegram\SignalReviewer;
+use App\Support\Tenancy\Tenant;
 use Illuminate\Console\Command;
 
 /**
@@ -35,7 +36,11 @@ class ReviewTelegramSignals extends Command
         $approved = 0;
 
         foreach ($pending as $signal) {
-            $verdict = $reviewer->review($signal);
+            // The reviewer is the hungriest model call in the application - one per
+            // captured signal, every minute - so attributing it matters more here than
+            // anywhere else. Running as the signal's owner is what puts the call on their
+            // allowance instead of on nobody's.
+            $verdict = Tenant::for($signal->user_id, fn () => $reviewer->review($signal));
 
             $signal->update([
                 'review_status' => $verdict['status'],

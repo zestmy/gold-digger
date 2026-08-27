@@ -99,6 +99,7 @@ class CommandController extends Controller
             $command->markFailed($error, $result);
 
             BotLog::create([
+                'user_id' => $command->user_id,
                 'level' => 'error',
                 'source' => 'mql5_ea',
                 'message' => "Command {$command->id} ({$command->type}) failed: {$error}",

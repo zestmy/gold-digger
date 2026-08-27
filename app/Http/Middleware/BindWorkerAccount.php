@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\TelegramAccount;
+use App\Support\Tenancy\Tenant;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -37,6 +38,21 @@ class BindWorkerAccount
         $request->attributes->set('telegram_account', $account);
         $request->attributes->set('bot_user', $account->user);
 
+        // The ingest controller is shared with the self-hosted collector, which arrives
+        // carrying a bot token that names its tenant. This is the equivalent statement for
+        // the hosted path, so one implementation can store messages for either without
+        // branching on how the request got here.
+        Tenant::actAs($account->user_id);
+
         return $next($request);
+    }
+
+    /**
+     * Put the tenant back down once the response has gone - see AuthenticateBot::terminate
+     * for why a static outliving its request is the same bug in a different costume.
+     */
+    public function terminate(Request $request, Response $response): void
+    {
+        Tenant::forget();
     }
 }

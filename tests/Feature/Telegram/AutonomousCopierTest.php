@@ -49,7 +49,10 @@ class AutonomousCopierTest extends TestCase
             'alerts.telegram.chat_id' => '316745398',
         ]);
 
-        $this->user = User::factory()->create();
+        // The chat now belongs to the tenant rather than to the deployment - see
+        // AlertNotifier::destinationFor. The configured chat above is the platform's own
+        // address and is deliberately never used for a customer's position.
+        $this->user = User::factory()->create(['telegram_chat_id' => '316745398']);
         $this->account = BrokerAccount::create([
             'user_id' => $this->user->id, 'label' => 'Demo', 'broker_name' => 'Elev8',
             'account_number' => '230070844', 'server' => 'Elev8-Demo2',

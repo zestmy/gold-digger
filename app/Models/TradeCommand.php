@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -21,6 +22,8 @@ use Illuminate\Support\Str;
  */
 class TradeCommand extends Model
 {
+    use BelongsToTenant;
+
     /** Bumped whenever the column layout changes, so an old EA can refuse politely. */
     /**
      * Bumped to GDCMD2 when `entry_price` was appended for pending orders.

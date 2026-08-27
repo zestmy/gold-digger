@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Str;
@@ -17,6 +18,8 @@ use Illuminate\Support\Str;
  */
 class BotToken extends Model
 {
+    use BelongsToTenant;
+
     /** Prefix makes the credential recognisable in logs and secret scanners. */
     public const PREFIX = 'gd_';
 
@@ -90,7 +93,11 @@ class BotToken extends Model
      */
     public static function resolve(string $plaintext): ?self
     {
-        $token = self::where('token_hash', self::hash($plaintext))->first();
+        // Across tenants deliberately. Resolving a credential is what establishes who the
+        // tenant is, so it cannot itself be filtered by one - and a token presented while
+        // some other identity happens to be current must still resolve to its real owner
+        // rather than silently to nothing.
+        $token = self::acrossTenants()->where('token_hash', self::hash($plaintext))->first();
 
         if ($token === null || ! $token->isUsable()) {
             return null;
