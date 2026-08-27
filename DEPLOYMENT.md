@@ -151,6 +151,43 @@ mysqldump -u gold_digger -p gold_digger > backup_$(date +%Y%m%d).sql
 mysql -u gold_digger -p gold_digger < backup_20240101.sql
 ```
 
+### Retention
+
+Nothing in this application deleted anything until `data:prune` existed, and one table
+dominates the consequences: measured on a working database, **`candles` was 91% of the
+total** — and it is stored per broker account rather than shared, so it multiplies by
+tenant. One symbol on M5 is roughly 75,000 bars a year at about 240 bytes each.
+
+The command runs weekly from the scheduler. Run it by hand once before trusting that:
+
+```bash
+php artisan data:prune --dry
+```
+
+`--dry` reports every count and deletes nothing. Worth using first, because a prune that
+turns out to have been wrong is not undone by editing the setting afterwards.
+
+**Bars are counted, not dated.** A 90-day cutoff would leave 25,000 M5 bars and 1,500 H1
+bars — the same policy barely touching one series and starving another. Retention is
+therefore the newest N bars *per series*, where a series is one account's one symbol on one
+timeframe. The default of 30,000 sits above `StrategyImprovement::DEFAULT_BARS` (20,000),
+which is the deepest consumer; trading itself needs 300.
+
+**What it will not touch, at any setting:** `trades`, `trade_partials`,
+`trade_screenshots`, `daily_summaries` — the financial record — and `signals`,
+`telegram_signals`, `chart_analyses` — the evidence for whether any of this works. That list
+is not configurable, because a retention setting that could be turned up until it ate the
+trade history is one somebody will eventually turn up.
+
+Tunable in `config/trading.php` or by environment: `RETAIN_CANDLE_BARS`,
+`RETAIN_BOT_LOG_DAYS`, `RETAIN_AI_USAGE_DAYS`, `RETAIN_RESOLVED_ALERT_DAYS`,
+`RETAIN_ECONOMIC_EVENT_DAYS`. Set `RETAIN_CANDLE_BARS=0` to keep everything and accept
+unbounded growth.
+
+> InnoDB does not return freed pages to the filesystem, so `df` will not move after a
+> prune — the table stays the same size on disk and reuses the space. That is normal, and
+> the reason the command reports rows rather than megabytes saved.
+
 ### Clear Caches
 ```bash
 cd /var/www/gold-digger

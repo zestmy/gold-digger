@@ -96,6 +96,17 @@ Schedule::command('telegram:follow-up')->everyMinute()->withoutOverlapping();
 // Nothing here can widen a stop or add to a position; see PositionManager.
 Schedule::command('copier:protect')->everyMinute()->withoutOverlapping();
 
+// Retention. Weekly and at a quiet hour, because this is the only scheduled command that
+// deletes anything and there is no reason for it to compete with a live session.
+//
+// Sunday rather than Saturday: the week's bars have stopped arriving, and a prune that runs
+// while the terminal is pushing is a prune racing the writes it is measuring.
+//
+// Nothing here touches the trade record or the signal history - see PruneOldData for the
+// list and why it is not configurable. `data:prune --dry` reports without deleting, and is
+// worth running once by hand before trusting this line.
+Schedule::command('data:prune')->weeklyOn(0, '04:00')->withoutOverlapping();
+
 // Commitments of Traders. Saturdays, because positions are counted on a Tuesday and
 // published the following Friday afternoon - running it more often re-fetches the same
 // rows all week.

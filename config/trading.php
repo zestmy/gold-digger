@@ -89,4 +89,73 @@ return [
     */
     'min_reward_ratio' => (float) env('MIN_REWARD_RATIO', 0),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Retention
+    |--------------------------------------------------------------------------
+    |
+    | What `data:prune` deletes, and what it will not touch at any setting.
+    |
+    | Nothing here is pruned by default in the sense of "silently": the command runs on a
+    | schedule, but every limit below is generous, and `--dry` reports exactly what would
+    | go before anything does.
+    |
+    | ## Never pruned, at any setting
+    |
+    | `trades`, `trade_partials`, `trade_screenshots` and `daily_summaries` are the
+    | financial record. `signals`, `telegram_signals` and `chart_analyses` are the evidence
+    | for "was any of this any good" - which is the entire reason those three tables store
+    | refusals as carefully as they store decisions. Deleting them to save disk would undo
+    | the argument for having them.
+    |
+    */
+
+    'retention' => [
+
+        /*
+        | Bars kept per series, where a series is one account's one symbol on one
+        | timeframe.
+        |
+        | Counted in bars rather than in days, and that is the whole design. A 90-day
+        | cutoff leaves M5 with 25,000 bars and H1 with 1,500 - the same policy starving
+        | one timeframe while barely touching another. Bars are what the consumers actually
+        | ask for, so bars are what is kept.
+        |
+        | The floor is set by the deepest consumer: `StrategyImprovement::DEFAULT_BARS` is
+        | 20,000, and the walk-forward it feeds is the only evidence this project has about
+        | whether any of its ideas make money. Trading itself needs 300. This default leaves
+        | half again on top of the improver's window, which is about eight months of M5 or
+        | three years of H1.
+        |
+        | Raise it to backtest over more history; it costs roughly 240 bytes a bar per
+        | series. Set it to 0 to keep everything and accept unbounded growth - which is
+        | where this table was before, at 91% of the database on a box with 2GB of RAM.
+        */
+        'candle_bars_per_series' => (int) env('RETAIN_CANDLE_BARS', 30000),
+
+        /*
+        | Executor and monitor output. High volume, no analytical value once read, and the
+        | incidents themselves live in `alerts` regardless.
+        */
+        'bot_log_days' => (int) env('RETAIN_BOT_LOG_DAYS', 60),
+
+        /*
+        | Model spend. Long enough to reconcile an annual bill and then some, because this
+        | is the table an invoice dispute would be settled from.
+        */
+        'ai_usage_days' => (int) env('RETAIN_AI_USAGE_DAYS', 400),
+
+        /*
+        | Only incidents that resolved. A firing alert is never pruned however old it is -
+        | age is the most interesting thing about an outage nobody has fixed.
+        */
+        'resolved_alert_days' => (int) env('RETAIN_RESOLVED_ALERT_DAYS', 90),
+
+        /*
+        | Past economic releases. The blackout filter only looks forward and a little way
+        | back, so an event from last year is inert weight.
+        */
+        'economic_event_days' => (int) env('RETAIN_ECONOMIC_EVENT_DAYS', 90),
+    ],
+
 ];
