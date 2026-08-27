@@ -10,6 +10,7 @@ use App\Models\Strategy;
 use App\Services\Backtest\MarketAssumptions;
 use App\Services\Backtest\WalkForward;
 use App\Services\Backtest\WalkForwardReport;
+use App\Services\MarketData\MarketData;
 
 /**
  * Strategy Improvement
@@ -180,6 +181,22 @@ final class StrategyImprovement
      */
     private function candles(?int $accountId, string $symbol, string $timeframe, int $limit, array $options): array
     {
+        // A date range is a question about specific bars, so it is answered from what is
+        // stored rather than from a vendor - "what happened in March" and "twenty thousand
+        // bars from somewhere" are different requests.
+        $ranged = ($options['from'] ?? null) !== null || ($options['to'] ?? null) !== null;
+
+        if (! $ranged) {
+            // This is the only consumer in the application that asks for 20,000 bars; the
+            // next deepest wants 300. Reading them on demand rather than keeping them is
+            // what lets the stored series shrink to what trading needs.
+            $deep = app(MarketData::class)->forBacktest($symbol, $timeframe, $limit, $accountId);
+
+            if ($deep['bars'] !== []) {
+                return $deep['bars'];
+            }
+        }
+
         // Newest-first with a limit, then reversed: taking the oldest N of a long series
         // would measure last autumn and ignore everything since.
         return Candle::query()

@@ -121,17 +121,24 @@ return [
         | one timeframe while barely touching another. Bars are what the consumers actually
         | ask for, so bars are what is kept.
         |
-        | The floor is set by the deepest consumer: `StrategyImprovement::DEFAULT_BARS` is
-        | 20,000, and the walk-forward it feeds is the only evidence this project has about
-        | whether any of its ideas make money. Trading itself needs 300. This default leaves
-        | half again on top of the improver's window, which is about eight months of M5 or
-        | three years of H1.
+        | The floor is set by what actually reads stored bars now, which is a much smaller
+        | number than it used to be. The evaluator wants 300, the dashboard chart 300, the
+        | timeframe ladder 260 a rung, the chart analyst 120. This default is ten times the
+        | deepest of those.
         |
-        | Raise it to backtest over more history; it costs roughly 240 bytes a bar per
-        | series. Set it to 0 to keep everything and accept unbounded growth - which is
-        | where this table was before, at 91% of the database on a box with 2GB of RAM.
+        | It used to be 30,000, because the walk-forward asks for 20,000 and that history
+        | had nowhere else to come from. It does now: `MarketData::forBacktest()` fetches
+        | deep history from a vendor on demand and never stores it - see
+        | `config/marketdata.php`. One consumer was responsible for two orders of magnitude
+        | more stored history than everything else combined, and it is the one that runs on
+        | a person's deliberate act rather than on every bar.
+        |
+        | **If no vendor is configured**, a long walk-forward is limited to what is stored,
+        | so raise this instead - the trade-off is roughly 240 bytes a bar per series. Set
+        | it to 0 to keep everything and accept unbounded growth, which is where this table
+        | was when it reached 91% of the database on a box with 2GB of RAM.
         */
-        'candle_bars_per_series' => (int) env('RETAIN_CANDLE_BARS', 30000),
+        'candle_bars_per_series' => (int) env('RETAIN_CANDLE_BARS', 3000),
 
         /*
         | Executor and monitor output. High volume, no analytical value once read, and the

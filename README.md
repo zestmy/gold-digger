@@ -35,6 +35,11 @@ are picked up by [`docs/RECONCILIATION.md`](docs/RECONCILIATION.md).
 > — nine call sites behind one key, bounded by a fund cap and a daily request allowance,
 > and a single rule: the model never produces a number that becomes a price.
 
+> **Where do the bars come from?** [`docs/MARKET_DATA.md`](docs/MARKET_DATA.md) - deep
+> history for a replay is fetched on demand and never stored, because one consumer wanted
+> 20,000 bars where the next deepest wanted 300. What decides a price still reads the
+> terminal's own series, and there is no setting that changes that.
+
 > **More than one person using this?** [`docs/TENANCY.md`](docs/TENANCY.md) — isolation is
 > a property of the model now rather than 93 remembered `where` clauses, because the one
 > time it was forgotten every tenant could read, and delete, every other tenant's logs.

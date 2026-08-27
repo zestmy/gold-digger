@@ -11,7 +11,7 @@ use App\Models\Signal;
 use App\Models\Strategy;
 use App\Models\Trade;
 use App\Models\User;
-use App\Services\Ai\StrategyImprovement;
+use App\Services\Strategy\StrategyEvaluator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Tests\TestCase;
@@ -190,15 +190,19 @@ class PruneOldDataTest extends TestCase
     }
 
     /**
-     * The floor the default is set from: the strategy improver reads 20,000 bars and the
-     * walk-forward it feeds is the only evidence this project has about whether any of its
-     * ideas make money.
+     * The floor the default is set from.
+     *
+     * It used to be the improver's 20,000, because deep history had nowhere else to come
+     * from. `MarketData::forBacktest()` fetches that on demand now and stores none of it,
+     * so what has to survive retention is only what still reads stored bars - and the
+     * deepest of those is the evaluator's 300, shared with the dashboard chart.
      */
-    public function test_the_default_keeps_more_than_the_deepest_consumer_asks_for(): void
+    public function test_the_default_keeps_well_clear_of_what_still_reads_stored_bars(): void
     {
-        $this->assertGreaterThan(
-            StrategyImprovement::DEFAULT_BARS,
+        $this->assertGreaterThanOrEqual(
+            StrategyEvaluator::LOOKBACK_BARS * 5,
             (int) config('trading.retention.candle_bars_per_series'),
+            'Retention has to leave the evaluator and the chart surfaces comfortable room.',
         );
     }
 
