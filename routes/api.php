@@ -27,7 +27,7 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::prefix('v1/bot')->middleware('bot.auth')->group(function () {
+Route::prefix('v1/bot')->middleware(['bot.auth', 'throttle:executor'])->group(function () {
     // Claim work. Accept: text/plain returns the EA's tab-separated wire format.
     Route::get('commands', [CommandController::class, 'index'])->name('api.bot.commands.index');
     Route::post('commands/{command}/result', [CommandController::class, 'result'])->name('api.bot.commands.result');
@@ -64,7 +64,7 @@ Route::prefix('v1/bot')->middleware('bot.auth')->group(function () {
 |
 */
 
-Route::prefix('v1/telegram')->middleware('bot.auth')->group(function () {
+Route::prefix('v1/telegram')->middleware(['bot.auth', 'throttle:collector'])->group(function () {
     // What to forward. The account sees far more than the copier should be shown.
     Route::get('channels', [CollectorController::class, 'index'])->name('api.telegram.channels.index');
 
@@ -100,7 +100,7 @@ Route::prefix('v1/telegram')->middleware('bot.auth')->group(function () {
 |
 */
 
-Route::prefix('v1/telegram/worker')->middleware('worker.auth')->group(function () {
+Route::prefix('v1/telegram/worker')->middleware(['worker.auth', 'throttle:worker'])->group(function () {
     // Every hosted account worth acting on, with the sessions needed to connect.
     Route::get('accounts', [WorkerController::class, 'index'])->name('api.telegram.worker.accounts');
 
@@ -118,7 +118,7 @@ Route::prefix('v1/telegram/worker')->middleware('worker.auth')->group(function (
 // collector posts to: idempotency on chat plus message id, the channel switch, and the
 // parse pipeline are all things there must only ever be one of.
 Route::prefix('v1/telegram/worker/accounts/{account}')
-    ->middleware(['worker.auth', 'worker.account'])
+    ->middleware(['worker.auth', 'worker.account', 'throttle:worker'])
     ->group(function () {
         Route::get('channels', [CollectorController::class, 'index'])->name('api.telegram.worker.channels');
         Route::post('channels', [CollectorController::class, 'announce'])->name('api.telegram.worker.announce');
