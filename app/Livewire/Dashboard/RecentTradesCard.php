@@ -29,8 +29,9 @@ class RecentTradesCard extends Component
     {
         $userId = Auth::id();
 
-        if (!$userId) {
+        if (! $userId) {
             $this->trades = collect();
+
             return;
         }
 

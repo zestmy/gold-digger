@@ -12,6 +12,7 @@ use App\Models\Candle;
 use App\Models\EconomicEvent;
 use App\Models\Strategy;
 use App\Models\User;
+use App\Services\Strategy\StrategyEvaluator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -111,7 +112,7 @@ class MarketContextCardsTest extends TestCase
 
         $context = Livewire::test(TrendCard::class)->get('context');
 
-        $evaluator = app(\App\Services\Strategy\StrategyEvaluator::class);
+        $evaluator = app(StrategyEvaluator::class);
         $trendBars = Candle::recentSeries($this->account->id, 'XAUUSD', 'H1', 300);
 
         $this->assertSame(

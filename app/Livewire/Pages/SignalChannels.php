@@ -215,8 +215,7 @@ class SignalChannels extends Component
 
         $this->privateUsername = '';
 
-        $this->dispatch('notify', type: 'success', message:
-            "Looking up @{$username}. It appears once the collector confirms the account exists.");
+        $this->dispatch('notify', type: 'success', message: "Looking up @{$username}. It appears once the collector confirms the account exists.");
     }
 
     public function render(ChannelPerformance $performance)

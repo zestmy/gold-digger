@@ -80,7 +80,6 @@ class TelegramAccounts extends Component
             'is_hosted' => $hosted,
         ]);
 
-
         $this->issuedToken = $plaintext;
         $this->issuedFor = $account->id;
         $this->label = '';
@@ -156,8 +155,7 @@ class TelegramAccounts extends Component
         // code" for ever, because nothing is listening. Saying so is the difference
         // between a misconfigured deployment and one that looks broken to its customers.
         if ($account->is_hosted && ! self::hostedReady()) {
-            $this->dispatch('notify', type: 'error', message:
-                'Hosted sign-in is not configured on this deployment. Nothing would answer this request.');
+            $this->dispatch('notify', type: 'error', message: 'Hosted sign-in is not configured on this deployment. Nothing would answer this request.');
 
             return;
         }

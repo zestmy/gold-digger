@@ -5,6 +5,7 @@ namespace App\Services\Strategy;
 use App\Models\Candle;
 use App\Models\Strategy;
 use App\Services\Indicators\Indicators;
+use Illuminate\Support\Carbon;
 
 /**
  * Market Context
@@ -52,7 +53,7 @@ final class MarketContext
      *     atr: float|null,
      *     atr_pct: float|null,
      *     last_close: float|null,
-     *     last_bar_at: \Illuminate\Support\Carbon|null,
+     *     last_bar_at: Carbon|null,
      *     bars_entry: int,
      *     bars_trend: int,
      * }

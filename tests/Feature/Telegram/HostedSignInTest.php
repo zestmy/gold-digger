@@ -4,6 +4,7 @@ namespace Tests\Feature\Telegram;
 
 use App\Http\Controllers\Api\Telegram\LoginController;
 use App\Livewire\Pages\TelegramAccounts;
+use App\Models\BotToken;
 use App\Models\TelegramAccount;
 use App\Models\TelegramSignal;
 use App\Models\User;
@@ -132,7 +133,7 @@ class HostedSignInTest extends TestCase
 
     public function test_a_tenants_own_token_does_not_reach_the_worker_surface(): void
     {
-        [$plaintext] = \App\Models\BotToken::generate($this->user, 'Collector');
+        [$plaintext] = BotToken::generate($this->user, 'Collector');
 
         $this->getJson(route('api.telegram.worker.accounts'), [
             'Authorization' => "Bearer {$plaintext}",

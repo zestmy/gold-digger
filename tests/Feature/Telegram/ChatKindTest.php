@@ -3,7 +3,6 @@
 namespace Tests\Feature\Telegram;
 
 use App\Models\BotToken;
-use App\Models\TelegramAccount;
 use App\Models\TelegramChannel;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;

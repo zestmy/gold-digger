@@ -2,7 +2,6 @@
 
 namespace App\Livewire\Dashboard;
 
-use App\Models\DailySummary;
 use App\Models\Trade;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Component;
@@ -21,8 +20,11 @@ use Livewire\Component;
 class TodayStatsCard extends Component
 {
     public int $tradesCount = 0;
+
     public float $grossPnl = 0;
+
     public float $totalCosts = 0;
+
     public float $netPnl = 0;
 
     public function mount(): void
@@ -34,7 +36,7 @@ class TodayStatsCard extends Component
     {
         $userId = Auth::id();
 
-        if (!$userId) {
+        if (! $userId) {
             return;
         }
 
