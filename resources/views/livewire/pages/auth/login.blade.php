@@ -73,6 +73,27 @@ new #[Layout('layouts.guest')] class extends Component
             <x-input-error :messages="$errors->get('form.password')" class="mt-2" />
         </div>
 
+        {{-- Only once the password was right and this account asked for a second factor.
+             Shown rather than navigated to, so the password does not have to be retyped and
+             there is no half-authenticated state to hold anywhere. --}}
+        @if($form->awaitingCode)
+            <div>
+                <label for="code" class="block text-sm font-medium text-gray-300">{{ __('Authenticator code') }}</label>
+
+                <input wire:model="form.code" id="code" name="code" type="text" required autofocus
+                       inputmode="numeric" autocomplete="one-time-code"
+                       placeholder="000000"
+                       class="mt-1 block w-full rounded-md border-gray-600 bg-gray-800 font-mono tracking-widest text-white shadow-sm focus:border-yellow-500 focus:ring-yellow-500">
+
+                <x-input-error :messages="$errors->get('form.code')" class="mt-2" />
+
+                <p class="mt-2 text-xs text-gray-500">
+                    Six digits from your authenticator app. Lost the phone? A recovery code works here
+                    instead, and each one can be used once.
+                </p>
+            </div>
+        @endif
+
         <label for="remember" class="flex items-center gap-2">
             <input wire:model="form.remember" id="remember" name="remember" type="checkbox"
                    class="rounded border-gray-600 bg-gray-800 text-yellow-500 focus:ring-yellow-500 focus:ring-offset-gray-900">

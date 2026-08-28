@@ -115,6 +115,44 @@ Two things the trait will not do for you:
 
 ---
 
+## Account security
+
+A session on this dashboard can enable autonomous trading, raise the AI capital cap, disable
+the news filter and queue orders. It was protected by a password and nothing else - Breeze
+defaults, entirely reasonable for the blog they were written for.
+
+**Two-factor is TOTP, RFC 6238, implemented rather than installed.** It is `hash_hmac` over a
+counter, a dynamic truncation and a modulo; the RFC publishes test vectors, so the whole
+algorithm is forty lines that can be proved correct against numbers somebody else published.
+The tests assert those vectors rather than a recording of our own output.
+
+- **Enrolment is two steps.** A secret is issued, then a code from it has to work before
+  anything is enforced. A secret nobody has proved they hold would lock somebody out of an
+  account that can move money.
+- **A code is spent when used.** It stays valid for its whole thirty-second window, so
+  `two_factor_last_step` is recorded - otherwise an intercepted code can be replayed inside
+  its own window.
+- **Recovery codes are hashed, not encrypted.** They are single-use passwords and get what
+  passwords get: the server checks one, it never reads one back. So they are shown once, and
+  the page says so.
+- **The secret is encrypted at rest**, like broker account numbers. Losing `APP_KEY` means
+  every enrolled account re-enrols.
+- **Turning it off asks for the password**, because that is the first thing somebody holding
+  a stolen session would do.
+
+**`AuthenticateSession` is now on the web guard.** The Filament panel has had it since it was
+scaffolded; the dashboard had not - so changing a password, or signing other devices out, left
+the old sessions working and made both gestures theatre.
+
+**Sessions are listed and revocable** at Profile, read from the `sessions` table. Signing out
+elsewhere both rotates the guard token and deletes the rows, because a listed session that no
+longer works is still confusing to somebody who just tried to remove it.
+
+Not built: no QR rendering (the secret and `otpauth://` URI are shown for pasting - a QR needs
+an image encoder), and 2FA is opt-in per account rather than enforceable platform-wide.
+
+---
+
 ## What is still not covered
 
 Honest list, so nobody assumes more than is true:

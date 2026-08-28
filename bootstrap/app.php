@@ -7,6 +7,7 @@ use App\Services\Monitoring\ErrorReporter;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Session\Middleware\AuthenticateSession;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -18,6 +19,16 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Ties a browser session to the password it was created under. Without it, changing
+        // a password - or signing every other device out after a suspected compromise -
+        // leaves the old sessions working, which makes both gestures theatre.
+        //
+        // The Filament panel has had this since it was scaffolded; the dashboard that can
+        // enable autonomous trading and raise a capital cap had not.
+        $middleware->web(append: [
+            AuthenticateSession::class,
+        ]);
+
         // Bearer-token auth for the MQL5 EA and any future executor.
         $middleware->alias([
             'bot.auth' => AuthenticateBot::class,

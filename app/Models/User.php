@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\Hash;
 
 /**
  * User Model
@@ -48,6 +49,10 @@ class User extends Authenticatable implements FilamentUser
     protected $hidden = [
         'password',
         'remember_token',
+        // A careless toArray() in a Livewire payload is how this sort of column reaches a
+        // browser, and either of these is enough to sign in as somebody.
+        'two_factor_secret',
+        'two_factor_recovery_codes',
     ];
 
     /**
@@ -62,6 +67,11 @@ class User extends Authenticatable implements FilamentUser
             'is_admin' => 'boolean',
             'alerts_enabled' => 'boolean',
             'password' => 'hashed',
+            // The shared secret generates valid codes for ever, so it is protected the way
+            // broker account numbers and Telegram sessions are.
+            'two_factor_secret' => 'encrypted',
+            'two_factor_recovery_codes' => 'array',
+            'two_factor_confirmed_at' => 'datetime',
         ];
     }
 
@@ -153,5 +163,63 @@ class User extends Authenticatable implements FilamentUser
     public function hasChosenZone(): bool
     {
         return filled($this->timezone);
+    }
+
+    // =========================================================================
+    // TWO-FACTOR
+    // =========================================================================
+
+    /**
+     * Is a second factor actually in force?
+     *
+     * Confirmed, not merely issued. A secret nobody has proved they hold would lock the
+     * account out of itself, which is the opposite of what enabling this is for.
+     */
+    public function hasTwoFactor(): bool
+    {
+        return $this->two_factor_secret !== null && $this->two_factor_confirmed_at !== null;
+    }
+
+    /**
+     * Spend one recovery code, if it matches.
+     *
+     * Single use, and removed on use rather than marked - a code that is gone cannot be
+     * replayed, and there is nothing about a spent one worth keeping.
+     *
+     * Compared against hashes, so this walks the list rather than looking one up. Eight
+     * entries makes that a non-question.
+     */
+    public function useRecoveryCode(string $code): bool
+    {
+        $code = trim(strtolower($code));
+        $remaining = [];
+        $used = false;
+
+        foreach ((array) ($this->two_factor_recovery_codes ?? []) as $hash) {
+            if (! $used && Hash::check($code, $hash)) {
+                $used = true;
+
+                continue;
+            }
+
+            $remaining[] = $hash;
+        }
+
+        if ($used) {
+            $this->forceFill(['two_factor_recovery_codes' => $remaining])->save();
+        }
+
+        return $used;
+    }
+
+    /**
+     * How many ways back in are left.
+     *
+     * Worth surfacing: somebody down to their last code should be told to regenerate
+     * before they are down to none.
+     */
+    public function recoveryCodesRemaining(): int
+    {
+        return count((array) ($this->two_factor_recovery_codes ?? []));
     }
 }
