@@ -28,6 +28,16 @@ use Illuminate\Support\Facades\DB;
  */
 class FillController extends Controller
 {
+    /**
+     * What FXSReplayClosedDeals puts in `closure_note` to mark its own re-reports.
+     *
+     * Provenance rather than a reason, so it is deliberately not stored as one. Coupled
+     * to the EA by an exact string, which is why it is named here instead of being
+     * matched inline: this constant and the StringFormat call in FXSReplayClosedDeals
+     * have to be changed together, and a name is greppable where a literal is not.
+     */
+    private const REPLAY_NOTE = 'replayed from history on attach';
+
     public function store(Request $request): JsonResponse
     {
         /** @var BotToken $token */
@@ -246,9 +256,26 @@ class FillController extends Controller
                 // A stop-out is worth distinguishing from a target exit: the analytics
                 // page separates them, and "how often do we get stopped" is the first
                 // question asked of a scalping strategy.
-                $trade->status = ($data['reason'] ?? null) === 'sl' ? 'stopped_out' : 'fully_closed';
-                $trade->closure_reason = $data['closure_note'] ?? $data['reason'] ?? 'manual';
-                $trade->closed_at = now();
+                // How a position ended is decided once, by the first report that sees it
+                // closed. The same one-way rule as the partial row above, and for the same
+                // reason: a retry or the attach replay is news about an old event, and
+                // letting it restate when and why is how ticket 89795022 came to have
+                // closed at 18:18 - the reconnect - for `replayed from history on attach`,
+                // which is not a reason a position can close. It is the replay describing
+                // itself, in a column that is read as the reason on the trade page.
+                //
+                // Later reports still re-derive the money and the lots above, which are
+                // summed from the stored deals and so are safe to recompute.
+                if ($trade->closed_at === null) {
+                    $trade->status = ($data['reason'] ?? null) === 'sl' ? 'stopped_out' : 'fully_closed';
+
+                    $note = ($data['closure_note'] ?? null) === self::REPLAY_NOTE
+                        ? null
+                        : ($data['closure_note'] ?? null);
+
+                    $trade->closure_reason = $note ?? $data['reason'] ?? 'manual';
+                    $trade->closed_at = now();
+                }
             }
 
             $trade->save();

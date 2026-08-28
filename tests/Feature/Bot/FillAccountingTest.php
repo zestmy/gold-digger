@@ -181,6 +181,45 @@ class FillAccountingTest extends TestCase
     }
 
     /**
+     * The trade row carried the same loss as its partials, and more visibly: the reason a
+     * position closed is read straight off the trade page, and the replay wrote its own
+     * provenance note into it.
+     */
+    public function test_a_replay_does_not_restate_when_or_why_the_position_closed(): void
+    {
+        $this->fill(deal: 86016866, volume: 0.01, price: 4663.43, pips: 50.20, profit: 5.02, reason: 'tp1');
+        $this->fill(deal: 86022835, volume: 0.01, price: 4658.23, pips: -1.80, profit: -0.18, reason: 'sl', note: 'stop loss hit');
+
+        $closedAt = $this->trade->fresh()->closed_at;
+
+        $this->travel(8)->hours();
+        $this->replay(deal: 86022835, volume: 0.01, price: 4658.23, profit: -0.18, reason: 'sl');
+
+        $trade = $this->trade->fresh();
+
+        $this->assertSame('stop loss hit', $trade->closure_reason);
+        $this->assertSame('stopped_out', $trade->status);
+        $this->assertTrue($closedAt->equalTo($trade->closed_at));
+    }
+
+    /**
+     * And when the replay is the only report there has ever been - the close happened
+     * while the terminal was shut - the note still never lands in the reason. It describes
+     * how the row arrived, not how the position ended.
+     */
+    public function test_the_replay_note_is_never_stored_as_a_closure_reason(): void
+    {
+        $this->replay(deal: 86016866, volume: 0.01, price: 4663.43, profit: 5.02, reason: 'sl');
+        $this->replay(deal: 86022835, volume: 0.01, price: 4658.23, profit: -0.18, reason: 'sl');
+
+        $trade = $this->trade->fresh();
+
+        $this->assertSame('sl', $trade->closure_reason);
+        $this->assertSame('stopped_out', $trade->status);
+        $this->assertNotNull($trade->closed_at);
+    }
+
+    /**
      * What FXSReplayClosedDeals actually sends on attach: no pips, and a reason derived
      * from DEAL_REASON rather than from the command that asked for the close.
      */
@@ -207,6 +246,7 @@ class FillAccountingTest extends TestCase
         string $reason,
         float $commission = 0.0,
         float $swap = 0.0,
+        ?string $note = null,
     ): void {
         $this->withToken($this->token)->postJson('/api/v1/bot/fills', [
             'event' => 'closed',
@@ -219,6 +259,7 @@ class FillAccountingTest extends TestCase
             'commission' => $commission,
             'swap' => $swap,
             'reason' => $reason,
+            'closure_note' => $note,
         ])->assertSuccessful();
     }
 }
