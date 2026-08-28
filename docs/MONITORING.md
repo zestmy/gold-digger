@@ -116,6 +116,43 @@ express "unique among unresolved rows".
 
 ---
 
+## The application watching itself
+
+Everything above watches the *bot*. `ErrorReporter` watches this software, which until it
+existed nothing did: a 500 on a customer settings page was invisible until they emailed, and
+the only way to find one was reading `laravel.log` over SSH.
+
+Every unhandled exception becomes a `critical` row on `/logs` with source `app`, carrying the
+exception class, the file and line, and the first frame inside `app/`. Laravel's own logging is
+untouched - this adds an incident, it does not replace the stack trace in the file.
+
+**It reports faults, not refusals.** A 404, a failed login, a rejected form, a throttled
+client and any 4xx are the application working correctly. An error reporter that reports
+everything buries the faults among them, which is how people learn to ignore one.
+
+**Repetition is counted, not repeated.** A page throwing on every request would otherwise
+write a row and send a message per request, taking the channel down alongside the page. The
+first occurrence in each fifteen-minute window reports; the rest increment a counter that
+travels with the next report as "N further occurrences since".
+
+**Faults are deduplicated on class, file and line - never the message.** Messages carry ids,
+symbols and balances, so signing on one would give the same broken line a new signature per
+request and deduplicate nothing.
+
+**The operator hears, the tenant does not.** An exception is a fault in this software; the
+customer whose request hit it cannot act on a stack trace. The notification carries no owner,
+which routes it to the platform's own address rather than a customer channel. The log row *is*
+stamped with the tenant when one is current, so the fault is findable beside their activity.
+
+Reporting never throws. An exception raised while reporting an exception is how a small fault
+becomes an outage, and there is nowhere useful for it to go.
+
+> This is the floor, not a replacement for a real reporter. Stack traces, aggregation,
+> release tracking and search are genuine reasons to add one - but they need an account and
+> a key, and this needed neither to stop faults being invisible.
+
+---
+
 ## Not built
 
 - **Any channel but Telegram.** Email and webhooks would be small additions; the notifier is one

@@ -3,6 +3,7 @@
 use App\Http\Middleware\AuthenticateBot;
 use App\Http\Middleware\AuthenticateWorker;
 use App\Http\Middleware\BindWorkerAccount;
+use App\Services\Monitoring\ErrorReporter;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -25,5 +26,14 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        // This application watched the trading bot closely and itself not at all: a 500 on
+        // a customer's page was invisible until they emailed, and the only way to find one
+        // was reading laravel.log over SSH.
         //
+        // `report` rather than `reportable`, so Laravel's own logging still happens - this
+        // adds an incident on /logs and a message to the operator, it does not replace the
+        // stack trace in the file.
+        $exceptions->report(function (Throwable $e): void {
+            app(ErrorReporter::class)->report($e);
+        });
     })->create();

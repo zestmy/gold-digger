@@ -140,6 +140,28 @@ final class AlertNotifier
     }
 
     /**
+     * Tell the operator something, without recording it again.
+     *
+     * `announce()` logs and then delivers, because for a copied order the record is the
+     * point. `ErrorReporter` has already written its own row - with a critical level, an
+     * exception class and a signature that `announce()`'s row could not carry - so routing
+     * through that would file every fault twice, once properly and once as an info-level
+     * copier event.
+     *
+     * Platform-addressed by construction. A fault in this software is not an event on
+     * anybody's account, and the customer whose request hit it cannot act on a stack trace.
+     */
+    public function notifyPlatform(string $title, string $body, string $icon = '🔴'): bool
+    {
+        return $this->dispatch(
+            null,
+            $icon.' *'.$this->escape($title).'*'."\n\n".$this->escape($body),
+            $title,
+            $body,
+        );
+    }
+
+    /**
      * Get a message to whoever it concerns, by whatever route reaches them.
      *
      * Telegram when the tenant has connected it, because it is immediate and it is what
