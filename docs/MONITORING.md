@@ -116,6 +116,35 @@ express "unique among unresolved rows".
 
 ---
 
+## One tenant cannot stop the sweep
+
+`bot:monitor`, `copier:protect` and `ai:decide` each iterate every account. They used to do
+it in a plain `foreach`, which meant a throw for one tenant aborted the command and every
+account with a higher id was skipped — silently, and for as long as the cause persisted,
+which for anything deterministic is for ever.
+
+That was a correctness fault at any size, not a scaling one. Two tenants in it is invisible;
+it still meant one customer's malformed symbol spec could stop everybody else's stops being
+trailed.
+
+`TenantSweep` runs each account inside `Tenant::for()` and catches what it throws. The
+failure becomes an incident on `/logs` filed against the tenant it happened for, the sweep
+continues, and the command reports how many accounts it could not finish — because a
+scheduled run nobody watches is exactly where a partial sweep would otherwise pass for a
+complete one.
+
+The monitor most of all: it is the thing that notices when something has stopped working, so
+it must not be the thing that stops working.
+
+> **Not done.** The sweeps are still serial, so a slow account still delays the ones behind
+> it and a long enough tick still meets `withoutOverlapping`. Moving per-tenant work onto the
+> queue is the fix for that, and it is deliberately not taken here: this deployment runs the
+> database queue, and the codebase already documents what happens when queued trading work
+> has no worker — see `QUEUE_STRATEGY_EVALUATION`. Isolation was worth having on its own and
+> costs nothing; parallelism needs a worker somebody is watching.
+
+---
+
 ## The application watching itself
 
 Everything above watches the *bot*. `ErrorReporter` watches this software, which until it

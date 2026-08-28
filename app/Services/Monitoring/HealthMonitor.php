@@ -12,6 +12,7 @@ use App\Models\TradePartial;
 use App\Models\User;
 use App\Services\Instruments\InstrumentProfile;
 use App\Services\Strategy\TradingSession;
+use App\Support\Tenancy\TenantSweep;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -52,7 +53,11 @@ final class HealthMonitor
         $opened = [];
         $resolved = [];
 
-        foreach (User::query()->cursor() as $user) {
+        // Isolated per tenant. The monitor is the thing that notices when something has
+        // stopped working, so it above all must not be the thing that stops working: a
+        // throw while checking one account used to end the sweep, and every account behind
+        // it went unwatched precisely when watching mattered.
+        app(TenantSweep::class)->each(User::query()->cursor(), function (User $user) use (&$opened, &$resolved) {
             $conditions = $this->conditionsFor($user);
 
             foreach ($conditions as $condition) {
@@ -64,7 +69,7 @@ final class HealthMonitor
             }
 
             $resolved = array_merge($resolved, $this->resolveAbsent($user, array_column($conditions, 'key')));
-        }
+        });
 
         return ['opened' => $opened, 'resolved' => $resolved];
     }

@@ -8,6 +8,7 @@ use App\Services\Ai\AutonomousTrader;
 use App\Services\Monitoring\AlertNotifier;
 use App\Services\Telegram\SignalExecutor;
 use App\Support\Tenancy\Tenant;
+use App\Support\Tenancy\TenantSweep;
 use Illuminate\Console\Command;
 
 /**
@@ -29,19 +30,23 @@ class DecideAutonomously extends Command
         $considered = 0;
         $opened = 0;
 
-        foreach (User::query()->orderBy('id')->cursor() as $user) {
-            // Everything inside runs as this tenant. Two things follow from that, and both
-            // used to be the caller's problem: every model in here filters itself to them,
-            // and the model calls this loop pays for are attributed to their allowance
-            // rather than to nobody. A scheduled command is the one place where "whose
-            // request is this" has no answer unless it is stated.
-            [$considered, $opened] = Tenant::for($user, function () use ($user, $trader, $executor, $notifier, $considered, $opened) {
-                return $this->decideFor($user, $trader, $executor, $notifier, $considered, $opened);
-            });
-        }
+        // TenantSweep runs each account as itself and keeps going when one of them throws.
+        // Both matter here: a scheduled command is the one place where "whose request is
+        // this" has no answer unless it is stated, and a model that timed out for one tenant
+        // used to stop every tenant behind them from being considered at all.
+        $result = app(TenantSweep::class)->each(
+            User::query()->orderBy('id')->cursor(),
+            function (User $user) use ($trader, $executor, $notifier, &$considered, &$opened) {
+                [$considered, $opened] = $this->decideFor($user, $trader, $executor, $notifier, $considered, $opened);
+            },
+        );
 
         $this->newLine();
         $this->info("{$considered} considered, {$opened} opened.");
+
+        if ($result['failed'] > 0) {
+            $this->warn("{$result['failed']} account(s) could not be considered; each is on /logs.");
+        }
 
         return self::SUCCESS;
     }
