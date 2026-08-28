@@ -320,6 +320,12 @@ class TenantIsolationTest extends TestCase
         config()->set('alerts.telegram.token', 'platform-bot-token');
         config()->set('alerts.telegram.chat_id', '999-operator');
 
+        // A mailer that would actually leave the server. The test environment runs on
+        // `array`, which `mailUsable()` correctly refuses to count as a channel - so
+        // without this the fallback under test is not reachable.
+        config()->set('mail.default', 'smtp');
+        config()->set('mail.mailers.smtp.host', 'smtp.example.com');
+
         Notification::fake();
         Http::fake();
 
@@ -333,6 +339,47 @@ class TenantIsolationTest extends TestCase
 
         Http::assertNothingSent();
         Notification::assertSentTo($this->bob, TradingAlert::class);
+    }
+
+    /**
+     * The bug this closes was found on a live deployment sitting at Laravel's default.
+     *
+     * `MAIL_MAILER=log` makes `notify()` succeed, so the incident was stamped notified and
+     * an alert that reached nobody became indistinguishable from one that was read. That is
+     * the exact silence this whole subsystem exists to prevent.
+     */
+    public function test_a_log_mailer_is_not_treated_as_delivery(): void
+    {
+        config(['mail.default' => 'log', 'alerts.telegram.token' => 'platform-bot-token']);
+        Notification::fake();
+
+        // No chat id, so the fallback is the only route available.
+        $alert = Alert::query()->forceCreate([
+            'user_id' => $this->bob->id, 'key' => 'executor_offline', 'level' => 'critical',
+            'title' => 'Executor offline', 'body' => 'No heartbeat for 12 minutes.',
+            'first_seen_at' => now(), 'last_seen_at' => now(),
+        ]);
+
+        $sent = app(AlertNotifier::class)->send($alert);
+
+        $this->assertFalse($sent, 'a log mailer is not a channel');
+        $this->assertNull($alert->fresh()->notified_at, 'an undelivered incident must retry');
+        Notification::assertNothingSent();
+    }
+
+    /**
+     * The Laravel default host is a local mail catcher in development and nothing at all on
+     * a droplet, so a real driver name is not on its own evidence of a real channel.
+     */
+    public function test_smtp_pointed_at_localhost_is_not_treated_as_delivery(): void
+    {
+        config(['mail.default' => 'smtp', 'mail.mailers.smtp.host' => '127.0.0.1']);
+
+        $this->assertFalse(app(AlertNotifier::class)->mailUsable());
+
+        config(['mail.mailers.smtp.host' => 'smtp.postmarkapp.com']);
+
+        $this->assertTrue(app(AlertNotifier::class)->mailUsable());
     }
 
     public function test_the_incident_log_row_belongs_to_the_tenant_it_concerns(): void

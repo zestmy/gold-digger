@@ -199,6 +199,18 @@ final class AlertNotifier
             return false;
         }
 
+        // A mailer that writes to a file or an array is not a channel, and treating it as
+        // one is worse than having no fallback at all: `notify()` succeeds, the incident is
+        // stamped `notified_at`, and an alert that reached nobody is indistinguishable from
+        // one that was read. Returning false leaves it undelivered, so the next sweep tries
+        // again and the null is visible on the row.
+        //
+        // Found on a live deployment sitting at MAIL_MAILER=log, which is Laravel's default
+        // and therefore the state every unconfigured deployment is in.
+        if (! $this->mailUsable()) {
+            return false;
+        }
+
         try {
             $user->notify(new TradingAlert($subject, $body));
 
@@ -208,6 +220,35 @@ final class AlertNotifier
 
             return false;
         }
+    }
+
+    /**
+     * Would an email actually leave this server?
+     *
+     * `log` and `array` are transports in the sense that they accept a message and return
+     * success; they are not channels, because nobody is at the other end. `smtp` with no
+     * host is the same problem wearing a real driver's name, so that is checked too.
+     *
+     * Deliberately a positive check on what is configured rather than a deny-list of what
+     * is not: a future driver nobody thought of should be assumed to work, whereas a
+     * deny-list would silently start counting it as delivery.
+     */
+    public function mailUsable(): bool
+    {
+        $driver = (string) config('mail.default');
+
+        if (in_array($driver, ['log', 'array', 'null'], true)) {
+            return false;
+        }
+
+        // The Laravel default is 127.0.0.1:2525, which is a local mail catcher in
+        // development and nothing at all on a droplet.
+        if ($driver === 'smtp') {
+            return filled(config('mail.mailers.smtp.host'))
+                && config('mail.mailers.smtp.host') !== '127.0.0.1';
+        }
+
+        return true;
     }
 
     /**
