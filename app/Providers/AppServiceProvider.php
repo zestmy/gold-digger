@@ -2,8 +2,23 @@
 
 namespace App\Providers;
 
+use App\Models\Alert;
+use App\Models\BotHeartbeat;
+use App\Models\BotLog;
+use App\Models\BotSettings;
 use App\Models\BotToken;
+use App\Models\BrokerAccount;
+use App\Models\ChartAnalysis;
+use App\Models\DailySummary;
+use App\Models\Strategy;
+use App\Models\StrategyImprovement;
+use App\Models\TelegramAccount;
+use App\Models\TelegramChannel;
+use App\Models\TelegramSignal;
+use App\Models\Trade;
+use App\Models\TradeCommand;
 use App\Models\User;
+use App\Observers\AdminActionObserver;
 use App\Observers\UserObserver;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -29,7 +44,46 @@ class AppServiceProvider extends ServiceProvider
         // when new users register (creates BotSettings + default Strategy)
         User::observe(UserObserver::class);
 
+        $this->auditAdminAction();
         $this->defineRateLimits();
+    }
+
+    /**
+     * Watch the models an administrator can reach through the support console.
+     *
+     * The Filament panel is the one place cross-tenant access happens by design - a support
+     * console that could only see its own operator would be useless - and every resource in
+     * it carries an edit action and a bulk delete. None of that was recorded anywhere.
+     *
+     * The list is the models that carry an owner, because those are the ones where "somebody
+     * else's" means something. `AdminAction` itself is deliberately absent: an audit trail
+     * that audited its own writes would grow without end and tell nobody anything.
+     *
+     * The observer is silent unless an administrator touches a row belonging to a different
+     * user, so on a single-operator deployment this costs a comparison per save and writes
+     * nothing at all.
+     */
+    private function auditAdminAction(): void
+    {
+        foreach ([
+            Alert::class,
+            BotHeartbeat::class,
+            BotLog::class,
+            BotSettings::class,
+            BotToken::class,
+            BrokerAccount::class,
+            ChartAnalysis::class,
+            DailySummary::class,
+            Strategy::class,
+            StrategyImprovement::class,
+            TelegramAccount::class,
+            TelegramChannel::class,
+            TelegramSignal::class,
+            Trade::class,
+            TradeCommand::class,
+        ] as $model) {
+            $model::observe(AdminActionObserver::class);
+        }
     }
 
     /**

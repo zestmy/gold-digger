@@ -120,9 +120,25 @@ Two things the trait will not do for you:
 Honest list, so nobody assumes more than is true:
 
 - **Filament.** The nine admin resources scope by nothing and are gated only by
-  `users.is_admin`. That is deliberate — it is a support console — but it is one boolean
-  away from repeating the `/logs` failure at much greater scope. It has no audit trail and
-  no impersonation record.
+  `users.is_admin`. That is deliberate — a support console that could only see its own
+  operator would be useless — but every resource carries an edit action and a bulk delete,
+  so an administrator can change a customer's stop price or raise their capital cap.
+
+  That is now **recorded**. `AdminActionObserver` writes to `admin_actions` whenever an
+  administrator creates, updates or deletes a row belonging to a different user: who, whose,
+  what changed, and from which address. It is silent for an operator working on their own
+  account, so a single-operator deployment writes nothing — and it starts recording the
+  moment there is a second tenant, which is when it starts to matter.
+
+  Two deliberate choices. It stores a **diff** rather than the whole row, because that is
+  what somebody investigating wants and every column of every save would bury it. And it
+  **redacts** anything the model hides plus a deny-list — `account_number`, `session`,
+  `token_hash` — because an audit log holding the plaintext of the secrets it audits would
+  be a worse leak than the one it exists to detect.
+
+  Still open: the panel is **read-write**, and making tenant data read-only there is a
+  capability decision rather than a bug fix. There is no impersonation record, and **reads
+  are not audited** — only writes.
 - **`signals`, `trade_partials`, `trade_screenshots` and `bot_logs`' siblings** reach their
   owner indirectly, through `strategy_id` or `trade_id`. That works and is invisible to a
   reader; it is not asserted anywhere as an invariant.
