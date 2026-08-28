@@ -82,6 +82,13 @@ class FillAccountingTest extends TestCase
         $this->assertEqualsWithDelta(0.01, (float) $trade->remaining_lot_size, 0.0001);
     }
 
+    /**
+     * This test used to replay the live figures back at the endpoint and pass, which is
+     * why the loss below went unnoticed for as long as it did. FXSReplayClosedDeals does
+     * not send what the live close sent: it walks a date-ranged history selection it
+     * cannot re-query per position, so it has no entry price and sends 0.00 pips, and it
+     * reads DEAL_REASON, which cannot name a ladder rung and so says `manual`.
+     */
     public function test_a_whole_position_replayed_on_attach_changes_nothing(): void
     {
         $this->fill(deal: 86016866, volume: 0.01, price: 4663.43, pips: 50.20, profit: 5.02, reason: 'tp1');
@@ -89,11 +96,74 @@ class FillAccountingTest extends TestCase
 
         $before = $this->trade->fresh()->only(['net_pnl_money', 'gross_pnl_pips', 'remaining_lot_size', 'status']);
 
-        // Exactly what FXSReplayClosedDeals sends when the terminal reconnects.
-        $this->fill(deal: 86016866, volume: 0.01, price: 4663.43, pips: 50.20, profit: 5.02, reason: 'tp1');
-        $this->fill(deal: 86022835, volume: 0.01, price: 4658.23, pips: -1.80, profit: -0.18, reason: 'sl');
+        $this->replay(deal: 86016866, volume: 0.01, price: 4663.43, profit: 5.02, reason: 'manual');
+        $this->replay(deal: 86022835, volume: 0.01, price: 4658.23, profit: -0.18, reason: 'sl');
 
         $this->assertSame($before, $this->trade->fresh()->only(['net_pnl_money', 'gross_pnl_pips', 'remaining_lot_size', 'status']));
+    }
+
+    /**
+     * The reported symptom: real money on both partials, 0.00 pips, and a commanded TP1
+     * close filed as a manual one.
+     */
+    public function test_a_replay_does_not_erase_what_the_live_close_knew(): void
+    {
+        $this->fill(deal: 86016866, volume: 0.01, price: 4663.43, pips: 50.20, profit: 5.02, reason: 'tp1');
+
+        $this->replay(deal: 86016866, volume: 0.01, price: 4663.43, profit: 5.02, reason: 'manual');
+
+        $partial = TradePartial::sole();
+
+        $this->assertEqualsWithDelta(50.20, (float) $partial->pips_profit, 0.001);
+        $this->assertSame('tp1', $partial->close_reason);
+        $this->assertEqualsWithDelta(50.20, (float) $this->trade->fresh()->gross_pnl_pips, 0.001);
+    }
+
+    /**
+     * The guard runs one way only. Replaying remains how a close that happened while the
+     * terminal was shut gets recorded at all, and 0.00 pips is better than no row.
+     */
+    public function test_a_replay_still_records_a_deal_nobody_reported_live(): void
+    {
+        $this->replay(deal: 86022835, volume: 0.01, price: 4658.23, profit: -0.18, reason: 'sl');
+
+        $partial = TradePartial::sole();
+
+        $this->assertEqualsWithDelta(0.0, (float) $partial->pips_profit, 0.001);
+        $this->assertSame('sl', $partial->close_reason);
+        $this->assertEqualsWithDelta(-0.18, (float) $this->trade->fresh()->net_pnl_money, 0.001);
+    }
+
+    /**
+     * And a report that does know the figure still corrects a stored zero - which is how
+     * the rows already flattened on production heal, once the EA computes pips on replay.
+     */
+    public function test_a_later_report_that_knows_the_pips_corrects_a_stored_zero(): void
+    {
+        $this->replay(deal: 86016866, volume: 0.01, price: 4663.43, profit: 5.02, reason: 'manual');
+
+        $this->fill(deal: 86016866, volume: 0.01, price: 4663.43, pips: 50.20, profit: 5.02, reason: 'tp1');
+
+        $partial = TradePartial::sole();
+
+        $this->assertEqualsWithDelta(50.20, (float) $partial->pips_profit, 0.001);
+        $this->assertSame('tp1', $partial->close_reason);
+    }
+
+    /**
+     * A deal closes once. The replay stamped its own arrival over the close time, which
+     * moved the TP1 partial from 02:40 to 18:18 - when the terminal reconnected.
+     */
+    public function test_a_re_report_does_not_move_when_the_deal_closed(): void
+    {
+        $this->fill(deal: 86016866, volume: 0.01, price: 4663.43, pips: 50.20, profit: 5.02, reason: 'tp1');
+
+        $closedAt = TradePartial::sole()->closed_at;
+
+        $this->travel(8)->hours();
+        $this->replay(deal: 86016866, volume: 0.01, price: 4663.43, profit: 5.02, reason: 'manual');
+
+        $this->assertTrue($closedAt->equalTo(TradePartial::sole()->closed_at));
     }
 
     public function test_costs_are_totalled_from_the_deals_that_carried_them(): void
@@ -110,8 +180,26 @@ class FillAccountingTest extends TestCase
         $this->assertLessThanOrEqual((float) $trade->gross_pnl_money, (float) $trade->net_pnl_money);
     }
 
-    private function fill(
-        int $deal,
+    /**
+     * What FXSReplayClosedDeals actually sends on attach: no pips, and a reason derived
+     * from DEAL_REASON rather than from the command that asked for the close.
+     */
+    private function replay(int $deal, float $volume, float $price, float $profit, string $reason): void
+    {
+        $this->withToken($this->token)->postJson('/api/v1/bot/fills', [
+            'event' => 'closed',
+            'ticket' => $this->trade->mt5_ticket,
+            'deal_ticket' => $deal,
+            'volume' => $volume,
+            'price' => $price,
+            'pips_profit' => 0.0,
+            'profit' => $profit,
+            'reason' => $reason,
+            'closure_note' => 'replayed from history on attach',
+        ])->assertSuccessful();
+    }
+
+    private function fill(int $deal,
         float $volume,
         float $price,
         float $pips,

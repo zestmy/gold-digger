@@ -673,8 +673,19 @@ void FXSReplayClosedDeals(const int days)
       return;
      }
 
+   //--- Two passes, and the second one is why. Pricing a close in pips needs the
+   //--- position's opening deal, which is reached with HistorySelectByPosition - and
+   //--- calling that from inside this walk would replace the very selection being
+   //--- walked, renumbering it underneath the index. So the closing deals are collected
+   //--- first and priced afterwards, once the enumeration is finished.
    const int total = HistoryDealsTotal();
-   int replayed = 0;
+
+   ulong  d_ticket[];
+   long   d_position[];
+   double d_price[], d_volume[], d_profit[], d_commission[], d_swap[];
+   string d_reason[], d_symbol[];
+
+   int found = 0;
 
    for(int i = 0; i < total; i++)
      {
@@ -689,44 +700,92 @@ void FXSReplayClosedDeals(const int days)
       if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_OUT_BY)
          continue;
 
-      const long   position_id = HistoryDealGetInteger(deal, DEAL_POSITION_ID);
-      const double price       = HistoryDealGetDouble(deal, DEAL_PRICE);
-      const double volume      = HistoryDealGetDouble(deal, DEAL_VOLUME);
-      const double profit      = HistoryDealGetDouble(deal, DEAL_PROFIT);
-      const double commission  = HistoryDealGetDouble(deal, DEAL_COMMISSION);
-      const double swap        = HistoryDealGetDouble(deal, DEAL_SWAP);
-
       const ENUM_DEAL_REASON why = (ENUM_DEAL_REASON)HistoryDealGetInteger(deal, DEAL_REASON);
-
-      //--- The deal names its own instrument, which is the only reliable way to format
-      //--- it once this terminal carries more than one.
-      const int di = FXSIndexFor(HistoryDealGetString(deal, DEAL_SYMBOL));
 
       string reason_enum = "manual";
       if(why == DEAL_REASON_SL || why == DEAL_REASON_SO) reason_enum = "sl";
       else if(why == DEAL_REASON_TP)                     reason_enum = "tp3";
 
-      //--- Pips need the entry price, and the entry deal is in this same selection.
-      //--- Left at zero when it cannot be found: a wrong pip figure is worse than an
-      //--- absent one, and the dashboard treats this as a historical correction.
+      found++;
+
+      ArrayResize(d_ticket, found);     ArrayResize(d_position, found);
+      ArrayResize(d_price, found);      ArrayResize(d_volume, found);
+      ArrayResize(d_profit, found);     ArrayResize(d_commission, found);
+      ArrayResize(d_swap, found);       ArrayResize(d_reason, found);
+      ArrayResize(d_symbol, found);
+
+      const int k = found - 1;
+
+      d_ticket[k]     = deal;
+      d_position[k]   = HistoryDealGetInteger(deal, DEAL_POSITION_ID);
+      d_price[k]      = HistoryDealGetDouble(deal, DEAL_PRICE);
+      d_volume[k]     = HistoryDealGetDouble(deal, DEAL_VOLUME);
+      d_profit[k]     = HistoryDealGetDouble(deal, DEAL_PROFIT);
+      d_commission[k] = HistoryDealGetDouble(deal, DEAL_COMMISSION);
+      d_swap[k]       = HistoryDealGetDouble(deal, DEAL_SWAP);
+      d_reason[k]     = reason_enum;
+
+      //--- The deal names its own instrument, which is the only reliable way to format
+      //--- it once this terminal carries more than one.
+      d_symbol[k]     = HistoryDealGetString(deal, DEAL_SYMBOL);
+     }
+
+   int replayed = 0;
+
+   for(int k = 0; k < found; k++)
+     {
+      const int di = FXSIndexFor(d_symbol[k]);
+
+      //--- Still zero when the opening deal is out of reach, because a wrong pip figure
+      //--- is worse than an absent one. The difference is that it is now only zero when
+      //--- the number genuinely cannot be had, rather than on every replayed deal.
+      //---
+      //--- Sending a real figure matters because the dashboard will not derive one: pips
+      //--- are a per-instrument unit and only the terminal knows the point size, so a
+      //--- close that reaches the dashboard at zero stays at zero.
       double pips = 0.0;
+
+      if(HistorySelectByPosition((ulong)d_position[k]))
+        {
+         const int legs = HistoryDealsTotal();
+
+         for(int j = 0; j < legs; j++)
+           {
+            const ulong leg = HistoryDealGetTicket(j);
+
+            if(leg == 0 || HistoryDealGetInteger(leg, DEAL_ENTRY) != DEAL_ENTRY_IN)
+               continue;
+
+            //--- The opening deal carries the direction as well as the price, so the
+            //--- sign comes from the same row as the entry and cannot disagree with it.
+            //--- Note this reads the opposite way round to the live path, which has a
+            //--- closing deal in hand: a BUY deal opens a long, a SELL deal closes one.
+            const double entry_price = HistoryDealGetDouble(leg, DEAL_PRICE);
+            const bool   was_buy     = ((ENUM_DEAL_TYPE)HistoryDealGetInteger(leg, DEAL_TYPE) == DEAL_TYPE_BUY);
+
+            if(entry_price > 0.0 && di >= 0 && g_exec[di].PipSize() > 0.0)
+               pips = ((d_price[k] - entry_price) / g_exec[di].PipSize()) * (was_buy ? 1.0 : -1.0);
+
+            break;
+           }
+        }
 
       FXSQueueReport(StringFormat(
          "{\"event\":\"closed\",\"ticket\":%s,\"deal_ticket\":%s,\"volume\":%s,"
          "\"price\":%s,\"pips_profit\":%s,\"profit\":%s,\"commission\":%s,\"swap\":%s,"
          "\"reason\":\"%s\",\"closure_note\":\"replayed from history on attach\"}",
-         IntegerToString(position_id), IntegerToString((long)deal),
-         DoubleToString(volume, 2), DoubleToString(price, di >= 0 ? g_exec[di].Digits() : 6),
-         DoubleToString(pips, 2), DoubleToString(profit, 2),
-         DoubleToString(commission, 2), DoubleToString(swap, 2),
-         reason_enum));
+         IntegerToString(d_position[k]), IntegerToString((long)d_ticket[k]),
+         DoubleToString(d_volume[k], 2), DoubleToString(d_price[k], di >= 0 ? g_exec[di].Digits() : 6),
+         DoubleToString(pips, 2), DoubleToString(d_profit[k], 2),
+         DoubleToString(d_commission[k], 2), DoubleToString(d_swap[k], 2),
+         d_reason[k]));
 
       replayed++;
      }
 
    if(replayed > 0)
       FXSLog("info", StringFormat("Replaying %d closing deal(s) from the last %d day(s); "
-                                 "any the dashboard already has are ignored.", replayed, days));
+                                 "the dashboard keeps whatever it already knows.", replayed, days));
   }
 
 //+------------------------------------------------------------------+

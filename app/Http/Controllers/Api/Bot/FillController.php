@@ -196,9 +196,11 @@ class FillController extends Controller
             $commission = $data['commission'] ?? 0;
             $swap = $data['swap'] ?? 0;
 
+            $key = ['mt5_deal_ticket' => $data['deal_ticket'] ?? null];
+
             $partial = TradePartial::updateOrCreate(
-                ['mt5_deal_ticket' => $data['deal_ticket'] ?? null],
-                [
+                $key,
+                $this->keepingWhatIsKnown(TradePartial::where($key)->first(), [
                     'trade_id' => $trade->id,
                     'closed_lot_size' => $data['volume'],
                     'close_price' => $data['price'],
@@ -209,7 +211,7 @@ class FillController extends Controller
                     'swap_money' => $swap,
                     'net_money_profit' => $gross + $commission + $swap,
                     'closed_at' => now(),
-                ],
+                ]),
             );
 
             // Derived from the partials, never accumulated.
@@ -260,5 +262,59 @@ class FillController extends Controller
             'status' => $trade->status,
             'remaining_lot_size' => (float) $trade->remaining_lot_size,
         ]);
+    }
+
+    /**
+     * Merge a re-report onto a row that already exists, without losing what it knows.
+     *
+     * A deal can arrive here more than once: the report queue retries, and the EA replays
+     * recent closes every time it attaches. Idempotence was solved for the money - the
+     * totals are summed from the stored rows rather than accumulated - but not for the
+     * fields themselves, and a replay can carry less than the live report it lands on:
+     *
+     *   - it sends `pips_profit` 0.00 when it cannot reach the position's opening deal,
+     *     because a wrong pip figure would be worse than an absent one;
+     *   - it reads DEAL_REASON, which cannot say which rung of the ladder a close was,
+     *     so anything that was not a broker stop or target arrives as `manual`.
+     *
+     * Both are the right call in the terminal. Neither is a correction, and letting them
+     * overwrite is how ticket 89795022 lost the pips on both its partials: +5.02 and
+     * -0.18 in money against 0.00 pips, a commanded TP1 close filed as `manual`, and
+     * `gross_pnl_pips` summing to zero on a position that made 48.4 pips.
+     *
+     * FXSReplayClosedDeals now works the pips out wherever it can, which is the other
+     * half of this fix - but that is a property of one build of one file, running on
+     * machines this server does not control, and every terminal still on an older EA
+     * replays zeros. So the rule is enforced here as well, and it runs one way only: a
+     * later report may fill in what is missing, and may replace one real value with
+     * another, but it may never replace a known value with an absent one.
+     */
+    private function keepingWhatIsKnown(?TradePartial $existing, array $attributes): array
+    {
+        if ($existing === null) {
+            return $attributes;
+        }
+
+        // Zero here is the EA saying it could not work the figure out, not a measurement.
+        // A genuine scratch close writes zero over zero and is unchanged, so this only
+        // ever protects a real number.
+        if ((float) $attributes['pips_profit'] === 0.0 && (float) $existing->pips_profit !== 0.0) {
+            $attributes['pips_profit'] = $existing->pips_profit;
+        }
+
+        // The same loss in a different field: `manual` is the replay's "cannot tell", and
+        // a stored `tp1` is something only the live path - which saw the command that
+        // asked for it - was ever in a position to know.
+        if ($attributes['close_reason'] === 'manual' && $existing->close_reason !== 'manual') {
+            $attributes['close_reason'] = $existing->close_reason;
+        }
+
+        // A deal closes once. A second report is news about an old event, not a new one,
+        // so the timestamp stays where the first report put it. Left at now() the replay
+        // moved the TP1 partial's close from 02:40 to 18:18 - which is not when it filled,
+        // it is when the terminal reconnected.
+        unset($attributes['closed_at']);
+
+        return $attributes;
     }
 }
