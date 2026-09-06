@@ -1,16 +1,19 @@
 # Gold Digger
 
-Personal automated gold scalping trading bot with Laravel web dashboard.
+Automated XAUUSD (gold) scalping bot: a Laravel dashboard that decides, an MQL5 Expert
+Advisor that executes, and a Telegram signal copier alongside.
 
 ## Overview
 
-Gold Digger is a multi-component trading system designed for XAUUSD (gold) scalping:
-- **Laravel Dashboard**: Web interface for monitoring, configuration, and analytics
-- **Python Bot** (Phase 2+): Trading engine connecting to MT5 broker — see [`bot/`](bot/)
-- **MySQL Database**: Shared data store for trades, signals, and logs
-
-Trade execution runs through an **MQL5 Expert Advisor** in [`mql5/`](mql5/) that polls this
-dashboard and reports fills back — see [`docs/MT5_EA_BRIDGE.md`](docs/MT5_EA_BRIDGE.md) for setup.
+- **Laravel dashboard** — monitoring, configuration, analytics, and the strategy layer
+  itself. It also serves the bot API the executor talks to. [`ARCHITECTURE.md`](ARCHITECTURE.md)
+  is the one-page map of how the pieces fit.
+- **MQL5 Expert Advisor** in [`mql5/`](mql5/) — the executor. It runs inside the MT5
+  terminal, polls this dashboard for commands and reports fills back. Setup is in
+  [`docs/MT5_EA_BRIDGE.md`](docs/MT5_EA_BRIDGE.md).
+- **MySQL** — trades, signals, logs, the command queue and the job queue.
+- **Python tooling** in [`bot/`](bot/) — a preflight diagnostic and a reference executor.
+  It does not trade; see [`bot/README.md`](bot/README.md).
 
 Entries are decided here, not in the terminal: the EA pushes closed bars, the dashboard
 computes the indicators and queues the order. See
@@ -99,6 +102,13 @@ The default `.env` is configured for Laravel Herd with MySQL:
 - Username: `root`
 - Password: (empty)
 
+Set `APP_URL` to the address the dashboard is actually reached on (`http://gold-digger.test`
+locally, `https://your-host` in production). It is not cosmetic: `/terminal/download` builds
+the EA archive per request with `APP_URL` written into its `ApiBaseUrl` default, and that is
+the URL the terminal has to whitelist. An EA downloaded while `APP_URL` still says
+`http://localhost` will point at the wrong place. It is also sent to OpenRouter as the
+attribution referer.
+
 ### 3. Create Database
 
 Using MySQL CLI or phpMyAdmin:
@@ -132,32 +142,56 @@ php artisan serve
 
 Or access via Laravel Herd URL: `http://gold-digger.test`
 
-### 7. Register First User
+The scheduler and the queue are separate processes. Nothing in `routes/console.php` runs
+without `php artisan schedule:work` (or cron calling `schedule:run` every minute), and
+`php artisan queue:work` is only needed once `QUEUE_STRATEGY_EVALUATION=true` or the
+strategy improver is used. Locally, the dashboard and the EA work without either.
 
-1. Visit `/register`
-2. Create your account
-3. You'll be redirected to the dashboard
+### 7. Create the First Account
 
-The system automatically creates:
-- Default bot settings (conservative risk management)
-- Default "Fira-Style Gold Trend Scalp" strategy
+Public registration is off by default (`REGISTRATION_ENABLED=false`), because an open
+sign-up form on a box holding broker credentials invites accounts nobody asked for. Create
+the first account from the console instead:
+
+```bash
+php artisan user:create you@example.com --admin
+```
+
+`--admin` sets `users.is_admin`, which is what gates `/admin`. It can be granted or revoked
+later with `php artisan user:admin you@example.com`.
+
+The alternative is `REGISTRATION_ENABLED=true` in `.env`, which defines `/register` and makes
+the landing page show its sign-up buttons. That is the setting for running this as something
+people join.
+
+Either way, creating a user also creates:
+- Default bot settings, with the bot switched **off**
+- A default "Fira-Style Gold Trend Scalp" strategy (H1 trend, M5 entries)
 
 ## Routes
 
 | Route | Description |
 |-------|-------------|
 | `/` | Landing page |
-| `/register` | User registration |
-| `/login` | User login |
-| `/dashboard` | Main dashboard with stats and controls |
-| `/trades/live` | Live trades (Phase 1B) |
-| `/trades/history` | Trade history (Phase 1B) |
-| `/strategies` | Strategy configuration (Phase 1B) |
+| `/login` | Sign in |
+| `/register` | Sign up — only defined when `REGISTRATION_ENABLED=true` |
+| `/dashboard` | Stats, bot status and the start / stop / close-all controls |
+| `/setup` | The four things that must be true before a copied signal becomes a position |
+| `/terminal` | Issue the EA's token; `/terminal/download` ships the EA configured for this dashboard |
+| `/trades/live` | Open positions |
+| `/trades/history` | Closed trades |
+| `/signals` | Every decision the strategy layer made, including the refusals |
+| `/signals/copier` | The Telegram copier: captured signals, reviews, executions |
+| `/signals/channels` | Which providers are on, and what each has been worth |
+| `/signals/accounts` | Telegram accounts, hosted or self-collected |
+| `/analysis` | Every instrument ranked on measured evidence, plus one model question |
+| `/strategies` | Strategy configuration; `/strategies/improve` is the AI proposer with walk-forward |
 | `/broker-accounts` | MT5 account management |
-| `/analytics` | Performance analytics (Phase 1C) |
-| `/settings` | Bot settings (Phase 1B) |
-| `/logs` | Bot logs (written by the EA) |
-| `/admin` | Filament admin panel |
+| `/analytics` | Performance analytics, computed from `trades` on request |
+| `/settings` | Bot settings |
+| `/logs` | Bot logs, written by the EA, the monitor and the copier |
+| `/profile` | Password, two-factor, active sessions |
+| `/admin` | Filament support console, for `users.is_admin` only |
 
 ## Bot API
 
@@ -180,16 +214,19 @@ php artisan bot:token you@example.com --name="Windows VPS" --account=1
 
 Protocol details: [`docs/MT5_EA_BRIDGE.md`](docs/MT5_EA_BRIDGE.md).
 
+The same token also authenticates `/api/v1/analysis/*` ([`docs/ANALYSIS_API.md`](docs/ANALYSIS_API.md))
+and `/api/v1/telegram/*` for a self-hosted collector ([`tools/telegram-collector/`](tools/telegram-collector/)).
+The hosted session worker under `/api/v1/telegram/worker/*` uses `TELEGRAM_WORKER_TOKEN`
+instead — an infrastructure credential, not an issued one ([`tools/telegram-worker/`](tools/telegram-worker/)).
+
 ## Admin Panel
 
-Access the Filament admin panel at `/admin` for direct CRUD operations on all models:
-- Trades (with partials and screenshots)
-- Strategies
-- Broker Accounts
-- Bot Settings
-- Signals
-- Bot Logs
-- Daily Summaries
+The Filament panel at `/admin` is a support console: it reads across every tenant, which is
+why it is limited to accounts with `users.is_admin`. It has no login page of its own — sign
+in at `/login` (with two-factor, if enrolled) and then open `/admin`. Resources for trades,
+trade partials, signals, strategies, broker accounts, bot settings and bot logs, each with
+edit and bulk delete. Any write to another user's row is recorded in `admin_actions` — see
+[`docs/TENANCY.md`](docs/TENANCY.md).
 
 ## Common Issues (Windows + Laravel Herd)
 
@@ -204,7 +241,7 @@ Access the Filament admin panel at `/admin` for direct CRUD operations on all mo
 
 ### Storage Link Permission Errors
 
-**Symptom:** Cannot access uploaded files or screenshots
+**Symptom:** `php artisan storage:link` fails, or `/storage/...` returns 404
 
 **Fix:**
 ```bash
@@ -247,31 +284,44 @@ php artisan storage:link
 ## Tech Stack
 
 - **Backend**: Laravel 12, PHP 8.2
-- **Frontend**: Livewire 3, Tailwind CSS, Alpine.js
-- **Admin**: Filament v4
-- **Database**: MySQL 8
-- **Image Processing**: Intervention Image
+- **Frontend**: Livewire 3 (with Volt for the auth pages), Tailwind CSS 3, Alpine.js, Lightweight Charts
+- **Admin**: Filament 3
+- **Database**: MySQL 8 — also the session store, cache and queue driver
+- **Executor**: MQL5, in the MetaTrader 5 terminal
+- **AI**: OpenRouter, one key in front of every model
+- **Outside processes**: Python for the Telegram collector and worker (`tools/`)
 
 ## Project Structure
 
 ```
 gold-digger/
 ├── app/
+│   ├── Console/Commands/      # bot:token, bot:monitor, backtest, telegram:*, data:prune ...
 │   ├── Filament/Resources/    # Admin panel resources
+│   ├── Http/
+│   │   ├── Controllers/Api/   # Bot, Analysis and Telegram endpoints
+│   │   └── Middleware/        # AuthenticateBot, AuthenticateWorker, BindWorkerAccount
+│   ├── Jobs/                  # EvaluateNewBars, RunStrategyImprovement
 │   ├── Livewire/
 │   │   ├── Dashboard/         # Dashboard card components
 │   │   └── Pages/             # Full-page Livewire components
-│   ├── Models/                # Eloquent models
-│   └── Observers/             # Model observers
+│   ├── Models/                # Eloquent models; Concerns/BelongsToTenant
+│   ├── Observers/             # UserObserver, AdminActionObserver
+│   ├── Services/              # Strategy, Telegram, Ai, Monitoring, MarketData, Backtest ...
+│   └── Support/Tenancy/       # Tenant, TenantSweep
 ├── bot/                       # Python MT5 diagnostics + reference executor
 ├── database/migrations/       # Database schema
-├── docs/                      # Design notes and analysis
+├── docs/                      # Per-topic design notes
 ├── mql5/                      # MetaTrader 5 Expert Advisor (the executor)
-├── routes/api.php             # Bot API: /api/v1/bot/*
+├── tools/                     # Telegram collector and hosted session worker (Python)
+├── routes/
+│   ├── api.php                # /api/v1/bot, /api/v1/analysis, /api/v1/telegram
+│   ├── console.php            # The schedule
+│   └── web.php                # Dashboard routes
 ├── resources/views/
 │   ├── layouts/               # App layout with sidebar
 │   └── livewire/              # Livewire component views
-└── routes/web.php             # Web routes
+└── tests/Feature/             # Including the EA wire-protocol contract test
 ```
 
 ## License

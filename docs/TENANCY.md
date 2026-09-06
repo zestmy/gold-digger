@@ -34,10 +34,17 @@ Three small pieces, in `app/Support/Tenancy/` and `app/Models/`:
 | `TenantScope` | Adds `where user_id = <current>` to every query on an owned model. |
 | `BelongsToTenant` | Applies the scope, stamps `user_id` on create, and provides the escape hatches. |
 
-Fifteen models carry the trait. The hand-written `where()` clauses were **left in place** —
-they are now redundant rather than load-bearing, and removing 93 of them in the same change
-that introduced the mechanism would have meant trusting the new thing before it had run
-anywhere.
+Seventeen models carry the trait (`grep -l BelongsToTenant app/Models/*.php` is the
+authoritative count). The hand-written `where()` clauses were **left in place** — where
+they exist they are redundant rather than load-bearing, and removing 93 of them in the same
+change that introduced the mechanism would have meant trusting the new thing before it had
+run anywhere.
+
+One place has no such clause to fall back on. `/logs` — the page that caused all this — was
+fixed by giving `bot_logs` an owner and the trait, not by adding a `where()`: `clearLog()` is
+still `BotLog::find($id)?->delete()` and `clearAllLogs()` is still `BotLog::query()->delete()`.
+There the scope is the whole of the isolation, and `TenantIsolationTest` drives both actions
+as a second tenant to keep it that way.
 
 ### Where the tenant comes from, in order
 
@@ -153,34 +160,64 @@ an image encoder), and 2FA is opt-in per account rather than enforceable platfor
 
 ---
 
+## The support console
+
+The Filament panel at `/admin` is the one place cross-tenant access happens **by design**: a
+support console that could only see its own operator would be useless. It is gated by
+`users.is_admin` (`php artisan user:admin`), and the owned resources — trades, strategies,
+broker accounts, bot settings, bot logs — read across every tenant with `acrossTenants()` in
+`getEloquentQuery()`: the escape hatch above, used where it belongs and spelled out in each
+resource so the decision is visible in a diff rather than implied by the absence of a scope.
+
+`Signal` and `TradePartial` carry no `user_id` at all and are not scoped themselves; they
+reach their owner through `strategy_id` or `trade_id`. Their resources load that parent
+without the tenant filter — otherwise every signal but the administrator's own would list
+with a blank strategy — and `AdminActionObserver::ownerOf()` follows the same relation one
+step, past the filter, so an edit on those two screens is attributed to the tenant it
+touched rather than going unrecorded. `TradeScreenshot` has the same shape and the observer
+covers it too; its resource was removed along with `DailySummary`'s, because nothing writes
+either table and a console screen listing an empty one was a promise the system did not keep.
+
+**There is no `/admin/login`.** Filament's stock login page calls `Auth::attempt()` and stops
+there, so an administrator with two-factor enrolled could sign in at `/admin/login` with a
+password alone — the second factor was enforced on `/login` and only there. The panel no
+longer has a login page: `AuthenticateAdmin` sends an unauthenticated visitor to `/login`,
+they complete the TOTP challenge if they have one, and `/admin` accepts the same `web`-guard
+session. A second door with a weaker lock is the door that gets used, and this one opened
+onto every tenant.
+
+Every resource still carries an edit action and a bulk delete, so an administrator can change
+a customer's stop price or raise their capital cap. That is **recorded**. `AdminActionObserver`
+writes to `admin_actions` whenever an administrator creates, updates or deletes a row belonging
+to a different user: who, whose, what changed, and from which address. It is silent for an
+operator working on their own account, so a single-operator deployment writes nothing — and it
+starts recording the moment there is a second tenant, which is when it starts to matter.
+
+Two deliberate choices. It stores a **diff** rather than the whole row, because that is what
+somebody investigating wants and every column of every save would bury it. And it **redacts**
+anything the model hides plus a deny-list — `account_number`, `session`, `token_hash` —
+because an audit log holding the plaintext of the secrets it audits would be a worse leak
+than the one it exists to detect.
+
+Still open: the panel is **read-write**, and making tenant data read-only there is a
+capability decision rather than a bug fix. There is no impersonation record, and **reads are
+not audited** — only writes.
+
+---
+
 ## What is still not covered
 
 Honest list, so nobody assumes more than is true:
 
-- **Filament.** The nine admin resources scope by nothing and are gated only by
-  `users.is_admin`. That is deliberate — a support console that could only see its own
-  operator would be useless — but every resource carries an edit action and a bulk delete,
-  so an administrator can change a customer's stop price or raise their capital cap.
-
-  That is now **recorded**. `AdminActionObserver` writes to `admin_actions` whenever an
-  administrator creates, updates or deletes a row belonging to a different user: who, whose,
-  what changed, and from which address. It is silent for an operator working on their own
-  account, so a single-operator deployment writes nothing — and it starts recording the
-  moment there is a second tenant, which is when it starts to matter.
-
-  Two deliberate choices. It stores a **diff** rather than the whole row, because that is
-  what somebody investigating wants and every column of every save would bury it. And it
-  **redacts** anything the model hides plus a deny-list — `account_number`, `session`,
-  `token_hash` — because an audit log holding the plaintext of the secrets it audits would
-  be a worse leak than the one it exists to detect.
-
-  Still open: the panel is **read-write**, and making tenant data read-only there is a
-  capability decision rather than a bug fix. There is no impersonation record, and **reads
-  are not audited** — only writes.
-- **`signals`, `trade_partials`, `trade_screenshots` and `bot_logs`' siblings** reach their
-  owner indirectly, through `strategy_id` or `trade_id`. That works and is invisible to a
-  reader; it is not asserted anywhere as an invariant.
+- **`signals`, `trade_partials` and `trade_screenshots`** reach their owner only through
+  `strategy_id` or `trade_id`. Outside the admin audit that is invisible to a reader, and it
+  is not asserted anywhere as an invariant — a page that listed signals by id alone would
+  have no scope to save it.
 - **Console fan-out** remains the caller's responsibility, per the trade-off above.
+  `TenantSweep` (`app/Support/Tenancy/`) is the helper for it: `copier:protect` and
+  `ai:decide` run each user inside `Tenant::for()` through it, so one tenant's throw is
+  reported as an incident for that tenant rather than skipping everybody behind them. A new
+  command that iterates users should use it; nothing forces one to.
 - **Per-tenant alert routing** now exists (`users.telegram_chat_id`), but a tenant who
   configures neither Telegram nor a reachable mailbox still hears nothing. The incident is
   recorded on `/logs` either way.
