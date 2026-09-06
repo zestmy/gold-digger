@@ -561,6 +561,37 @@ class SignalGenerationTest extends TestCase
         $this->assertSame('buy', $features['trend_direction']);
     }
 
+    /**
+     * What the signal card reads. Stored at generation rather than recomputed on view, so
+     * the card for an old signal says what was true when it fired, and so the score can
+     * never be a number somebody chose later.
+     */
+    public function test_the_signal_records_what_the_card_needs_to_read_it(): void
+    {
+        $this->seedBullishSetup();
+
+        $signal = $this->generate();
+        $features = $signal->features;
+
+        foreach (['rsi', 'macd', 'macd_signal', 'macd_histogram', 'entry_zone_low', 'entry_zone_high', 'valid_until', 'quality'] as $key) {
+            $this->assertArrayHasKey($key, $features, "features should record {$key}");
+        }
+
+        // A quarter-ATR pullback below the close, a tenth-ATR beyond it, for a buy.
+        $entry = (float) $signal->entry_price;
+        $this->assertEqualsWithDelta($entry - 0.25 * $features['atr'], $features['entry_zone_low'], 1e-4);
+        $this->assertEqualsWithDelta($entry + 0.10 * $features['atr'], $features['entry_zone_high'], 1e-4);
+
+        // The same window the open command gets: one entry bar from now.
+        $this->assertTrue(Carbon::parse($features['valid_until'])->between(now()->addSeconds(295), now()->addSeconds(305)));
+
+        // SignalQuality's verdict, and the same ratio in the column the table sorts on.
+        $this->assertIsInt($features['quality']['confidence']);
+        $this->assertContains($features['quality']['risk'], ['LOW', 'MEDIUM', 'HIGH']);
+        $this->assertNotEmpty($features['quality']['factors']);
+        $this->assertEqualsWithDelta($features['quality']['confidence'] / 100, (float) $signal->confidence_score, 1e-4);
+    }
+
     // =====================================================================
     // THE REWARD FLOOR
     // =====================================================================

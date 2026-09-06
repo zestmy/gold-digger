@@ -67,6 +67,19 @@
         @endif
     </div>
 
+    <!-- The signal, read for entry -->
+    @if($card !== null)
+        <div class="mb-6">
+            <div class="mb-2 flex items-center justify-between">
+                <h2 class="text-sm font-semibold text-white">
+                    {{ $selected === null ? 'Latest signal' : 'Selected signal' }}
+                </h2>
+                <span class="text-xs text-gray-500">Click any row below to read it here</span>
+            </div>
+            @include('livewire.pages.partials.signal-card', ['card' => $card])
+        </div>
+    @endif
+
     <!-- Filters -->
     <div class="mb-4 flex flex-wrap gap-2">
         <button wire:click="$set('filter', '')"
@@ -110,14 +123,20 @@
                             <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-400">Entry</th>
                             <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-400">Stop / targets</th>
                             <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-400">Lots</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-400">Score</th>
                             <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-400">Readings</th>
                             <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-400">Outcome</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-700 bg-gray-800">
                         @foreach($signals as $signal)
-                            @php $features = $signal->features ?? []; @endphp
-                            <tr class="hover:bg-gray-700/50 transition-colors">
+                            @php
+                                $features = $signal->features ?? [];
+                                $quality = $features['quality'] ?? null;
+                                $onCard = $featured?->id === $signal->id;
+                            @endphp
+                            <tr wire:click="show({{ $signal->id }})"
+                                class="cursor-pointer transition-colors {{ $onCard ? 'bg-yellow-500/10 ring-1 ring-inset ring-yellow-500/40' : 'hover:bg-gray-700/50' }}">
                                 <td class="whitespace-nowrap px-4 py-3 text-sm text-gray-300">
                                     <x-local-time :value="$signal->generated_at" format="M d, H:i" />
                                     <span class="block text-xs text-gray-500">
@@ -152,6 +171,21 @@
                                 </td>
                                 <td class="whitespace-nowrap px-4 py-3 text-sm text-gray-300">
                                     {{ $signal->suggested_lot_size ? rtrim(rtrim(number_format($signal->suggested_lot_size, 4), '0'), '.') : '—' }}
+                                </td>
+                                <td class="whitespace-nowrap px-4 py-3 text-sm">
+                                    @if(is_array($quality) && isset($quality['confidence']))
+                                        @php
+                                            $c = (int) $quality['confidence'];
+                                            $scoreTone = $c >= 70 ? 'text-green-400' : ($c >= 55 ? 'text-yellow-400' : 'text-red-400');
+                                        @endphp
+                                        <span class="font-semibold {{ $scoreTone }}" title="Confluence {{ $quality['confluence'] ?? '?' }} of {{ $quality['possible'] ?? '?' }}">{{ $c }}%</span>
+                                        <span class="ml-1 text-xs text-gray-500">{{ $quality['grade'] ?? '' }}</span>
+                                        @if(($quality['risk'] ?? null) === 'HIGH')
+                                            <span class="block text-[10px] text-red-400">high risk</span>
+                                        @endif
+                                    @else
+                                        <span class="text-gray-600" title="No quality assessment was stored for this signal.">—</span>
+                                    @endif
                                 </td>
                                 <td class="whitespace-nowrap px-4 py-3 text-xs text-gray-400">
                                     @if(isset($features['adx']))

@@ -297,6 +297,42 @@ refactor of code that has never been compiled.
 
 ---
 
+## Reading a signal
+
+The Signals page puts the newest signal - or any row clicked - on a card that reads it
+the way somebody about to place the trade needs to: where the entry zone sits against the
+last stored close, what kind of order that calls for, how far each target is against the
+stop, how long the setup is still the one described, and what argued against it at the
+time. `App\Services\Strategy\SignalCard` builds it, from the row and one price, and
+nothing else.
+
+Everything on the card is either stored on the row at generation or arithmetic on it:
+
+- **Confidence** is `SignalQuality`'s ratio of what agreed to what could have, stored in
+  `confidence_score` and, with the factor list and the LOW / MEDIUM / HIGH risk grade, in
+  `features.quality`. It is not a number anybody chose, and an old signal's score is what
+  was true when it fired rather than what the market looks like now.
+- **The entry zone** is fixed at generation: a quarter-ATR pullback from the signal bar's
+  close and a tenth-ATR beyond it in the trade's direction, with the pullback side capped
+  at 40% of the stop distance. Inside it, an entry is still the trade described.
+- **The guidance** compares the zone with the last close. Inside the zone: *enter at
+  market*. Price gone through the zone in the trade's direction: *set a limit order* at
+  the zone and don't chase - unless it has already covered half the way to TP1, which is
+  *too late*. Price slipped to the stop side of the zone: *wait for it to reclaim* the
+  zone; through the stop: *invalidated*. Past the window: *expired*. A signal whose
+  confluence never cleared the floors says *wait for confirmation* before any of that.
+- **RSI and MACD** are recorded at the signal bar by `StrategyEvaluator` and never
+  consulted by the entry rule; the card shows whether momentum had confirmed, and a
+  reading against the trade becomes a risk note.
+- **R:R** is judged on the final rung, the target the order carries - the same one
+  `RewardFloor` judges - and each rung is shown as a multiple of the stop distance.
+- **Valid until** is the same window the open command gets: one entry bar. Rows written
+  before it was stored get it reconstructed from the timeframe.
+- **Risk assessment** lists the strategy's own refusal first, then every quality factor
+  that was not met with what it read, then any momentum or volatility reading against the
+  trade. Where nothing argued, the card says so - and names the stop as the only
+  guarantee.
+
 ## Not built
 
 - **News filter.** `news_filter_enabled` is stored; there is no news source.

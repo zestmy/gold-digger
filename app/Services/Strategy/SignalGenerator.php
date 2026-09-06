@@ -57,7 +57,27 @@ final class SignalGenerator
         private readonly SymbolResolver $symbols = new SymbolResolver,
         private readonly NewsBlackout $news = new NewsBlackout,
         private readonly RewardFloor $reward = new RewardFloor,
+        private readonly SignalQuality $quality = new SignalQuality,
     ) {}
+
+    /**
+     * The entry zone, as fractions of ATR either side of the bar close.
+     *
+     * The strategy enters at the close of the signal bar; a person reading the card does
+     * not, and needs to know how far from that close an entry is still the trade that was
+     * described. A quarter-ATR pullback is still that trade. A tenth-ATR beyond the close
+     * in the trade's own direction is still that trade. Past either, it is a different one:
+     * further back and the setup is being tested, further on and the reward has been spent
+     * on the entry.
+     *
+     * The pullback side is also capped at a share of the stop distance, so a zone can never
+     * reach halfway to the stop however the ATR multiple is configured.
+     */
+    private const ZONE_PULLBACK_ATR = 0.25;
+
+    private const ZONE_CHASE_ATR = 0.10;
+
+    private const ZONE_MAX_OF_STOP = 0.40;
 
     /**
      * Evaluate one strategy and act on the result.
@@ -105,6 +125,8 @@ final class SignalGenerator
 
         $settings = BotSettings::where('user_id', $strategy->user_id)->first();
         $levels = $this->levels($strategy, $setup, $spec['pip_size']);
+        $zone = $this->entryZone($setup, $levels);
+        $quality = $this->assess($strategy, $accountId, $symbol, $setup, $zone);
 
         $skipReason = $this->firstObjection($strategy, $setup, $settings, $heartbeat, $levels);
 
@@ -123,7 +145,7 @@ final class SignalGenerator
             }
         }
 
-        return DB::transaction(function () use ($strategy, $setup, $levels, $skipReason, $lots, $symbol, $accountId, $heartbeat) {
+        return DB::transaction(function () use ($strategy, $setup, $levels, $zone, $quality, $skipReason, $lots, $symbol, $accountId, $heartbeat) {
             // createOrFirst, not create: the check above avoids the write on the ordinary
             // path, but two overlapping candle pushes can both pass it. The unique index
             // on (strategy_id, generated_at) turns the loser's insert into a lookup
@@ -144,13 +166,21 @@ final class SignalGenerator
                     'tp2_price' => $levels['tp2_price'],
                     'tp3_price' => $levels['tp3_price'],
                     'suggested_lot_size' => $lots,
-                    'confidence_score' => null,
+                    // A ratio of what agreed to what could have, from SignalQuality - not
+                    // a number anybody chose. Null when the assessment could not be made.
+                    'confidence_score' => $quality !== null ? $quality['confidence'] / 100 : null,
                     'features' => $setup->features + [
                         'sl_pips' => $levels['sl_pips'],
                         'order_tp_pips' => $levels['order_tp_pips'],
                         'sessions_open' => $this->sessions->active($setup->barTime),
                         'balance' => $heartbeat?->balance !== null ? (float) $heartbeat->balance : null,
                         'pip_size' => $levels['pip_size'],
+                        'entry_zone_low' => $zone['low'],
+                        'entry_zone_high' => $zone['high'],
+                        // The same window the open command gets. After it the setup is a
+                        // different bar's story, whoever is reading it.
+                        'valid_until' => now()->addSeconds($this->timeframeSeconds($strategy->timeframe_entry))->toIso8601String(),
+                        'quality' => $quality,
                     ],
                     'was_executed' => false,
                     'skip_reason' => $skipReason,
@@ -246,6 +276,80 @@ final class SignalGenerator
             'tp2_price' => $target((float) $strategy->tp2_pips),
             'tp3_price' => $target($strategy->tp3_pips !== null ? (float) $strategy->tp3_pips : null),
             'order_tp_pips' => $finalTargetPips,
+        ];
+    }
+
+    /**
+     * Where an entry is still the trade this signal describes.
+     *
+     * @param  array{sl_price: float}  $levels
+     * @return array{low: float, high: float}
+     */
+    private function entryZone(Setup $setup, array $levels): array
+    {
+        $stopDistance = abs($setup->entryPrice - $levels['sl_price']);
+
+        $pullback = min(self::ZONE_PULLBACK_ATR * $setup->atr, self::ZONE_MAX_OF_STOP * $stopDistance);
+        $chase = self::ZONE_CHASE_ATR * $setup->atr;
+        $sign = $setup->sign();
+
+        $low = $setup->entryPrice - ($sign > 0 ? $pullback : $chase);
+        $high = $setup->entryPrice + ($sign > 0 ? $chase : $pullback);
+
+        return ['low' => round($low, 5), 'high' => round($high, 5)];
+    }
+
+    /**
+     * How much agrees with this setup, scored the way every other surface scores it.
+     *
+     * Descriptive, and deliberately unable to stop a trade: the gates in firstObjection()
+     * decide that, and a scoring failure - a series the context cannot read, a calendar
+     * that will not load - is reported and recorded as "no assessment" rather than allowed
+     * to abort an entry the rules have already accepted.
+     *
+     * @param  array{low: float, high: float}  $zone
+     * @return array<string, mixed>|null
+     */
+    private function assess(Strategy $strategy, ?int $accountId, string $symbol, Setup $setup, array $zone): ?array
+    {
+        try {
+            $assessment = $this->quality->assess(
+                $strategy,
+                $accountId,
+                $symbol,
+                $setup->direction,
+                $zone['low'],
+                $zone['high'],
+            );
+        } catch (\Throwable $e) {
+            report($e);
+
+            return null;
+        }
+
+        // Only what the card needs, and only the parts that are stable to store: the
+        // factor list with its notes, the totals, and the verdicts. The floors are kept so
+        // a later reader knows what bar the score was judged against at the time.
+        return [
+            'confidence' => $assessment['confidence'],
+            'grade' => $assessment['grade'],
+            'risk' => $assessment['risk'],
+            'entry_status' => $assessment['entry_status'],
+            'tradeable' => $assessment['tradeable'],
+            'confluence' => $assessment['confluence'],
+            'possible' => $assessment['possible'],
+            'directional' => $assessment['directional'],
+            'min_confluence' => $assessment['min_confluence'],
+            'min_directional' => $assessment['min_directional'],
+            'why' => $assessment['why'],
+            'factors' => array_map(fn (array $f) => [
+                'key' => $f['key'],
+                'name' => $f['name'],
+                'weight' => $f['weight'],
+                'met' => $f['met'],
+                'directional' => $f['directional'],
+                'note' => $f['note'],
+            ], $assessment['factors']),
         ];
     }
 

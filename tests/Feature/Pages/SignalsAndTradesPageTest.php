@@ -328,6 +328,108 @@ class SignalsAndTradesPageTest extends TestCase
         Livewire::test(SignalsPage::class)->assertSee('No bars have ever arrived');
     }
 
+    // =====================================================================
+    // THE SIGNAL CARD
+    // =====================================================================
+
+    /**
+     * The newest signal is read for entry at the top of the page: where its zone sits
+     * against the last stored close, and what order that calls for.
+     */
+    public function test_the_latest_signal_is_read_for_entry_against_the_last_close(): void
+    {
+        $this->feedAt(2001.00);
+
+        $this->signal([
+            'features' => [
+                'adx' => 30.5, 'atr' => 3.2, 'sl_pips' => 48, 'trend_direction' => 'buy', 'rsi' => 61.0,
+                'macd_histogram' => 0.2, 'entry_zone_low' => 1999.20, 'entry_zone_high' => 2000.30,
+                'valid_until' => now()->addMinutes(5)->toIso8601String(),
+                'quality' => ['confidence' => 78, 'grade' => 'B', 'risk' => 'MEDIUM', 'entry_status' => 'CAN ENTRY NOW',
+                    'tradeable' => true, 'confluence' => 5.0, 'possible' => 6.5, 'directional' => 3.5, 'why' => '', 'factors' => []],
+            ],
+        ]);
+
+        Livewire::test(SignalsPage::class)
+            ->assertSee('Latest signal')
+            ->assertSee('78%')
+            ->assertSee('Entry below current')
+            ->assertSee('SET LIMIT ORDER')
+            ->assertSee('2,001.00')
+            ->assertSee('1,999.20')
+            ->assertSee('TP1: 2,003.00')
+            ->assertSee('R:R')
+            ->assertSee('Risk assessment');
+    }
+
+    public function test_any_row_can_be_put_on_the_card(): void
+    {
+        $this->feedAt(2000.00);
+
+        // Dated now, so neither has run out its window: the card judges an expired signal
+        // before it looks at price.
+        $older = $this->signal(['direction' => 'sell', 'entry_price' => 1990.00, 'sl_price' => 1995.00,
+            'tp1_price' => 1987.00, 'tp2_price' => 1980.00, 'tp3_price' => 1970.00,
+            'generated_at' => now()->subMinutes(3)]);
+        $this->signal(['generated_at' => now()->subMinutes(1)]);
+
+        Livewire::test(SignalsPage::class)
+            ->assertSee('Latest signal')
+            ->call('show', $older->id)
+            ->assertSee('Selected signal')
+            // The sell is now on the card, with price through its stop.
+            ->assertSee('INVALIDATED');
+    }
+
+    /**
+     * Signals recorded before the card existed carry no score, zone or window, and still
+     * have to render: the guidance needs only the prices.
+     */
+    public function test_a_signal_without_a_stored_assessment_still_renders_a_card(): void
+    {
+        $this->signal(['generated_at' => now()->subMinutes(5)]);
+
+        Livewire::test(SignalsPage::class)
+            ->assertOk()
+            ->assertSee('Latest signal')
+            ->assertSee('NO LIVE PRICE');
+    }
+
+    /**
+     * And one whose window has passed says so first, whatever price is doing - a limit
+     * order resting on a setup from March is not a trade.
+     */
+    public function test_a_signal_past_its_window_is_shown_as_expired(): void
+    {
+        $this->feedAt(2001.00);
+        $this->signal();
+
+        Livewire::test(SignalsPage::class)->assertSee('EXPIRED');
+    }
+
+    private function feedAt(float $close): void
+    {
+        BotHeartbeat::create([
+            'user_id' => $this->user->id,
+            'broker_account_id' => $this->account->id,
+            'source' => 'mql5_ea',
+            'resolved_symbol' => self::SYMBOL,
+            'last_seen_at' => now(),
+        ]);
+
+        Candle::create([
+            'user_id' => $this->user->id,
+            'broker_account_id' => $this->account->id,
+            'symbol' => self::SYMBOL,
+            'timeframe' => 'M5',
+            'open_time' => now()->subMinutes(5),
+            'open' => $close,
+            'high' => $close + 1,
+            'low' => $close - 1,
+            'close' => $close,
+        ]);
+    }
+
     public function test_a_short_series_is_reported_as_still_warming_up(): void
     {
         BotHeartbeat::create([

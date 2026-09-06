@@ -6,6 +6,7 @@ use App\Models\BotHeartbeat;
 use App\Models\Candle;
 use App\Models\Signal;
 use App\Models\Strategy;
+use App\Services\Strategy\SignalCard;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
@@ -35,6 +36,21 @@ class Signals extends Component
 
     /** Filter: '' for everything, 'taken' for acted on, or a specific skip reason. */
     public string $filter = '';
+
+    /**
+     * The signal shown on the card, or null for the newest.
+     *
+     * The card is the point of the page for somebody about to place a trade: the row says
+     * what fired, the card says what to do about it against the price now. Any row can be
+     * put on it, because the question "was that one worth taking" is asked about old
+     * signals as often as new ones.
+     */
+    public ?int $selected = null;
+
+    public function show(int $signalId): void
+    {
+        $this->selected = $signalId;
+    }
 
     /**
      * What each skip reason means, in the terms a person would ask the question.
@@ -90,13 +106,58 @@ class Signals extends Component
             ->orderByDesc('last_seen_at')
             ->first();
 
+        $featured = $this->featured($base);
+
         return view('livewire.pages.signals', [
             'signals' => $signals,
             'byReason' => $byReason,
             'total' => array_sum($byReason),
             'heartbeat' => $heartbeat,
             'feed' => $this->feed($heartbeat),
+            'featured' => $featured,
+            'card' => $featured === null ? null : $this->card($featured, $heartbeat),
         ]);
+    }
+
+    /**
+     * The signal on the card: the one asked for, if it is this user's, else the newest.
+     */
+    private function featured($base): ?Signal
+    {
+        if ($this->selected !== null) {
+            $chosen = (clone $base)->find($this->selected);
+
+            if ($chosen !== null) {
+                return $chosen;
+            }
+        }
+
+        return (clone $base)->orderByDesc('generated_at')->first();
+    }
+
+    /**
+     * The card, against the last close the feed has stored for that instrument.
+     *
+     * The close of the last stored bar rather than a live tick, because a live tick is
+     * something only the terminal has. Its time is shown beside the price so a reader
+     * knows how stale "current" is.
+     *
+     * @return array<string, mixed>
+     */
+    private function card(Signal $signal, ?BotHeartbeat $heartbeat): array
+    {
+        $bar = $heartbeat?->broker_account_id === null
+            ? null
+            : Candle::query()
+                ->series($heartbeat->broker_account_id, $signal->symbol, $signal->timeframe)
+                ->orderByDesc('open_time')
+                ->first();
+
+        return app(SignalCard::class)->for(
+            $signal,
+            $bar === null ? null : (float) $bar->close,
+            $bar?->open_time,
+        );
     }
 
     /**

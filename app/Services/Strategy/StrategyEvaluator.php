@@ -105,6 +105,12 @@ final class StrategyEvaluator
         /** @var Candle $signalBar */
         $signalBar = $entryCandles[$last];
 
+        // Momentum readings, recorded but never consulted. The entry rule is the cross with
+        // the higher timeframe's agreement, and stays so; RSI and MACD are stored so the
+        // signal card can say whether momentum had confirmed at the bar the decision was
+        // taken on, and so that question can be answered later from the row alone.
+        $macd = Indicators::macd($closes);
+
         return new Setup(
             direction: $direction,
             entryPrice: (float) $signalBar->close,
@@ -120,6 +126,10 @@ final class StrategyEvaluator
                 'adx' => round($adx, 4),
                 'plus_di' => $this->rounded(Indicators::last($adxSeries['plus_di'])),
                 'minus_di' => $this->rounded(Indicators::last($adxSeries['minus_di'])),
+                'rsi' => $this->rounded(Indicators::last(Indicators::rsi($closes))),
+                'macd' => $this->rounded(Indicators::last($macd['macd'])),
+                'macd_signal' => $this->rounded(Indicators::last($macd['signal'])),
+                'macd_histogram' => $this->rounded(Indicators::last($macd['histogram'])),
                 'atr' => round($atr, 5),
                 'spread_points' => $signalBar->spread_points,
                 'entry_timeframe' => $strategy->timeframe_entry,
