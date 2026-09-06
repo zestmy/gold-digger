@@ -9,6 +9,7 @@ use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class BrokerAccountResource extends Resource
 {
@@ -19,6 +20,15 @@ class BrokerAccountResource extends Resource
     protected static ?string $navigationGroup = 'Accounts';
 
     protected static ?int $navigationSort = 1;
+
+    /**
+     * Every tenant's broker accounts. See TradeResource::getEloquentQuery() for why the
+     * console has to say so explicitly.
+     */
+    public static function getEloquentQuery(): Builder
+    {
+        return static::getModel()::acrossTenants()->with('user');
+    }
 
     public static function form(Form $form): Form
     {

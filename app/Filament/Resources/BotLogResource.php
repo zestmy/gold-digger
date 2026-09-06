@@ -4,11 +4,14 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\BotLogResource\Pages;
 use App\Models\BotLog;
+use App\Models\Scopes\TenantScope;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\Relation;
 
 class BotLogResource extends Resource
 {
@@ -19,6 +22,18 @@ class BotLogResource extends Resource
     protected static ?string $navigationGroup = 'System';
 
     protected static ?int $navigationSort = 1;
+
+    /**
+     * Every tenant's logs. See TradeResource::getEloquentQuery() for why the console has
+     * to say so explicitly, and why the scoped relation is declared here.
+     */
+    public static function getEloquentQuery(): Builder
+    {
+        return static::getModel()::acrossTenants()->with([
+            'signal',
+            'trade' => fn (Relation $query) => $query->withoutGlobalScope(TenantScope::class),
+        ]);
+    }
 
     public static function form(Form $form): Form
     {
@@ -49,7 +64,7 @@ class BotLogResource extends Resource
                         Forms\Components\KeyValue::make('context')
                             ->label('Context Data'),
                         Forms\Components\Select::make('related_trade_id')
-                            ->relationship('trade', 'id')
+                            ->relationship('trade', 'id', modifyQueryUsing: fn (Builder $query) => $query->withoutGlobalScope(TenantScope::class))
                             ->label('Related Trade')
                             ->searchable(),
                         Forms\Components\Select::make('related_signal_id')
@@ -103,7 +118,7 @@ class BotLogResource extends Resource
                         'critical' => 'Critical',
                     ]),
                 Tables\Filters\SelectFilter::make('source')
-                    ->options(fn () => BotLog::distinct()->pluck('source', 'source')->toArray()),
+                    ->options(fn () => BotLog::acrossTenants()->distinct()->pluck('source', 'source')->toArray()),
             ])
             ->actions([
                 Tables\Actions\ViewAction::make(),

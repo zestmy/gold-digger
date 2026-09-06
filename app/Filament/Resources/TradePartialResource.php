@@ -3,12 +3,15 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\TradePartialResource\Pages;
+use App\Models\Scopes\TenantScope;
 use App\Models\TradePartial;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\Relation;
 
 class TradePartialResource extends Resource
 {
@@ -16,9 +19,21 @@ class TradePartialResource extends Resource
 
     protected static ?string $navigationIcon = 'heroicon-o-scissors';
 
-    protected static ?string $navigationGroup = 'Media';
+    protected static ?string $navigationGroup = 'Trading';
 
-    protected static ?int $navigationSort = 1;
+    protected static ?int $navigationSort = 4;
+
+    /**
+     * A partial carries no `user_id` and is not tenant-scoped itself; it belongs to
+     * whoever owns its trade. The trade is what the tenant filter would hide, so it is
+     * loaded here without it. See TradeResource::getEloquentQuery().
+     */
+    public static function getEloquentQuery(): Builder
+    {
+        return static::getModel()::query()->with([
+            'trade' => fn (Relation $query) => $query->withoutGlobalScope(TenantScope::class),
+        ]);
+    }
 
     public static function form(Form $form): Form
     {
@@ -26,8 +41,10 @@ class TradePartialResource extends Resource
             ->schema([
                 Forms\Components\Section::make('Partial Close Information')
                     ->schema([
+                        // Trades are tenant-scoped; without the modifier this list would
+                        // offer only the administrator's own.
                         Forms\Components\Select::make('trade_id')
-                            ->relationship('trade', 'id')
+                            ->relationship('trade', 'id', modifyQueryUsing: fn (Builder $query) => $query->withoutGlobalScope(TenantScope::class))
                             ->required()
                             ->searchable(),
                         Forms\Components\TextInput::make('mt5_deal_ticket')

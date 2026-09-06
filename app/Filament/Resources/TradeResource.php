@@ -4,12 +4,15 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\TradeResource\Pages;
 use App\Filament\Resources\TradeResource\RelationManagers;
+use App\Models\Scopes\TenantScope;
 use App\Models\Trade;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\Relation;
 
 class TradeResource extends Resource
 {
@@ -21,6 +24,25 @@ class TradeResource extends Resource
 
     protected static ?int $navigationSort = 1;
 
+    /**
+     * Every tenant's trades, not the administrator's own.
+     *
+     * `Tenant::current()` falls back to the signed-in user, so without this the support
+     * console showed each administrator their own account and nothing else - a console
+     * that could only see its operator. The relations are declared here too, unscoped,
+     * because Filament only adds an eager load for a column when none exists yet: left to
+     * itself it would load `strategy` through the tenant filter and render a blank name
+     * against every trade that is not the administrator's.
+     */
+    public static function getEloquentQuery(): Builder
+    {
+        return static::getModel()::acrossTenants()->with([
+            'user',
+            'strategy' => fn (Relation $query) => $query->withoutGlobalScope(TenantScope::class),
+            'brokerAccount' => fn (Relation $query) => $query->withoutGlobalScope(TenantScope::class),
+        ]);
+    }
+
     public static function form(Form $form): Form
     {
         return $form
@@ -30,11 +52,13 @@ class TradeResource extends Resource
                         Forms\Components\Select::make('user_id')
                             ->relationship('user', 'name')
                             ->required(),
+                        // Both related models are tenant-scoped, so without the modifier
+                        // these lists would offer only the administrator's own rows.
                         Forms\Components\Select::make('strategy_id')
-                            ->relationship('strategy', 'name')
+                            ->relationship('strategy', 'name', modifyQueryUsing: fn (Builder $query) => $query->withoutGlobalScope(TenantScope::class))
                             ->required(),
                         Forms\Components\Select::make('broker_account_id')
-                            ->relationship('brokerAccount', 'label')
+                            ->relationship('brokerAccount', 'label', modifyQueryUsing: fn (Builder $query) => $query->withoutGlobalScope(TenantScope::class))
                             ->required(),
                         Forms\Components\TextInput::make('mt5_ticket')
                             ->numeric(),
@@ -132,6 +156,11 @@ class TradeResource extends Resource
             ->columns([
                 Tables\Columns\TextColumn::make('id')
                     ->sortable(),
+                // Whose, now that the list is everybody's.
+                Tables\Columns\TextColumn::make('user.name')
+                    ->label('User')
+                    ->sortable()
+                    ->toggleable(),
                 Tables\Columns\TextColumn::make('symbol')
                     ->searchable(),
                 Tables\Columns\TextColumn::make('direction')
@@ -197,7 +226,6 @@ class TradeResource extends Resource
     {
         return [
             RelationManagers\PartialsRelationManager::class,
-            RelationManagers\ScreenshotsRelationManager::class,
         ];
     }
 

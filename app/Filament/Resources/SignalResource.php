@@ -3,12 +3,15 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\SignalResource\Pages;
+use App\Models\Scopes\TenantScope;
 use App\Models\Signal;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\Relation;
 
 class SignalResource extends Resource
 {
@@ -20,14 +23,29 @@ class SignalResource extends Resource
 
     protected static ?int $navigationSort = 3;
 
+    /**
+     * A signal carries no `user_id` and is not tenant-scoped itself; it belongs to whoever
+     * owns its strategy. The strategy is what the tenant filter would hide, so it is
+     * loaded here without it - otherwise every signal but the administrator's own would
+     * list with a blank strategy. See TradeResource::getEloquentQuery().
+     */
+    public static function getEloquentQuery(): Builder
+    {
+        return static::getModel()::query()->with([
+            'strategy' => fn (Relation $query) => $query->withoutGlobalScope(TenantScope::class),
+        ]);
+    }
+
     public static function form(Form $form): Form
     {
         return $form
             ->schema([
                 Forms\Components\Section::make('Signal Information')
                     ->schema([
+                        // Strategies and trades are tenant-scoped; without the modifier
+                        // these lists would offer only the administrator's own rows.
                         Forms\Components\Select::make('strategy_id')
-                            ->relationship('strategy', 'name')
+                            ->relationship('strategy', 'name', modifyQueryUsing: fn (Builder $query) => $query->withoutGlobalScope(TenantScope::class))
                             ->required(),
                         Forms\Components\TextInput::make('symbol')
                             ->required()
@@ -92,7 +110,7 @@ class SignalResource extends Resource
                         Forms\Components\TextInput::make('skip_reason')
                             ->maxLength(255),
                         Forms\Components\Select::make('resulting_trade_id')
-                            ->relationship('resultingTrade', 'id')
+                            ->relationship('resultingTrade', 'id', modifyQueryUsing: fn (Builder $query) => $query->withoutGlobalScope(TenantScope::class))
                             ->label('Resulting Trade'),
                     ])->columns(3),
             ]);
@@ -151,7 +169,7 @@ class SignalResource extends Resource
                 Tables\Filters\TernaryFilter::make('was_executed')
                     ->label('Executed'),
                 Tables\Filters\SelectFilter::make('strategy')
-                    ->relationship('strategy', 'name'),
+                    ->relationship('strategy', 'name', fn (Builder $query) => $query->withoutGlobalScope(TenantScope::class)),
             ])
             ->actions([
                 Tables\Actions\EditAction::make(),

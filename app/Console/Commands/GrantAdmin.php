@@ -8,7 +8,8 @@ use Illuminate\Console\Command;
 /**
  * Grant Admin
  *
- * The only way to reach the Filament panel.
+ * How an existing account comes to reach the Filament panel. (A new one can be created with
+ * access in one step: `user:create --admin`.)
  *
  * Deliberately a console command rather than a screen: the panel is not scoped by user, so an
  * admin sees every account's trading data. That is acceptable for the person who owns the

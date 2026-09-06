@@ -9,8 +9,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 /**
  * Daily Summary Model
  *
- * Pre-aggregated daily statistics per user per broker account.
- * Functions like a materialized view, updated at end of each trading day.
+ * UNUSED. Nothing writes to `daily_summaries` - no job aggregates the day, and the
+ * dashboard computes its figures from `trades` directly. The console resource that
+ * listed the empty table has been removed; the model and table stay only because
+ * dropping them is a migration decision to be taken on its own.
+ *
+ * Original intent: pre-aggregated daily statistics per user per broker account,
+ * functioning like a materialized view updated at the end of each trading day.
  *
  * WHY pre-aggregate?
  * - Dashboard loads instantly without scanning all trades

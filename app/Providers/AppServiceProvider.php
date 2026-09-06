@@ -10,6 +10,7 @@ use App\Models\BotToken;
 use App\Models\BrokerAccount;
 use App\Models\ChartAnalysis;
 use App\Models\DailySummary;
+use App\Models\Signal;
 use App\Models\Strategy;
 use App\Models\StrategyImprovement;
 use App\Models\TelegramAccount;
@@ -17,6 +18,8 @@ use App\Models\TelegramChannel;
 use App\Models\TelegramSignal;
 use App\Models\Trade;
 use App\Models\TradeCommand;
+use App\Models\TradePartial;
+use App\Models\TradeScreenshot;
 use App\Models\User;
 use App\Observers\AdminActionObserver;
 use App\Observers\UserObserver;
@@ -56,8 +59,10 @@ class AppServiceProvider extends ServiceProvider
      * it carries an edit action and a bulk delete. None of that was recorded anywhere.
      *
      * The list is the models that carry an owner, because those are the ones where "somebody
-     * else's" means something. `AdminAction` itself is deliberately absent: an audit trail
-     * that audited its own writes would grow without end and tell nobody anything.
+     * else's" means something. Three of them - Signal, TradePartial, TradeScreenshot - carry
+     * it one step removed, through their strategy or trade; the observer knows how to
+     * follow that. `AdminAction` itself is deliberately absent: an audit trail that audited
+     * its own writes would grow without end and tell nobody anything.
      *
      * The observer is silent unless an administrator touches a row belonging to a different
      * user, so on a single-operator deployment this costs a comparison per save and writes
@@ -74,6 +79,7 @@ class AppServiceProvider extends ServiceProvider
             BrokerAccount::class,
             ChartAnalysis::class,
             DailySummary::class,
+            Signal::class,
             Strategy::class,
             StrategyImprovement::class,
             TelegramAccount::class,
@@ -81,6 +87,8 @@ class AppServiceProvider extends ServiceProvider
             TelegramSignal::class,
             Trade::class,
             TradeCommand::class,
+            TradePartial::class,
+            TradeScreenshot::class,
         ] as $model) {
             $model::observe(AdminActionObserver::class);
         }

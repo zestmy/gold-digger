@@ -16,7 +16,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * - Master bot on/off switch (is_active)
  * - Risk management parameters (risk_percentage, max_daily_loss_percentage)
  * - Trade filters (allowed_sessions, news_filter_enabled)
- * - Screenshot capture preferences
+ * - The AI fund, the copier's protection rules, and the per-tenant AI allowance
+ *
+ * `capture_screenshots` is still a column but nothing reads it: no code ever wrote a
+ * trade screenshot. It stays until a drop migration is decided on, and is no longer
+ * offered on any form.
  */
 class BotSettings extends Model
 {
@@ -43,6 +47,9 @@ class BotSettings extends Model
         'news_blackout_after_minutes',
         'ai_trading_enabled',
         'ai_capital_cap',
+        // The tenant's own AI allowance. Fillable so the support console can set it; the
+        // tenant's Settings page never sends it, so this does not hand them the key.
+        'ai_daily_call_limit',
         'ai_risk_percentage',
         'ai_max_concurrent_trades',
         'ai_max_trades_per_day', 'ai_autonomous', 'ai_autonomous_symbols',
@@ -75,6 +82,8 @@ class BotSettings extends Model
             // absent means nobody has decided how much this may lose, which is a different
             // statement from zero and must not collapse into one.
             'ai_trading_enabled' => 'boolean',
+            // Null survives the cast, and null means "follow the platform default".
+            'ai_daily_call_limit' => 'integer',
             'ai_max_concurrent_trades' => 'integer',
             'ai_max_trades_per_day' => 'integer',
             'ai_autonomous' => 'boolean',

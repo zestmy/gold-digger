@@ -3,6 +3,10 @@
 namespace App\Observers;
 
 use App\Models\AdminAction;
+use App\Models\Scopes\TenantScope;
+use App\Models\Signal;
+use App\Models\TradePartial;
+use App\Models\TradeScreenshot;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
@@ -21,6 +25,16 @@ use Throwable;
  *
  * That also means it does not audit the console's own housekeeping - an operator editing
  * their own strategy is using the application, not exercising a privilege.
+ *
+ * ## Rows that belong to somebody only through their parent
+ *
+ * A signal has no `user_id`; its strategy does. A partial close and a screenshot belong to
+ * a trade, and the trade to a user. Those three used to be invisible here - the observer
+ * found no owner and said nothing - which meant the console's Signals and Partials
+ * screens, which list every tenant's rows, were the two places an administrator could
+ * edit unrecorded. `ownerOf()` follows the parent one step, and does so past the tenant
+ * filter: an administrator's session is itself a tenant, and a scoped lookup would find
+ * nobody's strategy but their own.
  *
  * ## Redaction is not optional
  *
@@ -82,17 +96,17 @@ class AdminActionObserver
                 return;
             }
 
-            $owner = $model->getAttribute('user_id');
+            $owner = $this->ownerOf($model);
 
             // Their own data is not a privileged act. Only reach for the audit table when
             // an administrator has stepped outside their own account.
-            if ($owner === null || (int) $owner === (int) $admin->getKey()) {
+            if ($owner === null || $owner === (int) $admin->getKey()) {
                 return;
             }
 
             AdminAction::create([
                 'admin_user_id' => $admin->getKey(),
-                'subject_user_id' => (int) $owner,
+                'subject_user_id' => $owner,
                 'action' => $action,
                 'subject_type' => $model::class,
                 'subject_id' => $model->getKey(),
@@ -106,6 +120,47 @@ class AdminActionObserver
                 'exception' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Whose row this is.
+     *
+     * The column when there is one; otherwise the parent's column, read without the
+     * tenant filter for the reason given at the top. One indexed lookup of a single
+     * value, and null whenever the answer is not there to be had - a signal whose strategy
+     * has gone is nobody's, and nobody's is not audited.
+     */
+    private function ownerOf(Model $model): ?int
+    {
+        $owner = $model->getAttribute('user_id');
+
+        if ($owner !== null) {
+            return (int) $owner;
+        }
+
+        $parent = match (true) {
+            $model instanceof Signal => 'strategy',
+            $model instanceof TradePartial, $model instanceof TradeScreenshot => 'trade',
+            default => null,
+        };
+
+        if ($parent === null) {
+            return null;
+        }
+
+        $relation = $model->{$parent}();
+        $key = $model->getAttribute($relation->getForeignKeyName());
+
+        if ($key === null) {
+            return null;
+        }
+
+        $owner = $relation->getRelated()->newQuery()
+            ->withoutGlobalScope(TenantScope::class)
+            ->whereKey($key)
+            ->value('user_id');
+
+        return $owner === null ? null : (int) $owner;
     }
 
     /**

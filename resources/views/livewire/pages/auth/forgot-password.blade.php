@@ -1,12 +1,24 @@
 <?php
 
 use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Layout;
 use Livewire\Volt\Component;
 
 new #[Layout('layouts.guest')] class extends Component
 {
     public string $email = '';
+
+    /**
+     * What the form says whatever the address was.
+     *
+     * The broker's own status strings say "We can't find a user with that email address",
+     * which turns this form into a directory: type an address, learn whether it has an
+     * account here. On a box that holds broker credentials, knowing which addresses to
+     * phish is most of the work.
+     */
+    public const SENT = 'If that address has an account, a reset link has been sent to it.';
 
     /**
      * Send a password reset link to the provided email address.
@@ -17,22 +29,27 @@ new #[Layout('layouts.guest')] class extends Component
             'email' => ['required', 'string', 'email'],
         ]);
 
-        // We will send the password reset link to this user. Once we have attempted
-        // to send the link, we will examine the response then see the message we
-        // need to show to the user. Finally, we'll send out a proper response.
-        $status = Password::sendResetLink(
-            $this->only('email')
-        );
+        // The route carries throttle:6,1 too, but that only meets the page load: the
+        // submission arrives through Livewire's own endpoint, which does not re-run a
+        // route's throttle. This is the limit that actually binds, and it is keyed the way
+        // the login form's is, so one caller cannot spend everybody's allowance.
+        $key = Str::transliterate(Str::lower($this->email).'|'.request()->ip());
 
-        if ($status != Password::RESET_LINK_SENT) {
-            $this->addError('email', __($status));
+        if (RateLimiter::tooManyAttempts($key, 6)) {
+            $this->addError('email', 'Too many attempts. Try again in a minute.');
 
             return;
         }
 
+        RateLimiter::hit($key);
+
+        // The status is deliberately not shown. Whatever the broker found, the caller is
+        // told the same thing - see SENT.
+        Password::sendResetLink($this->only('email'));
+
         $this->reset('email');
 
-        session()->flash('status', __($status));
+        session()->flash('status', self::SENT);
     }
 }; ?>
 

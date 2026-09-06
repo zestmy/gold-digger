@@ -10,11 +10,14 @@ use Illuminate\Support\Facades\Storage;
 /**
  * Trade Screenshot Model
  *
- * Stores chart screenshots captured at key trade events.
- * Screenshots help with post-trade review and pattern recognition.
+ * UNUSED. Nothing in the application writes a row to `trade_screenshots`: the executor
+ * never captured a chart, and `bot_settings.capture_screenshots` toggled nothing. The
+ * console resource and relation manager that displayed the empty table have been
+ * removed; the model and table stay only because dropping them is a migration decision
+ * to be taken on its own.
  *
- * Files are stored in: storage/app/public/screenshots/
- * Accessible via: /storage/screenshots/...
+ * Original intent: chart screenshots at key trade events, stored under
+ * storage/app/public/screenshots/ and served from /storage/screenshots/...
  */
 class TradeScreenshot extends Model
 {
