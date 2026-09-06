@@ -45,9 +45,30 @@ use Illuminate\Support\Carbon;
  *
  * A high decline rate is the expected result. If this approves most of what it sees, that
  * is a finding about the reviewer, not about the signals.
+ *
+ * ## Two kinds of signal never reach the model here
+ *
+ * An autonomous decision was made by a model reading this system's own measurements, and
+ * `AutonomousTrader` stores it already approved - asking a second model to approve what
+ * the first proposed is not a review, it is the same opinion bought twice. A layer is a
+ * further entry on a signal the model already judged, at the stop it already judged.
+ *
+ * Both still pass every gate, every time: kill switch, session, news, fund, staleness.
+ * What they skip is the paid opinion, because for them there is nothing left to have an
+ * opinion about. See `gates()`.
  */
 final class SignalReviewer
 {
+    /**
+     * Kinds whose review is the gates alone.
+     *
+     * @var array<int, string>
+     */
+    private const GATES_ONLY = [
+        TelegramSignal::KIND_AUTONOMOUS,
+        TelegramSignal::KIND_LAYER,
+    ];
+
     /** Beyond this, the market that produced the signal is not the market you would enter. */
     public const MAX_AGE_MINUTES = 45;
 
@@ -76,6 +97,10 @@ final class SignalReviewer
      */
     public function review(TelegramSignal $signal): array
     {
+        if (in_array((string) $signal->kind, self::GATES_ONLY, true)) {
+            return $this->gates($signal);
+        }
+
         if ($signal->parse_status !== TelegramSignal::PARSE_OK) {
             return $this->decline('The message never parsed into a signal, so there is nothing to review.');
         }
@@ -117,6 +142,38 @@ final class SignalReviewer
             'reasoning' => $reasoning !== '' ? $reasoning : 'No reasoning given.',
             'confidence' => max(0, min(100, $confidence)),
             'model' => $result['model'],
+        ];
+    }
+
+    /**
+     * The deterministic checks alone, with no model behind them.
+     *
+     * Approval here means only that nothing in code objects right now. The confidence
+     * and model carried on the signal are the ones whatever judged it originally wrote
+     * there, and they are returned as-is rather than invented: a gates-only pass is not a
+     * fresh opinion and should not look like one in the record.
+     *
+     * @return array{status: string, reasoning: string, confidence: int|null, model: string|null}
+     */
+    public function gates(TelegramSignal $signal): array
+    {
+        if ($signal->parse_status !== TelegramSignal::PARSE_OK) {
+            return $this->decline('The message never parsed into a signal, so there is nothing to review.');
+        }
+
+        $settings = BotSettings::where('user_id', $signal->user_id)->first();
+
+        $objection = $this->gate($signal, $settings);
+
+        if ($objection !== null) {
+            return $this->decline($objection);
+        }
+
+        return [
+            'status' => TelegramSignal::REVIEW_APPROVED,
+            'reasoning' => 'Every gate passed. The model was not asked again: this signal carries its own judgement.',
+            'confidence' => $signal->review_confidence === null ? null : (int) $signal->review_confidence,
+            'model' => $signal->review_model,
         ];
     }
 

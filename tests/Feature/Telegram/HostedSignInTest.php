@@ -9,6 +9,8 @@ use App\Models\TelegramAccount;
 use App\Models\TelegramSignal;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -208,6 +210,42 @@ class HostedSignInTest extends TestCase
 
         // A stolen worker token cannot replay a sign-in with a code already spent.
         $this->assertNull($this->worker('get', "accounts/{$account->id}/login")->json('code'));
+    }
+
+    /**
+     * "In the cache" is a database table by default. Five minutes bounds how long a code
+     * sits there, not who can read it while it does.
+     */
+    public function test_a_relayed_secret_is_not_stored_in_clear(): void
+    {
+        $account = $this->account();
+
+        LoginController::relay($account, 'code', '11111');
+        LoginController::relay($account, 'password', 'hunter2');
+
+        $storedCode = Cache::get("telegram.login.{$account->id}.code");
+        $storedPassword = Cache::get("telegram.login.{$account->id}.password");
+
+        $this->assertIsString($storedCode);
+        $this->assertNotSame('11111', $storedCode);
+        $this->assertStringNotContainsString('11111', $storedCode);
+        $this->assertSame('11111', Crypt::decryptString($storedCode));
+
+        $this->assertNotSame('hunter2', $storedPassword);
+        $this->assertSame('hunter2', Crypt::decryptString($storedPassword));
+    }
+
+    /**
+     * A value something else put under the key is not a code anybody can use.
+     */
+    public function test_a_secret_that_was_not_sealed_by_the_relay_is_discarded(): void
+    {
+        $account = $this->account();
+        $account->advance(TelegramAccount::CODE_SUBMITTED);
+        Cache::put("telegram.login.{$account->id}.code", 'plaintext-from-elsewhere', 300);
+
+        $this->assertNull($this->worker('get', "accounts/{$account->id}/login")->json('code'));
+        $this->assertNull(Cache::get("telegram.login.{$account->id}.code"));
     }
 
     public function test_a_completed_sign_in_names_the_account_and_clears_the_number(): void

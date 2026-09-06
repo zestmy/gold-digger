@@ -327,6 +327,12 @@
                                 {{ $fund['realised'] >= 0 ? '+' : '' }}{{ number_format($fund['realised'], 2) }}
                             </p>
                         </div>
+                        {{-- Already spoken for by open positions. Not lost, but not available
+                             to size the next one from either - see AiFund. --}}
+                        <div>
+                            <p class="text-xs uppercase tracking-wide text-gray-500">At risk</p>
+                            <p class="font-mono text-lg text-gray-100">{{ number_format($fund['committed'], 2) }}</p>
+                        </div>
                         <div>
                             <p class="text-xs uppercase tracking-wide text-gray-500">Risk per trade</p>
                             <p class="font-mono text-lg text-gray-100">{{ number_format($fund['risk_per_trade'], 2) }}</p>
@@ -506,7 +512,7 @@
                     <label for="ai_risk_percentage" class="block text-sm font-medium text-gray-300">Risk per trade (% of fund)</label>
                     <input type="number" step="0.1" min="0.1" max="100" id="ai_risk_percentage" wire:model="ai_risk_percentage"
                            class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm">
-                    <p class="mt-1 text-xs text-gray-500">Of what remains, so a losing run shrinks its own stake.</p>
+                    <p class="mt-1 text-xs text-gray-500">Of what remains, so a losing run shrinks its own stake. Times the open-trade limit, it may not exceed 100%.</p>
                     @error('ai_risk_percentage') <p class="mt-1 text-xs text-red-400">{{ $message }}</p> @enderror
                 </div>
 

@@ -6,6 +6,7 @@ use App\Livewire\Pages\Settings;
 use App\Models\BotSettings;
 use App\Models\BrokerAccount;
 use App\Models\Strategy;
+use App\Models\SymbolSpec;
 use App\Models\Trade;
 use App\Models\User;
 use App\Services\Ai\AiFund;
@@ -260,5 +261,189 @@ class AiFundTest extends TestCase
         Livewire::test(Settings::class)
             ->assertSee('AI Trading Fund')
             ->assertSee('47.20');
+    }
+
+    // =====================================================================
+    // WHAT IS LEFT IS WHAT IS NOT ALREADY AT RISK
+    // =====================================================================
+
+    /**
+     * A position that has not resolved has not lost anything, but what it could lose is
+     * already spoken for. The next position is sized from what is left after that.
+     */
+    public function test_an_open_position_commits_its_risk_to_the_fund(): void
+    {
+        $this->fund(['ai_max_concurrent_trades' => 3]);
+        $this->spec();
+
+        // 5.00 from entry to the opening stop is 50 pips at 0.10; 0.02 lots at 10 a pip
+        // per lot puts 10.00 of the 200 at risk.
+        $this->trade([
+            'status' => 'open', 'closed_at' => null,
+            'entry_price' => 2000.0, 'initial_sl_price' => 1995.0,
+            'initial_lot_size' => 0.02, 'remaining_lot_size' => 0.02,
+        ]);
+
+        $state = $this->state();
+
+        $this->assertSame(0.0, $state['realised']);
+        $this->assertSame(10.0, $state['committed']);
+        $this->assertSame(190.0, $state['remaining']);
+        $this->assertSame(1.9, $state['risk_per_trade']);
+    }
+
+    /**
+     * The stop that protection has since moved does not un-commit what was agreed to when
+     * the position opened.
+     */
+    public function test_committed_risk_is_measured_from_the_opening_stop_not_the_live_one(): void
+    {
+        $this->fund(['ai_max_concurrent_trades' => 3]);
+        $this->spec();
+
+        $this->trade([
+            'status' => 'open', 'closed_at' => null,
+            'entry_price' => 2000.0, 'initial_sl_price' => 1995.0, 'sl_price' => 2000.0,
+            'initial_lot_size' => 0.02, 'remaining_lot_size' => 0.02,
+        ]);
+
+        $this->assertSame(10.0, $this->state()['committed']);
+    }
+
+    /**
+     * Unknown is not zero. The direction to be wrong in is the one that sizes the next
+     * trade smaller.
+     */
+    public function test_a_position_whose_risk_cannot_be_measured_costs_a_full_stake(): void
+    {
+        $this->fund(['ai_max_concurrent_trades' => 3, 'ai_risk_percentage' => 5.00]);
+
+        // No SymbolSpec for this account, and no opening stop recorded.
+        $this->trade(['status' => 'open', 'closed_at' => null, 'initial_sl_price' => null]);
+
+        $state = $this->state();
+
+        // One stake at 5% of the unspent 200.
+        $this->assertSame(10.0, $state['committed']);
+        $this->assertSame(190.0, $state['remaining']);
+    }
+
+    public function test_a_position_with_a_stop_but_no_instrument_specification_costs_a_full_stake(): void
+    {
+        $this->fund(['ai_max_concurrent_trades' => 3, 'ai_risk_percentage' => 5.00]);
+
+        $this->trade([
+            'status' => 'open', 'closed_at' => null,
+            'entry_price' => 2000.0, 'initial_sl_price' => 1995.0,
+        ]);
+
+        $this->assertSame(10.0, $this->state()['committed']);
+    }
+
+    /**
+     * The gap the old arithmetic left: N positions each sized at pct% of the same
+     * remaining figure, because nothing changed it until something closed.
+     */
+    public function test_concurrent_positions_cannot_commit_more_than_the_fund_holds(): void
+    {
+        $this->fund(['ai_max_concurrent_trades' => 4, 'ai_risk_percentage' => 25.00]);
+        $this->spec();
+
+        // Three open at 50.00 each: 5.00 of stop over 0.10 lots at 10 a pip.
+        foreach ([1, 2, 3] as $n) {
+            $this->trade([
+                'status' => 'open', 'closed_at' => null, 'mt5_ticket' => 9000 + $n,
+                'entry_price' => 2000.0, 'initial_sl_price' => 1995.0,
+                'initial_lot_size' => 0.10, 'remaining_lot_size' => 0.10,
+            ]);
+        }
+
+        $state = $this->state();
+
+        $this->assertSame(150.0, $state['committed']);
+        $this->assertSame(50.0, $state['remaining']);
+        // A fourth is sized from the 50 that is actually left, not from 200 again.
+        $this->assertSame(12.5, $state['risk_per_trade']);
+        $this->assertNull($state['blocked_reason']);
+    }
+
+    /**
+     * Nothing lost, nothing available. The remedy is to wait, not to raise the cap, and
+     * the reason should say which.
+     */
+    public function test_a_fully_committed_fund_is_not_reported_as_spent(): void
+    {
+        $this->fund(['ai_max_concurrent_trades' => 4, 'ai_risk_percentage' => 25.00]);
+        $this->spec();
+
+        foreach ([1, 2] as $n) {
+            $this->trade([
+                'status' => 'open', 'closed_at' => null, 'mt5_ticket' => 9000 + $n,
+                'entry_price' => 2000.0, 'initial_sl_price' => 1990.0,
+                'initial_lot_size' => 0.10, 'remaining_lot_size' => 0.10,
+            ]);
+        }
+
+        $state = $this->state();
+
+        $this->assertSame(0.0, $state['remaining']);
+        $this->assertFalse($state['exhausted']);
+        $this->assertSame('ai_fund_committed', $state['blocked_reason']);
+        $this->assertFalse($this->fund->canOpen($this->settings->fresh(), $this->user->id));
+    }
+
+    // =====================================================================
+    // THE STAKE TIMES THE NUMBER OF STAKES
+    // =====================================================================
+
+    public function test_the_stake_times_the_open_limit_may_not_exceed_the_fund(): void
+    {
+        Livewire::test(Settings::class)
+            ->set('ai_risk_percentage', '40')
+            ->set('ai_max_concurrent_trades', 3)
+            ->call('save')
+            ->assertHasErrors(['ai_risk_percentage']);
+
+        $this->assertNotEquals(40.0, (float) $this->settings->fresh()->ai_risk_percentage);
+    }
+
+    public function test_a_stake_that_fits_the_open_limit_is_accepted(): void
+    {
+        Livewire::test(Settings::class)
+            ->set('ai_risk_percentage', '33.3')
+            ->set('ai_max_concurrent_trades', 3)
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertEquals(33.3, $this->settings->fresh()->ai_risk_percentage);
+    }
+
+    /**
+     * A user created outside registration - a seeder, an import - has no settings row
+     * until something writes one. The page has to be able to be that something.
+     */
+    public function test_saving_settings_creates_the_row_when_a_user_has_none(): void
+    {
+        BotSettings::where('user_id', $this->user->id)->delete();
+
+        Livewire::test(Settings::class)
+            ->set('ai_capital_cap', '125')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertEquals(125.0, BotSettings::where('user_id', $this->user->id)->sole()->ai_capital_cap);
+    }
+
+    // =====================================================================
+    // HELPERS
+    // =====================================================================
+
+    private function spec(): void
+    {
+        SymbolSpec::updateOrCreate(
+            ['broker_account_id' => $this->account->id, 'symbol' => 'XAUUSD'],
+            ['base_symbol' => 'XAUUSD', 'pip_size' => 0.10, 'digits' => 2,
+                'pip_value_per_lot' => 10.0, 'volume_min' => 0.01, 'volume_step' => 0.01],
+        );
     }
 }

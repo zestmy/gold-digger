@@ -10,8 +10,10 @@ use App\Services\Ai\AiSpend;
 use App\Services\Ai\OpenRouter;
 use App\Support\Tenancy\Tenant;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
+use RuntimeException;
 use Tests\TestCase;
 
 /**
@@ -284,6 +286,35 @@ class AiSpendTest extends TestCase
         $this->ask();
 
         $this->assertNull(AiUsage::acrossTenants()->sole()->user_id);
+    }
+
+    /**
+     * Charging nobody is tolerated so a bookkeeping mistake cannot become a trading
+     * outage, but it is never quiet: every unattributed call from the console is a call
+     * site that forgot Tenant::for(), and the shared bucket it lands in is what every
+     * tenant's copier is refused from once it runs dry.
+     */
+    public function test_an_unattributed_console_call_is_reported_rather_than_quietly_filed(): void
+    {
+        Exceptions::fake();
+        $this->fakeAnswer();
+
+        $this->ask();
+
+        Exceptions::assertReported(
+            fn (RuntimeException $e) => str_contains($e->getMessage(), 'no tenant in scope'),
+        );
+    }
+
+    public function test_a_call_made_as_a_tenant_has_nothing_to_report(): void
+    {
+        Exceptions::fake();
+        $this->fakeAnswer();
+
+        Tenant::for($this->alice, fn () => $this->ask());
+
+        Exceptions::assertNotReported(RuntimeException::class);
+        $this->assertSame($this->alice->id, AiUsage::acrossTenants()->sole()->user_id);
     }
 
     public function test_usage_rows_are_scoped_like_everything_else_a_tenant_owns(): void

@@ -132,13 +132,17 @@ final class SignalExecutor
                 'symbol' => $spec['symbol'],
                 'direction' => $signal->direction,
                 'volume' => $sizing['lots'],
-                // A resting order carries absolute levels: its stop belongs to its own
-                // entry, not to a market it has not touched yet.
-                'sl_pips' => $pending ? null : $sizing['sl_pips'],
-                'tp_pips' => $pending ? null : $sizing['tp_pips'],
+                // Absolute levels, for a market order as much as for a resting one. The
+                // provider's stop is a price, and the EA prefers a price when it is given
+                // one; a pip distance would be re-measured from wherever the order
+                // filled, so the stop drifted with the fill - and the spread buffer, which
+                // exists to size the position smaller, would instead have pushed the stop
+                // further away. The pip distances stay inside `size()`, where they belong.
+                'sl_pips' => null,
+                'tp_pips' => null,
                 'entry_price' => $pending ? $sizing['entry'] : null,
-                'sl_price' => $pending ? $sizing['sl'] : null,
-                'tp_price' => $pending ? $sizing['tp'] : null,
+                'sl_price' => $sizing['sl'],
+                'tp_price' => $sizing['tp'],
                 'comment' => 'tg-'.$signal->id,
                 // Read back by FillController. Without it the resulting position records
                 // as `bot` and the fund never learns it spent anything.
@@ -164,9 +168,9 @@ final class SignalExecutor
                     round($sizing['risk'], 2),
                 )
                 : sprintf(
-                    'Queued %s lots at market, stop %s pips (%s levels), risking %s of the fund.',
+                    'Queued %s lots at market, stop %s (%s levels), risking %s of the fund.',
                     $sizing['lots'],
-                    round($sizing['sl_pips'], 1),
+                    $sizing['sl'],
                     $sizing['source'],
                     round($sizing['risk'], 2),
                 ),
@@ -259,8 +263,11 @@ final class SignalExecutor
         // large share of a five-point stop, and it makes the realised loss bigger than the
         // one that was sized.
         //
-        // Added to the distance rather than to the stop itself: a wider distance sizes a
-        // smaller position, which is the safe direction. Moving the stop would risk more.
+        // Added to the distance used for sizing, and to nothing else: a wider distance
+        // sizes a smaller position, which is the safe direction. The stop the order
+        // carries is still the plan's own level - see `execute()`, which sends prices
+        // rather than pips - so the buffer can only ever make the position smaller, never
+        // the stop wider.
         if ($settings?->copier_spread_buffer) {
             $slPips += $this->spreadPips($signal, $spec, $pipSize);
         }
@@ -308,8 +315,8 @@ final class SignalExecutor
 
         return [
             'lots' => round($lots, 2),
-            // Absolute levels alongside the pip distances, so a resting order can carry
-            // the levels its own entry implies.
+            // The levels the order carries. The pip distances below are what sized it and
+            // what the reward floor judges; they never reach the broker.
             'entry' => $plan['entry'],
             'sl' => $plan['sl'],
             'tp' => $finalTarget,

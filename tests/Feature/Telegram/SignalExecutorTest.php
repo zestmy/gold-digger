@@ -146,7 +146,7 @@ class SignalExecutorTest extends TestCase
         $command = TradeCommand::where('type', 'open')->firstOrFail();
 
         $this->assertEqualsWithDelta(0.01, $command->payload['volume'], 1e-9);
-        $this->assertEqualsWithDelta(100.0, $command->payload['sl_pips'], 0.01);
+        $this->assertEqualsWithDelta(2640.0, $command->payload['sl_price'], 1e-9);
     }
 
     public function test_the_order_carries_the_final_target_not_the_first(): void
@@ -155,7 +155,7 @@ class SignalExecutorTest extends TestCase
 
         // An order stopped out at TP1 would close the whole position at a level meant to
         // take part of it - the same rule the strategy path follows.
-        $this->assertEqualsWithDelta(300.0, TradeCommand::firstOrFail()->payload['tp_pips'], 0.01);
+        $this->assertEqualsWithDelta(2680.0, TradeCommand::firstOrFail()->payload['tp_price'], 1e-9);
     }
 
     /**
@@ -226,7 +226,7 @@ class SignalExecutorTest extends TestCase
         $command = TradeCommand::firstOrFail();
 
         $this->assertEqualsWithDelta(0.02, $command->payload['volume'], 1e-9);
-        $this->assertEqualsWithDelta(50.0, $command->payload['sl_pips'], 0.01);
+        $this->assertEqualsWithDelta(2645.0, $command->payload['sl_price'], 1e-9);
     }
 
     public function test_it_refuses_to_size_without_a_pip_value(): void
@@ -411,7 +411,30 @@ class SignalExecutorTest extends TestCase
 
         $this->assertSame('open', $command->type);
         $this->assertNull($command->payload['entry_price']);
-        $this->assertEqualsWithDelta(102.0, $command->payload['sl_pips'], 0.5);
+        // At market, but the stop is still the provider's level - not a distance from
+        // wherever the fill lands.
+        $this->assertEqualsWithDelta(2640.0, $command->payload['sl_price'], 1e-9);
+        $this->assertNull($command->payload['sl_pips']);
+    }
+
+    /**
+     * A pip distance is re-measured by the EA from the fill, so a stop sent as pips
+     * drifts with the fill. The provider named a price; that price goes down the wire.
+     */
+    public function test_a_market_order_carries_the_providers_levels_not_a_distance_from_the_fill(): void
+    {
+        $this->richFund();
+        $r = (new SignalExecutor)->execute($this->signal([
+            'entry_price' => null, 'sl_price' => 2640.0, 'tp_prices' => [2660.0, 2680.0],
+        ]));
+        $this->assertTrue($r['ok'], $r['note']);
+
+        $payload = TradeCommand::firstOrFail()->payload;
+
+        $this->assertEqualsWithDelta(2640.0, $payload['sl_price'], 1e-9);
+        $this->assertEqualsWithDelta(2680.0, $payload['tp_price'], 1e-9);
+        $this->assertNull($payload['sl_pips']);
+        $this->assertNull($payload['tp_pips']);
     }
 
     public function test_a_market_order_signal_never_rests(): void

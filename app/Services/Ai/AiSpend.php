@@ -5,6 +5,8 @@ namespace App\Services\Ai;
 use App\Models\AiUsage;
 use App\Models\BotSettings;
 use App\Support\Tenancy\Tenant;
+use Illuminate\Support\Facades\Log;
+use RuntimeException;
 
 /**
  * AI Spend
@@ -126,13 +128,37 @@ final class AiSpend
      * Whose spend a call belongs to.
      *
      * `Tenant::current()` is set for dashboard requests and for the bot API. Console
-     * commands set it per tenant as they iterate - see `ai:decide` and `telegram:review` -
-     * so a scheduled call is attributed to the customer it was made for rather than to
-     * nobody.
+     * commands set it per tenant as they iterate - see `ai:decide`, `telegram:review`,
+     * `telegram:execute` and `telegram:follow-up` - so a scheduled call is attributed to
+     * the customer it was made for rather than to nobody.
+     *
+     * ## Why a missing tenant on the console is reported, not tolerated
+     *
+     * There is no legitimate unattributed model call from a scheduled command: every one
+     * of them is made about some customer's chart, signal or position. When the tenant is
+     * missing it is because a call site forgot `Tenant::for()`, and the cost of forgetting
+     * is not one mis-filed row - it is every such call from every tenant sharing one
+     * platform bucket of 200 a day, and once that is gone, every tenant's copier refusing
+     * at once with a message about an allowance none of them used.
+     *
+     * The call still goes through, charged to the platform. Refusing outright would turn
+     * a bookkeeping mistake into a trading outage, which is the worse failure for this
+     * application. But it goes through loudly: an error in the log and a reported
+     * exception, so the gap is found on the first call rather than on the day the bucket
+     * runs dry.
      */
     public function currentTenant(): ?int
     {
-        return Tenant::current();
+        $tenant = Tenant::current();
+
+        if ($tenant === null && app()->runningInConsole()) {
+            $message = 'A metered AI call was made from the console with no tenant in scope. It has been charged to the platform bucket; the call site should run inside Tenant::for().';
+
+            Log::error('[ai-spend] '.$message);
+            report(new RuntimeException($message));
+        }
+
+        return $tenant;
     }
 
     private function intOrNull(mixed $value): ?int

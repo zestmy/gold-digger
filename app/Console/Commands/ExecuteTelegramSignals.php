@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\TelegramSignal;
 use App\Services\Monitoring\AlertNotifier;
 use App\Services\Telegram\SignalExecutor;
+use App\Support\Tenancy\Tenant;
 use Illuminate\Console\Command;
 
 /**
@@ -48,7 +49,11 @@ class ExecuteTelegramSignals extends Command
         $queued = 0;
 
         foreach ($approved as $signal) {
-            $result = $executor->execute($signal);
+            // Execution re-runs the reviewer, and the reviewer is a model call. Run as the
+            // tenant whose signal this is, so the call lands on their allowance rather than
+            // on the platform's "nobody" bucket - which, once exhausted, was refusing every
+            // tenant's approved signal at once. See AiSpend::currentTenant.
+            $result = Tenant::for($signal->user_id, fn () => $executor->execute($signal));
             $queued += $result['ok'] ? 1 : 0;
 
             if ($result['ok'] && ! $this->option('quiet-announce')) {

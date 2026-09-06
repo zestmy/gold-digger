@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Telegram;
 
+use App\Models\AiUsage;
 use App\Models\BotHeartbeat;
 use App\Models\BotLog;
 use App\Models\BotSettings;
@@ -129,6 +130,10 @@ class AutonomousCopierTest extends TestCase
      */
     public function test_pressing_execute_yourself_announces_nothing(): void
     {
+        // The button runs as the person who pressed it, which is what puts the re-check
+        // on their allowance. Without a tenant the call would be reported as unattributed.
+        $this->actingAs($this->user);
+
         $result = (new SignalExecutor)->execute($this->signal());
 
         $this->assertTrue($result['ok'], $result['note']);
@@ -320,5 +325,25 @@ class AutonomousCopierTest extends TestCase
                 'execution_status' => TelegramSignal::EXEC_NONE,
             ],
         );
+    }
+
+    // =====================================================================
+    // WHO PAYS FOR THE RE-CHECK
+    // =====================================================================
+
+    /**
+     * Execution re-runs the reviewer, which is a model call. Made from the scheduler with
+     * no tenant in scope it was charged to the platform's shared bucket - and once that
+     * bucket was empty, every tenant's approved signal was refused at once.
+     */
+    public function test_the_scheduled_re_check_is_charged_to_the_signals_owner(): void
+    {
+        $this->artisan('telegram:execute', ['--quiet-announce' => true])->assertSuccessful();
+
+        $this->assertSame(1, TradeCommand::count());
+
+        $usage = AiUsage::acrossTenants()->where('call_site', 'signal_reviewer')->sole();
+
+        $this->assertSame($this->user->id, $usage->user_id);
     }
 }

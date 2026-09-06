@@ -23,6 +23,16 @@ use Illuminate\Console\Command;
  */
 class ManageTelegramFollowUps extends Command
 {
+    /**
+     * Below this, a reading is commentary however it was labelled.
+     *
+     * The interpreter's prompt tells the model that anything under sixty should almost
+     * always be `none`, and the schema says the same - but a prompt is a request, not a
+     * gate. A model that answers `secure_partial` at 35% has told you it is guessing, and
+     * a guess about somebody else's position is exactly what this path must not act on.
+     */
+    public const MIN_CONFIDENCE = 60;
+
     protected $signature = 'telegram:follow-up {--limit=10 : Most replies to handle in one pass}
                             {--quiet-announce : Act without announcing, for testing}';
 
@@ -47,7 +57,9 @@ class ManageTelegramFollowUps extends Command
         foreach ($pending as $followUp) {
             // Interpretation is a model call, so it runs as the tenant whose position the
             // instruction concerns - putting it on their allowance rather than on nobody's.
-            $reading = Tenant::for($followUp->user_id, fn () => $interpreter->interpret($followUp));
+            $reading = $this->gated(
+                Tenant::for($followUp->user_id, fn () => $interpreter->interpret($followUp)),
+            );
 
             $followUp->update([
                 'follow_up_action' => $reading['action'],
@@ -77,7 +89,10 @@ class ManageTelegramFollowUps extends Command
                 continue;
             }
 
-            $result = $executor->execute($followUp->fresh());
+            // A layer goes through the signal executor, which re-runs the reviewer - a
+            // model call, and one that has to be charged to the position's owner for the
+            // same reason interpretation is.
+            $result = Tenant::for($followUp->user_id, fn () => $executor->execute($followUp->fresh()));
             $acted += $result['ok'] ? 1 : 0;
 
             $this->line('     <fg=gray>'.$result['note'].'</>');
@@ -91,6 +106,42 @@ class ManageTelegramFollowUps extends Command
         $this->info(sprintf('%d interpreted, %d acted on.', $pending->count(), $acted));
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Demote a low-confidence reading to `none`, saying so.
+     *
+     * The action is replaced rather than the row discarded, so the record still shows
+     * what the model thought it read and why it was not acted on. A provider whose
+     * instructions keep landing just under the line is something worth being able to see.
+     *
+     * @param  array{action: string, fraction: float|null, price: float|null, confidence: int|null, reasoning: string, model: string|null}  $reading
+     * @return array{action: string, fraction: float|null, price: float|null, confidence: int|null, reasoning: string, model: string|null}
+     */
+    private function gated(array $reading): array
+    {
+        if ($reading['action'] === TelegramSignal::FOLLOW_NONE || $reading['confidence'] === null) {
+            return $reading;
+        }
+
+        if ($reading['confidence'] >= self::MIN_CONFIDENCE) {
+            return $reading;
+        }
+
+        return [
+            'action' => TelegramSignal::FOLLOW_NONE,
+            'fraction' => null,
+            'price' => null,
+            'confidence' => $reading['confidence'],
+            'reasoning' => sprintf(
+                'Read as %s at %d%% confidence, below the %d%% needed to act on it. %s',
+                $reading['action'],
+                $reading['confidence'],
+                self::MIN_CONFIDENCE,
+                $reading['reasoning'],
+            ),
+            'model' => $reading['model'],
+        ];
     }
 
     /**

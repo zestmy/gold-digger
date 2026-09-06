@@ -133,14 +133,21 @@ class ExecutionControlsTest extends TestCase
     public function test_the_spread_makes_the_position_smaller_not_the_stop_wider(): void
     {
         $plain = $this->execute();
+        $plainStop = TradeCommand::firstOrFail()->payload['sl_price'];
 
         TradeCommand::query()->delete();
         TelegramSignal::query()->delete();
 
         $this->settings->update(['copier_spread_buffer' => true]);
         $buffered = $this->execute();
+        $bufferedStop = TradeCommand::firstOrFail()->payload['sl_price'];
 
         $this->assertLessThan($plain, $buffered, 'a wider distance has to size a smaller position');
+        // The buffer is a sizing input. Had it gone down the wire as a pip distance the
+        // EA would have placed the stop that much further from the fill, which is the
+        // opposite of what "count the spread" is for.
+        $this->assertEqualsWithDelta(2640.0, $bufferedStop, 1e-9, 'the stop on the wire is the plan\'s own level');
+        $this->assertEqualsWithDelta($plainStop, $bufferedStop, 1e-9);
     }
 
     // =====================================================================

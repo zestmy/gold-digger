@@ -312,11 +312,13 @@ class FollowUpTest extends TestCase
 
         $this->assertTrue($result['ok'], $result['note']);
 
-        // 5% of the 200 fund is 10, over the parent's 5.00 stop (50 pips at 10 a pip):
-        // 10 / 500 = 0.02 lots. The same arithmetic a first entry gets.
+        // The open position already commits 50 of the 200 fund (a 5.00 stop over 0.10
+        // lots at 10 a pip), so the layer is sized from the 150 that is left: 5% is 7.50,
+        // over the parent's 50-pip stop at 10 a pip = 0.015 lots, snapped down to 0.01.
+        // The same arithmetic a first entry gets, from the same fund.
         $command = TradeCommand::whereIn('type', ['open', 'open_pending'])->firstOrFail();
 
-        $this->assertEqualsWithDelta(0.02, $command->payload['volume'], 1e-9);
+        $this->assertEqualsWithDelta(0.01, $command->payload['volume'], 1e-9);
     }
 
     /**
@@ -377,13 +379,16 @@ class FollowUpTest extends TestCase
         $second = $this->siblingFollowUp($first, TelegramSignal::FOLLOW_ADD);
         (new FollowUpExecutor)->execute($second);
 
-        $risked = TelegramSignal::where('kind', TelegramSignal::KIND_LAYER)->get()
-            ->sum(fn ($layer) => 0.02 * 50 * 10);
+        // What the layers actually risk: their queued volume over the 50-pip stop at 10 a
+        // pip, read off the wire rather than assumed.
+        $risked = TradeCommand::whereIn('type', ['open', 'open_pending'])->get()
+            ->sum(fn (TradeCommand $command) => (float) $command->payload['volume'] * 50 * 10);
 
-        // Two layers at 10 each against a 200 cap. Each is sized from the fund at its own
-        // stop distance, so N layers risk N shares of a pot fixed in advance.
-        $this->assertEqualsWithDelta(20.0, $risked, 0.01);
-        $this->assertLessThan(200.0, $risked);
+        // Two layers at 5 each, against a 200 cap with 50 already committed to the
+        // position they add to. Each is sized from what the fund has left, so N layers
+        // risk N shares of a pot fixed in advance - never N times the first position.
+        $this->assertEqualsWithDelta(10.0, $risked, 0.01);
+        $this->assertLessThan(150.0, $risked);
     }
 
     // =====================================================================
@@ -470,7 +475,7 @@ class FollowUpTest extends TestCase
                 'mt5_ticket' => 910001,
                 'symbol' => 'XAUUSD', 'direction' => 'buy',
                 'initial_lot_size' => 0.10, 'remaining_lot_size' => 0.10,
-                'entry_price' => 2650.0, 'sl_price' => 2645.0,
+                'entry_price' => 2650.0, 'sl_price' => 2645.0, 'initial_sl_price' => 2645.0,
                 'status' => 'open', 'origin' => 'ai', 'opened_at' => now()->subMinutes(10),
             ]);
         }

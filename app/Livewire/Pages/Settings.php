@@ -2,10 +2,12 @@
 
 namespace App\Livewire\Pages;
 
+use App\Models\BotSettings;
 use App\Models\Strategy;
 use App\Services\Ai\AiFund;
 use App\Services\Ai\AiSpend;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Validate;
@@ -182,8 +184,12 @@ class Settings extends Component
     public function save(): void
     {
         $this->validate();
+        $this->guardAiRisk();
 
-        $settings = Auth::user()->botSettings;
+        // A row that may not exist yet. A user created outside the normal registration
+        // path - a seeder, an import - has no settings until something writes them, and a
+        // settings page that cannot be saved because it was never saved is a locked door.
+        $settings = BotSettings::firstOrCreate(['user_id' => Auth::id()]);
 
         $settings->update([
             'is_active' => $this->is_active,
@@ -231,6 +237,34 @@ class Settings extends Component
         ]);
 
         $this->dispatch('notify', message: 'Settings saved successfully!', type: 'success');
+    }
+
+    /**
+     * The stake times the number of stakes may not exceed the fund.
+     *
+     * Each AI position is sized as a percentage of what remains, and `AiFund` now takes
+     * open positions' committed risk off that figure before the next one is sized - so
+     * the arithmetic already cannot overspend. This is the plainer statement of the same
+     * bound, at the moment somebody types the numbers: four positions at thirty percent
+     * each is a request to risk more than there is, and it should be refused as one rather
+     * than quietly sized down to something they did not ask for.
+     */
+    private function guardAiRisk(): void
+    {
+        $exposure = (float) $this->ai_risk_percentage * $this->ai_max_concurrent_trades;
+
+        if ($exposure <= 100.0) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'ai_risk_percentage' => sprintf(
+                '%s%% per trade across %d open trades is %s%% of the fund. Together they may not exceed 100%%.',
+                rtrim(rtrim(number_format((float) $this->ai_risk_percentage, 2, '.', ''), '0'), '.'),
+                $this->ai_max_concurrent_trades,
+                rtrim(rtrim(number_format($exposure, 2, '.', ''), '0'), '.'),
+            ),
+        ]);
     }
 
     public function toggleBot(): void

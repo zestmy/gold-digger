@@ -81,6 +81,17 @@ well-formed price, passing every sanity check, describing a completely different
 sized off what remains of the fund rather than the account balance, realised losses deplete
 it, and at zero the desk stops.
 
+What remains is what is *unspent and uncommitted*. Realised losses are the spent part. The
+committed part is what the open positions would lose at their stops — entry to initial
+stop, times the lots still held, in money through the symbol's pip value — and it comes off
+before the next position is sized, so three positions cannot each be sized against the
+same untouched balance. A position whose stop or pip value is unknown is counted as one
+full stake rather than as nothing. When everything left is already at risk the reason is
+`ai_fund_committed`, distinct from the fund being exhausted: nothing has been lost, and
+nothing more opens until something resolves. Settings also refuse a risk percentage times
+the concurrent-trade cap that exceeds a hundred, and a channel's own risk override is
+capped at its share of that.
+
 This exists because AI-initiated trading **cannot be backtested**. There are no historical
 model opinions to replay, so the guarantee the rest of the system offers — that a setting
 can be measured before it costs anything — is unavailable here, and a bounded loss replaces

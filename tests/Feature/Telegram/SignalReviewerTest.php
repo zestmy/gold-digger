@@ -427,4 +427,67 @@ class SignalReviewerTest extends TestCase
         $this->assertStringContainsString('No stored price', $result['reasoning']);
         Http::assertNothingSent();
     }
+
+    // =====================================================================
+    // SIGNALS THAT CARRY THEIR OWN JUDGEMENT ARE GATED, NOT RE-JUDGED
+    // =====================================================================
+
+    /**
+     * AutonomousTrader stores its decision approved. Asking a second model to approve
+     * what the first proposed is the same opinion bought twice.
+     */
+    public function test_an_autonomous_signal_passes_the_gates_without_a_second_model_call(): void
+    {
+        Http::fake();
+
+        $result = (new SignalReviewer)->review($this->signal([
+            'kind' => TelegramSignal::KIND_AUTONOMOUS,
+            'source' => 'autonomous',
+            'entry_price' => null,
+            'review_status' => TelegramSignal::REVIEW_APPROVED,
+            'review_confidence' => 72,
+            'review_model' => 'anthropic/claude-sonnet-5',
+        ]));
+
+        $this->assertSame(TelegramSignal::REVIEW_APPROVED, $result['status']);
+        // The judgement on record is the one that was actually made, not a fresh-looking
+        // number invented by a pass that asked nobody.
+        $this->assertSame(72, $result['confidence']);
+        $this->assertSame('anthropic/claude-sonnet-5', $result['model']);
+        Http::assertNothingSent();
+    }
+
+    public function test_a_layer_passes_the_gates_without_a_second_model_call(): void
+    {
+        Http::fake();
+
+        $result = (new SignalReviewer)->review($this->signal([
+            'kind' => TelegramSignal::KIND_LAYER,
+            'entry_price' => null,
+            'review_status' => TelegramSignal::REVIEW_APPROVED,
+        ]));
+
+        $this->assertSame(TelegramSignal::REVIEW_APPROVED, $result['status']);
+        Http::assertNothingSent();
+    }
+
+    /**
+     * Skipping the model is not skipping the gates. The kill switch binds an autonomous
+     * trade exactly as it binds a copied one.
+     */
+    public function test_an_autonomous_signal_is_still_held_to_every_gate(): void
+    {
+        $this->settings->update(['is_active' => false]);
+        Http::fake();
+
+        $result = (new SignalReviewer)->review($this->signal([
+            'kind' => TelegramSignal::KIND_AUTONOMOUS,
+            'entry_price' => null,
+            'review_status' => TelegramSignal::REVIEW_APPROVED,
+        ]));
+
+        $this->assertSame(TelegramSignal::REVIEW_DECLINED, $result['status']);
+        $this->assertStringContainsString('kill switch', $result['reasoning']);
+        Http::assertNothingSent();
+    }
 }

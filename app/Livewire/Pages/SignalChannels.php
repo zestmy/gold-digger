@@ -129,11 +129,24 @@ class SignalChannels extends Component
             return;
         }
 
+        // A channel may risk more than the account's default, but not more than one
+        // share of the fund: the share is 100% divided by how many positions may be open
+        // at once. Above that, two channels each at their override could commit more than
+        // the fund holds before either of them resolved - see Settings::guardAiRisk,
+        // which holds the account's own figures to the same line.
+        $ceiling = $this->riskCeiling();
+
         $this->validate([
-            'form.risk_percentage' => ['nullable', 'numeric', 'min:0.01', 'max:100'],
+            'form.risk_percentage' => ['nullable', 'numeric', 'min:0.01', 'max:'.$ceiling],
             'form.copier_levels' => ['nullable', 'in:provider,strategy'],
             'form.max_trades_per_day' => ['nullable', 'integer', 'min:0', 'max:50'],
             'form.min_confluence' => ['nullable', 'numeric', 'min:0', 'max:10'],
+        ], [
+            'form.risk_percentage.max' => sprintf(
+                'A channel may risk at most %s%% per trade: the account allows %d open AI trades, and together they may not exceed the fund.',
+                rtrim(rtrim(number_format($ceiling, 2, '.', ''), '0'), '.'),
+                $this->maxConcurrent(),
+            ),
         ]);
 
         $channel->update([
@@ -149,6 +162,19 @@ class SignalChannels extends Component
         $this->editing = null;
 
         $this->dispatch('notify', message: "{$channel->label()} updated.", type: 'success');
+    }
+
+    /**
+     * The most a single channel may risk per trade, as a share of the fund.
+     */
+    private function riskCeiling(): float
+    {
+        return round(100 / $this->maxConcurrent(), 2);
+    }
+
+    private function maxConcurrent(): int
+    {
+        return max(1, (int) (BotSettings::where('user_id', Auth::id())->value('ai_max_concurrent_trades') ?? 1));
     }
 
     private function blank(string $field): bool

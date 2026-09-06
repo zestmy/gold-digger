@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Api\Telegram;
 
 use App\Http\Controllers\Controller;
 use App\Models\TelegramAccount;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Crypt;
 
 /**
  * Relays a Telegram sign-in between the dashboard and a collector.
@@ -31,6 +33,16 @@ use Illuminate\Support\Facades\Cache;
  *
  * This is better than keeping a session here and worse than typing the code on the
  * collector directly, and the page says so rather than implying the choice is free.
+ *
+ * ## Encrypted in the cache, not merely expiring from it
+ *
+ * "In the cache" is not a place; it is whatever `CACHE_STORE` says, and by default that
+ * is a database table. A five-minute expiry bounds how long a code sits there, not who
+ * can read it while it does - a backup taken in that window, or anybody with the
+ * database, has a live sign-in code and the two-step password beside it. So each secret
+ * is encrypted with the application key before it is stored and decrypted only on the
+ * way out, and the handover is a single atomic pull rather than a read followed by a
+ * delete, which two collectors polling at once could both get through.
  */
 class LoginController extends Controller
 {
@@ -135,12 +147,21 @@ class LoginController extends Controller
      */
     private static function take(TelegramAccount $account, string $what): ?string
     {
-        $key = self::key($account, $what);
-        $value = Cache::get($key);
+        // pull() reads and deletes as one operation, so two collectors racing for the
+        // same code cannot both be handed it.
+        $sealed = Cache::pull(self::key($account, $what));
 
-        Cache::forget($key);
+        if (! is_string($sealed)) {
+            return null;
+        }
 
-        return is_string($value) ? $value : null;
+        try {
+            return Crypt::decryptString($sealed);
+        } catch (DecryptException) {
+            // Written under a different APP_KEY, or not by relay() at all. Either way it
+            // is not a code anybody can use, and it has already been destroyed.
+            return null;
+        }
     }
 
     private static function forget(TelegramAccount $account): void
@@ -154,7 +175,7 @@ class LoginController extends Controller
      */
     public static function relay(TelegramAccount $account, string $what, string $value): void
     {
-        Cache::put(self::key($account, $what), $value, self::SECRET_TTL_SECONDS);
+        Cache::put(self::key($account, $what), Crypt::encryptString($value), self::SECRET_TTL_SECONDS);
     }
 
     private static function key(TelegramAccount $account, string $what): string
