@@ -379,7 +379,10 @@ final class TradeManager
      */
     private function stopAtOrBeyond(Trade $trade, float $level): bool
     {
-        if ($trade->sl_price === null) {
+        // Zero is "no stop recorded", not a price. Compared as a price it sits below every
+        // level a sell could be asked to move to, so a sell whose fill never carried a stop
+        // read as already protected and neither break-even nor the trail was ever queued.
+        if ($trade->sl_price === null || (float) $trade->sl_price <= 0.0) {
             return false;
         }
 

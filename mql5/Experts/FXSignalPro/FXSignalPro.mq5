@@ -26,7 +26,7 @@
 //| instruction names its symbol, and all work happens on a timer.    |
 //+------------------------------------------------------------------+
 #property copyright "FXSignalPro"
-#property version   "1.00"
+#property version   "1.01"
 #property description "Executes FXSignalPro dashboard commands and reports fills back."
 
 #include <FXSignalPro/Executor.mqh>
@@ -34,7 +34,7 @@
 //--- Must match TradeCommand::WIRE_VERSION on the Laravel side.
 #define FXS_WIRE_VERSION   "GDCMD2"
 #define FXS_WIRE_COLUMNS   13
-#define FXS_EA_VERSION     "1.0.0"
+#define FXS_EA_VERSION     "1.0.1"
 #define FXS_MAX_PENDING    200
 
 //+------------------------------------------------------------------+
@@ -112,6 +112,28 @@ bool         g_trend_seeded[FXS_MAX_SYMBOLS];
 #define FXS_MAX_CLOSE_REASONS 32
 ulong        g_close_ticket[];
 string       g_close_reason[];
+
+//--- Resting orders this EA placed, keyed by order ticket and kept until the order
+//--- fills, expires or is cancelled. A market open is reported from the command path,
+//--- where the command id is known. A pending order fills later, in OnTradeTransaction,
+//--- which knows the order ticket and nothing else - so the id is remembered here and
+//--- looked up when the entry deal arrives. Without this the fill was never reported as
+//--- `opened` at all: the dashboard found the position in the next snapshot and adopted
+//--- it as a stranger's, so the signal stayed `queued`, the AI fund was never charged,
+//--- and the copier's own protection never ran on it.
+//---
+//--- Lost on detach, like the close reasons above. A resting order that fills after a
+//--- re-attach is still adopted by the snapshot; it is only the link to its command
+//--- that is gone.
+#define FXS_MAX_RESTING 32
+ulong        g_resting_order[];
+long         g_resting_command[];
+
+//--- Command results OnTradeTransaction needs to post - a resting order that left the
+//--- book without filling - queued for the same reason fill reports are: WebRequest is
+//--- synchronous and must not run on the event thread.
+long         g_pending_result_id[];
+string       g_pending_result_body[];
 
 //--- When the last position snapshot was sent.
 datetime     g_last_reconcile   = 0;
@@ -230,10 +252,79 @@ void FXSQueueReport(const string json)
   }
 
 //+------------------------------------------------------------------+
+//| Queue a command result for the next OnTimer flush.                |
+//|                                                                   |
+//| The command-path handlers post results directly because they run |
+//| on the timer. OnTradeTransaction does not, and the one result it  |
+//| has to give - a resting order that expired or was cancelled       |
+//| unfilled - goes through here.                                     |
+//+------------------------------------------------------------------+
+void FXSQueueResult(const long command_id, const bool ok, const uint retcode,
+                   const ulong ticket, const double price, const double volume,
+                   const string error)
+  {
+   const int n = ArraySize(g_pending_result_id);
+
+   ArrayResize(g_pending_result_id, n + 1);
+   ArrayResize(g_pending_result_body, n + 1);
+   g_pending_result_id[n]   = command_id;
+   g_pending_result_body[n] = FXSResultBody(ok, retcode, ticket, price, volume, error);
+  }
+
+//+------------------------------------------------------------------+
+//| Flush queued command results. Same retry rule as fill reports.    |
+//+------------------------------------------------------------------+
+void FXSFlushResults(void)
+  {
+   const int n = ArraySize(g_pending_result_id);
+   if(n == 0)
+      return;
+
+   long   keep_id[];
+   string keep_body[];
+   int    kept = 0;
+
+   for(int i = 0; i < n; i++)
+     {
+      string response;
+      const int status = FXSHttp("POST",
+                                 "/api/v1/bot/commands/" + IntegerToString(g_pending_result_id[i]) + "/result",
+                                 g_pending_result_body[i], "application/json", response);
+
+      if(status >= 200 && status < 300)
+         continue;
+
+      if(status >= 400 && status < 500)
+        {
+         PrintFormat("[FXS] command result rejected (HTTP %d), discarding: %s", status, response);
+         continue;
+        }
+
+      ArrayResize(keep_id, kept + 1);
+      ArrayResize(keep_body, kept + 1);
+      keep_id[kept]   = g_pending_result_id[i];
+      keep_body[kept] = g_pending_result_body[i];
+      kept++;
+     }
+
+   ArrayResize(g_pending_result_id, kept);
+   ArrayResize(g_pending_result_body, kept);
+   for(int i = 0; i < kept; i++)
+     {
+      g_pending_result_id[i]   = keep_id[i];
+      g_pending_result_body[i] = keep_body[i];
+     }
+  }
+
+//+------------------------------------------------------------------+
 //| Flush queued fill reports. Anything that fails stays queued.      |
 //+------------------------------------------------------------------+
 void FXSFlushReports(void)
   {
+   //--- Results first: an order that expired is news the dashboard should have
+   //--- before any fill that follows it.
+   FXSFlushResults();
+
    const int n = ArraySize(g_pending);
    if(n == 0)
       return;
@@ -267,13 +358,12 @@ void FXSFlushReports(void)
   }
 
 //+------------------------------------------------------------------+
-//| Report the outcome of a command.                                  |
+//| The JSON body of a command result.                                |
 //+------------------------------------------------------------------+
-void FXSReportResult(const long command_id, const bool ok, const uint retcode,
-                    const ulong ticket, const double price, const double volume,
-                    const string error)
+string FXSResultBody(const bool ok, const uint retcode, const ulong ticket,
+                     const double price, const double volume, const string error)
   {
-   const string body = StringFormat(
+   return StringFormat(
       "{\"ok\":%s,\"retcode\":%d,\"ticket\":%s,\"price\":%s,\"volume\":%s,\"error\":\"%s\"}",
       (ok ? "true" : "false"), retcode, IntegerToString((long)ticket),
       //--- Six places because that is what trades.entry_price stores. Formatting to a
@@ -281,10 +371,98 @@ void FXSReportResult(const long command_id, const bool ok, const uint retcode,
       //--- instruments loaded there is no longer one right answer to pick.
       DoubleToString(price, 6), DoubleToString(volume, 2),
       FXSJsonEscape(error));
+  }
+
+//+------------------------------------------------------------------+
+//| Report the outcome of a command.                                  |
+//+------------------------------------------------------------------+
+void FXSReportResult(const long command_id, const bool ok, const uint retcode,
+                    const ulong ticket, const double price, const double volume,
+                    const string error)
+  {
+   const string body = FXSResultBody(ok, retcode, ticket, price, volume, error);
 
    string response;
    FXSHttp("POST", "/api/v1/bot/commands/" + IntegerToString(command_id) + "/result",
           body, "application/json", response);
+  }
+
+//+------------------------------------------------------------------+
+//| Remember which command placed a resting order.                    |
+//+------------------------------------------------------------------+
+void FXSRememberResting(const ulong order_ticket, const long command_id)
+  {
+   const int n = ArraySize(g_resting_order);
+
+   for(int i = 0; i < n; i++)
+      if(g_resting_order[i] == order_ticket)
+        {
+         g_resting_command[i] = command_id;
+         return;
+        }
+
+   //--- Same policy as the close reasons: a backlog this size means orders are
+   //--- resting for ever, and the oldest is the one least likely to still fill.
+   if(n >= FXS_MAX_RESTING)
+     {
+      for(int i = 1; i < n; i++)
+        {
+         g_resting_order[i - 1]   = g_resting_order[i];
+         g_resting_command[i - 1] = g_resting_command[i];
+        }
+      g_resting_order[n - 1]   = order_ticket;
+      g_resting_command[n - 1] = command_id;
+      return;
+     }
+
+   ArrayResize(g_resting_order, n + 1);
+   ArrayResize(g_resting_command, n + 1);
+   g_resting_order[n]   = order_ticket;
+   g_resting_command[n] = command_id;
+  }
+
+//+------------------------------------------------------------------+
+//| Where a resting order sits in the memory, or -1.                  |
+//+------------------------------------------------------------------+
+int FXSRestingIndex(const ulong order_ticket)
+  {
+   const int n = ArraySize(g_resting_order);
+
+   for(int i = 0; i < n; i++)
+      if(g_resting_order[i] == order_ticket)
+         return i;
+
+   return -1;
+  }
+
+//+------------------------------------------------------------------+
+//| Consume a remembered resting order; the command id, or -1.        |
+//|                                                                   |
+//| Consuming, like the close reasons: an order fills once, and a     |
+//| remembered id left behind would be attached to the next event on  |
+//| the same ticket. A pending order that fills in several deals is   |
+//| reported from its first - the dashboard sees that deal's volume,  |
+//| and the snapshot corrects the rest.                               |
+//+------------------------------------------------------------------+
+long FXSTakeResting(const ulong order_ticket)
+  {
+   const int i = FXSRestingIndex(order_ticket);
+   if(i < 0)
+      return -1;
+
+   const long command_id = g_resting_command[i];
+   const int  n          = ArraySize(g_resting_order);
+
+   for(int j = i + 1; j < n; j++)
+     {
+      g_resting_order[j - 1]   = g_resting_order[j];
+      g_resting_command[j - 1] = g_resting_command[j];
+     }
+
+   ArrayResize(g_resting_order, n - 1);
+   ArrayResize(g_resting_command, n - 1);
+
+   return command_id;
   }
 
 //+------------------------------------------------------------------+
@@ -1013,6 +1191,10 @@ void FXSHandleCommand(const string &f[])
       if(g_exec[si].OpenPending(dir == "buy", volume, entry_prc, sl_prc, tp_prc,
                                 PendingExpiryMinutes, comment, order_ticket, retcode))
         {
+         //--- The fill, if it comes, arrives in OnTradeTransaction with only the order
+         //--- ticket to go on. This is how it finds its way back to the command.
+         FXSRememberResting(order_ticket, id);
+
          FXSReportResult(id, true, retcode, order_ticket, entry_prc, volume, "");
          FXSLog("info", StringFormat("Resting %s order placed at %s, expires in %d minutes",
                                     dir, DoubleToString(entry_prc, g_exec[si].Digits()),
@@ -1066,15 +1248,8 @@ void FXSHandleCommand(const string &f[])
 
          //--- Reported here rather than from OnTradeTransaction so the trade can be
          //--- linked back to the command that asked for it.
-         FXSQueueReport(StringFormat(
-            "{\"event\":\"opened\",\"command_id\":%s,\"ticket\":%s,\"symbol\":\"%s\","
-            "\"direction\":\"%s\",\"volume\":%s,\"price\":%s,\"magic\":%s,\"spread_pips\":%s}",
-            IntegerToString(id), IntegerToString((long)out_ticket),
-            FXSJsonEscape(g_exec[si].Symbol()), (is_buy ? "buy" : "sell"),
-            DoubleToString(out_volume, 2), DoubleToString(out_price, g_exec[si].Digits()),
-            IntegerToString(MagicNumber),
-            DoubleToString(SymbolInfoInteger(g_exec[si].Symbol(), SYMBOL_SPREAD) * g_exec[si].Point()
-                           / g_exec[si].PipSize(), 2)));
+         FXSQueueReport(FXSOpenedReport(id, (ulong)out_ticket, g_exec[si].Symbol(), is_buy,
+                                        out_volume, out_price, si));
         }
       else
         {
@@ -1401,18 +1576,130 @@ void OnTimer(void)
   }
 
 //+------------------------------------------------------------------+
+//| The `opened` fill report for a position this EA just acquired.    |
+//|                                                                   |
+//| Shared by the market path, which has the command id in hand, and  |
+//| the resting-order path, which recovers it from FXSTakeResting().  |
+//|                                                                   |
+//| `sl` is read off the position itself rather than restated from    |
+//| the request: it is the level the broker accepted, after clamping, |
+//| and the dashboard's break-even and trailing rules measure from    |
+//| it. Zero means the position has no stop, and the dashboard treats |
+//| it as absent rather than as a price.                              |
+//+------------------------------------------------------------------+
+string FXSOpenedReport(const long command_id, const ulong position_ticket,
+                       const string symbol, const bool is_buy,
+                       const double volume, const double price, const int si)
+  {
+   double placed_sl = 0.0;
+   if(PositionSelectByTicket(position_ticket))
+      placed_sl = PositionGetDouble(POSITION_SL);
+
+   const int digits = (si >= 0) ? g_exec[si].Digits() : 6;
+
+   double spread_pips = 0.0;
+   if(si >= 0 && g_exec[si].PipSize() > 0.0)
+      spread_pips = SymbolInfoInteger(symbol, SYMBOL_SPREAD) * g_exec[si].Point() / g_exec[si].PipSize();
+
+   return StringFormat(
+      "{\"event\":\"opened\",\"command_id\":%s,\"ticket\":%s,\"symbol\":\"%s\","
+      "\"direction\":\"%s\",\"volume\":%s,\"price\":%s,\"sl\":%s,\"magic\":%s,\"spread_pips\":%s}",
+      IntegerToString(command_id), IntegerToString((long)position_ticket),
+      FXSJsonEscape(symbol), (is_buy ? "buy" : "sell"),
+      DoubleToString(volume, 2), DoubleToString(price, digits),
+      DoubleToString(placed_sl, digits),
+      IntegerToString(MagicNumber), DoubleToString(spread_pips, 2));
+  }
+
+//+------------------------------------------------------------------+
+//| A resting order this EA placed has just filled.                   |
+//|                                                                   |
+//| The market path reports its own fills with the command id in      |
+//| hand. A pending order fills whenever the market reaches it, on    |
+//| the event thread, with only the order ticket to go on - so the id |
+//| is looked up from what OpenPending remembered. An entry deal for  |
+//| an order nobody remembers is a market open, already reported.     |
+//+------------------------------------------------------------------+
+void FXSOnEntryDeal(const ulong deal)
+  {
+   const ulong order      = (ulong)HistoryDealGetInteger(deal, DEAL_ORDER);
+   const long  command_id = FXSTakeResting(order);
+
+   if(command_id < 0)
+      return;
+
+   const string symbol      = HistoryDealGetString(deal, DEAL_SYMBOL);
+   const long   position_id = HistoryDealGetInteger(deal, DEAL_POSITION_ID);
+   const bool   is_buy      = (HistoryDealGetInteger(deal, DEAL_TYPE) == DEAL_TYPE_BUY);
+   const double volume      = HistoryDealGetDouble(deal, DEAL_VOLUME);
+   const double price       = HistoryDealGetDouble(deal, DEAL_PRICE);
+
+   FXSQueueReport(FXSOpenedReport(command_id, (ulong)position_id, symbol, is_buy,
+                                  volume, price, FXSIndexFor(symbol)));
+
+   //--- Print, not FXSLog: this runs on the event thread, where WebRequest may not.
+   PrintFormat("[FXS] resting order %I64u filled as position %I64d for command %I64d",
+               order, position_id, command_id);
+  }
+
+//+------------------------------------------------------------------+
+//| An order has left the book and landed in history.                 |
+//|                                                                   |
+//| For a resting order this EA is waiting on, that is one of two     |
+//| things. Filled, in which case the entry deal reports it and this  |
+//| does nothing. Or expired, cancelled or rejected - unfilled - in   |
+//| which case the command that placed it is failed, so the dashboard |
+//| learns the entry never happened instead of waiting for a fill     |
+//| that is not coming.                                               |
+//+------------------------------------------------------------------+
+void FXSOnOrderRetired(const ulong order)
+  {
+   if(order == 0 || FXSRestingIndex(order) < 0)
+      return;
+
+   if(!HistoryOrderSelect(order))
+      return;
+
+   const ENUM_ORDER_STATE state = (ENUM_ORDER_STATE)HistoryOrderGetInteger(order, ORDER_STATE);
+
+   string why = "";
+   if(state == ORDER_STATE_EXPIRED)       why = "Resting order expired unfilled";
+   else if(state == ORDER_STATE_CANCELED) why = "Resting order was cancelled before it filled";
+   else if(state == ORDER_STATE_REJECTED) why = "Resting order was rejected by the broker";
+   else
+      return;   // filled, or still partially working: the deal path owns those
+
+   const long command_id = FXSTakeResting(order);
+
+   FXSQueueResult(command_id, false, 0, order, 0.0, 0.0, why);
+   PrintFormat("[FXS] %s (order %I64u, command %I64d)", why, order, command_id);
+  }
+
+//+------------------------------------------------------------------+
 //| OnTradeTransaction                                                |
 //|                                                                   |
 //| The only way to learn about closes the EA did not ask for: a stop |
 //| loss or take profit hit at the broker while nothing was polling.  |
 //| Without this the dashboard would show positions that closed hours |
 //| ago as still open.                                                |
+//|                                                                   |
+//| Also the only way to learn that a resting order filled - or that  |
+//| it never will.                                                    |
 //+------------------------------------------------------------------+
 void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeRequest &request,
                         const MqlTradeResult &result)
   {
-   if(!g_ready || trans.type != TRADE_TRANSACTION_DEAL_ADD)
+   if(!g_ready)
+      return;
+
+   if(trans.type == TRADE_TRANSACTION_HISTORY_ADD)
+     {
+      FXSOnOrderRetired(trans.order);
+      return;
+     }
+
+   if(trans.type != TRADE_TRANSACTION_DEAL_ADD)
       return;
 
    if(!HistoryDealSelect(trans.deal))
@@ -1423,7 +1710,15 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 
    const ENUM_DEAL_ENTRY entry = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
 
-   //--- Opens are reported from the command path, where the command id is known.
+   //--- Market opens are reported from the command path, where the command id is
+   //--- known. A resting order's fill is the one entry deal that has to be reported
+   //--- from here.
+   if(entry == DEAL_ENTRY_IN)
+     {
+      FXSOnEntryDeal(trans.deal);
+      return;
+     }
+
    if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_OUT_BY)
       return;
 

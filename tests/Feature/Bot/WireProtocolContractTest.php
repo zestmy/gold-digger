@@ -84,6 +84,87 @@ class WireProtocolContractTest extends TestCase
         );
     }
 
+    /**
+     * A resting order fills on the event thread, with only its order ticket to go on. The
+     * EA has to remember which command placed it, report the fill as `opened` against that
+     * command, and report an order that expired unfilled as the command failing - or the
+     * dashboard only ever meets the position in a snapshot and adopts it as a stranger's.
+     */
+    public function test_the_ea_links_a_resting_order_fill_back_to_its_command(): void
+    {
+        $source = preg_replace('#//[^\n]*#', '', $this->eaSource());
+
+        $this->assertStringContainsString(
+            'FXSRememberResting(order_ticket, id)',
+            $source,
+            'open_pending must remember the command id against the order ticket it placed.',
+        );
+
+        $this->assertStringContainsString(
+            'FXSTakeResting(order)',
+            $source,
+            'The entry deal of a resting order must look its command up by order ticket.',
+        );
+
+        $this->assertMatchesRegularExpression(
+            '/entry == DEAL_ENTRY_IN[\s\S]{0,200}FXSOnEntryDeal/',
+            $source,
+            'OnTradeTransaction must hand an entry deal to the resting-order path rather than ignore it.',
+        );
+
+        foreach (['ORDER_STATE_EXPIRED', 'ORDER_STATE_CANCELED'] as $state) {
+            $this->assertStringContainsString(
+                $state,
+                $source,
+                "A resting order that leaves the book as {$state} must fail its command; nothing else tells the dashboard.",
+            );
+        }
+    }
+
+    /**
+     * The stop the broker accepted is read off the position and sent with the open, so
+     * the dashboard measures break-even and trailing from the real level rather than
+     * from zero.
+     */
+    public function test_the_opened_report_carries_the_stop_the_broker_accepted(): void
+    {
+        $this->assertStringContainsString(
+            '\"sl\":%s',
+            $this->eaSource(),
+            'The opened report must carry `sl`; FillController reads it ahead of the command payload.',
+        );
+    }
+
+    /**
+     * A modify that names only the stop must leave the take profit exactly where the
+     * position holds it. Re-clamping the existing target against the current price is not
+     * a no-op once price is near it: every trail near the target pushed the target away.
+     */
+    public function test_modify_clamps_only_the_levels_the_dashboard_supplied(): void
+    {
+        $source = preg_replace('#//[^\n]*#', '', $this->executorSource());
+
+        $start = strpos($source, 'CFXSExecutor::ModifyPosition(');
+        $end = strpos($source, 'CFXSExecutor::CountOwnedPositions(');
+
+        $this->assertNotFalse($start);
+        $this->assertNotFalse($end);
+
+        $modify = substr($source, $start, $end - $start);
+
+        $this->assertStringContainsString(
+            'ClampStops(is_buy, price, sl_requested, tp_requested)',
+            $modify,
+            'ModifyPosition must clamp the requested levels, with an unrequested one passed as zero.',
+        );
+
+        $this->assertStringNotContainsString(
+            'ClampStops(is_buy, price, sl, tp)',
+            $modify,
+            'Clamping the levels loaded off the position re-clamps the one the dashboard did not ask to move.',
+        );
+    }
+
     public function test_the_ea_and_the_python_executor_map_the_same_critical_retcodes(): void
     {
         $mql = $this->executorSource();

@@ -281,6 +281,31 @@ Two details worth knowing:
 broker-side TP fill was, so the precise MT5 reason travels alongside it as `closure_note`
 and is stored in `trades.closure_reason`.
 
+The EA echoes whatever `reason` a close command carried, verbatim. The dashboard accepts
+any string there: a reason it can file — the ladder rungs, `sl`, the strategy's exits — is
+stored as itself, and anything else (the copier's `opposite-signal`, `copier-profit-lock`,
+`tg-followup-*`) is filed as `manual` with the raw reason kept in the note. It used to
+refuse unknown reasons with a 422, and since the EA discards any 4xx, every close the
+copier commanded went unrecorded.
+
+## Reporting opens the EA asked for later
+
+A market order fills inside the command handler, so its `opened` report carries the
+command id directly. A resting order (`open_pending`) fills whenever the market reaches
+it — in `OnTradeTransaction`, with only the order ticket to go on. The EA remembers which
+command placed each resting order and reports the entry deal as `opened` against it, so
+the signal is marked executed and the AI fund charged exactly as for a market fill. An
+order that expires or is cancelled unfilled fails its command instead, so the dashboard
+learns the entry never happened rather than waiting for a fill that is not coming.
+
+That memory is in-process, like the close reasons: a resting order that fills after the
+EA was detached and re-attached is still adopted by the next snapshot, but the link to its
+command is gone.
+
+Every `opened` report also carries `sl` — the stop as the position actually holds it,
+after the executor clamped it to the broker's stops level. The dashboard reads that ahead
+of anything the command asked for, and treats zero as "no stop" rather than as a price.
+
 ---
 
 ## Troubleshooting
@@ -313,5 +338,12 @@ The Experts tab in the terminal carries the same messages with more detail.
 - **`max_concurrent_trades` and `max_daily_loss_percentage` are enforced when a signal is
   generated, not in the EA.** A command queued by hand still bypasses both.
 - **The EA cannot be compiled or tested in CI.** It needs MetaEditor and a Windows
-  terminal. `WireProtocolContractTest` pins the constants both sides share; everything
-  else has to be verified on a demo account.
+  terminal. `WireProtocolContractTest` pins the constants both sides share. On a machine
+  that has a terminal installed, `ExpertAdvisorCompilesTest` finds MetaEditor and the
+  terminal's standard library on its own and compiles the repository's copy in a scratch
+  folder — it never writes to the terminal's own MQL5 tree — and is skipped anywhere
+  else. Everything past compiling has to be verified on a demo account.
+- **A `modify` clamps only the level it names.** Passing zero for the take profit leaves
+  the position's target exactly where it is. Re-clamping the existing target against the
+  current price looked harmless and was not: every trailing move that landed within the
+  stops level of the target pushed the target away from the market.

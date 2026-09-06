@@ -38,6 +38,15 @@ class FillController extends Controller
      */
     private const REPLAY_NOTE = 'replayed from history on attach';
 
+    /**
+     * What `trade_partials.close_reason` can hold.
+     *
+     * The column is a MySQL enum, so this list and the migration change together. Any
+     * reason outside it is flattened to `manual` and kept verbatim in the note - see
+     * normaliseReason() for why rejecting it instead was the wrong answer.
+     */
+    private const CLOSE_REASONS = ['tp1', 'tp2', 'tp3', 'sl', 'reversal_exit', 'time_exit', 'manual'];
+
     public function store(Request $request): JsonResponse
     {
         /** @var BotToken $token */
@@ -63,7 +72,9 @@ class FillController extends Controller
             'profit' => ['nullable', 'numeric'],
             // Required on closes: only the terminal knows the symbol's point size.
             'pips_profit' => ['required_unless:event,opened', 'numeric'],
-            'reason' => ['nullable', 'in:tp1,tp2,tp3,sl,reversal_exit,time_exit,manual'],
+            // Any string, not the enum: the EA echoes whatever reason the command carried,
+            // and refusing one it has never heard of loses the fill - see normaliseReason().
+            'reason' => ['nullable', 'string', 'max:64'],
             // trade_partials.close_reason is a fixed enum, but MT5's DEAL_REASON is
             // richer than it (and a broker-side TP fill does not say which ladder step
             // it was). This free-text note keeps the precise reason instead of
@@ -71,6 +82,8 @@ class FillController extends Controller
             'closure_note' => ['nullable', 'string', 'max:255'],
             'deal_ticket' => ['nullable', 'integer'],
         ]);
+
+        $data = $this->normaliseReason($data);
 
         $command = isset($data['command_id'])
             ? TradeCommand::where('user_id', $token->user_id)->find($data['command_id'])
@@ -109,6 +122,22 @@ class FillController extends Controller
             ], 422);
         }
 
+        // The stop this position actually has, in order of how much each source knows.
+        //
+        // The terminal's own figure first: it is the level the broker accepted, after the
+        // executor clamped it to the stops level. Zero from the terminal means "no stop",
+        // which is not a price and must not be stored as one.
+        //
+        // Then what the command asked for. The strategy path deliberately does not send
+        // `sl_price` on the wire - the EA places the stop relative to the fill, and a bar
+        // -close level would override that - so it carries the intended level under
+        // `intended_sl_price` instead. Reading only `sl_price` here left every bot trade
+        // with sl_price 0 and initial_sl_price null, which for a sell reads as "the stop is
+        // already beyond break-even" and silently switched off break-even and trailing.
+        $reportedSl = isset($data['sl']) && (float) $data['sl'] > 0 ? (float) $data['sl'] : null;
+        $intendedSl = $payload['sl_price'] ?? $payload['intended_sl_price'] ?? null;
+        $stop = $reportedSl ?? ($intendedSl !== null ? (float) $intendedSl : null);
+
         $trade = Trade::updateOrCreate(
             ['mt5_ticket' => $data['ticket']],
             [
@@ -128,12 +157,12 @@ class FillController extends Controller
                 'initial_lot_size' => $data['volume'],
                 'remaining_lot_size' => $data['volume'],
                 'entry_price' => $data['price'],
-                'sl_price' => $data['sl'] ?? $payload['sl_price'] ?? 0,
+                'sl_price' => $stop ?? 0,
                 // The risk this position was opened with, written once and never revised.
                 // `sl_price` above is live - PositionReconciler overwrites it with the
                 // terminal's actual stop - so it stops being the opening risk the moment
                 // anything moves the stop, and R is measured against this instead.
-                'initial_sl_price' => $data['sl'] ?? $payload['sl_price'] ?? null,
+                'initial_sl_price' => $stop,
                 'tp1_price' => $data['tp1'] ?? $payload['tp1_price'] ?? null,
                 'tp2_price' => $data['tp2'] ?? $payload['tp2_price'] ?? null,
                 'tp3_price' => $data['tp3'] ?? $payload['tp3_price'] ?? null,
@@ -289,6 +318,39 @@ class FillController extends Controller
             'status' => $trade->status,
             'remaining_lot_size' => (float) $trade->remaining_lot_size,
         ]);
+    }
+
+    /**
+     * Fit the commanded reason into the enum without losing it.
+     *
+     * The EA echoes the reason a close command carried, verbatim, so the fill can be filed
+     * as the ladder rung it was. That contract was written for TradeManager, whose reasons
+     * are the enum values. The copier then started commanding closes of its own -
+     * `opposite-signal`, `copier-profit-lock`, `tg-followup-close` - and every one of those
+     * fills came back here, failed the `in:` rule, and was answered with a 422. The EA
+     * treats any 4xx as "the dashboard will keep refusing this" and discards the report.
+     *
+     * So a copied position the copier closed stayed `open` in `trades`, its lots still
+     * counted against the AI fund, until reconciliation eventually marked it closed with no
+     * price, no pips and no money. The fix is not to widen the enum every time something
+     * new learns to close a position: the enum names *how* a position closed, and the note
+     * keeps *what asked for it*. Anything not in the enum is `manual` with the raw reason
+     * preserved in the note, which is also where the trade's closure_reason reads from.
+     */
+    private function normaliseReason(array $data): array
+    {
+        $reason = $data['reason'] ?? null;
+
+        if ($reason === null || in_array($reason, self::CLOSE_REASONS, true)) {
+            return $data;
+        }
+
+        // The EA already writes "closed by dashboard command (<reason>)" here. A client
+        // that sends no note gets the raw reason, so nothing about the close is lost.
+        $data['closure_note'] ??= $reason;
+        $data['reason'] = 'manual';
+
+        return $data;
     }
 
     /**

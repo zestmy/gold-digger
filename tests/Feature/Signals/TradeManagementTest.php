@@ -510,6 +510,58 @@ class TradeManagementTest extends TestCase
     }
 
     // =====================================================================
+    // WHAT MUST STILL HAPPEN WHEN SOMETHING ELSE WENT WRONG
+    // =====================================================================
+
+    /**
+     * A fill that carried no stop was recorded with sl_price 0. For a sell, zero is below
+     * every level the stop could be moved to, which the comparison read as "already beyond
+     * break-even" - and neither the break-even move nor the trail was ever queued.
+     */
+    public function test_a_sell_recorded_with_no_stop_still_gets_its_break_even_move(): void
+    {
+        $trade = $this->openTrade(lots: 1.00, direction: 'sell');
+        $trade->update(['sl_price' => 0]);
+
+        $this->seedBarsReaching(self::ENTRY - (self::TP1 - self::ENTRY));
+        $this->fillRung($trade, 'tp1', 0.50);
+
+        $this->manage();
+
+        $command = TradeCommand::where('type', 'modify')->firstOrFail();
+
+        $this->assertEqualsWithDelta(self::ENTRY, (float) $command->payload['sl_price'], 1e-9);
+        $this->assertSame('break_even', $command->payload['reason']);
+    }
+
+    /**
+     * The close's idempotency key is fixed for the life of the position, so a rejected
+     * close used to block its own retry: every later bar found the failed row under the
+     * same key and returned it, and the rung was never asked for again.
+     */
+    public function test_a_close_the_broker_rejected_is_asked_for_again_on_the_next_bar(): void
+    {
+        $this->openTrade(lots: 1.00);
+        $this->seedBarsReaching(self::TP1);
+
+        $this->manage();
+
+        $command = TradeCommand::where('type', 'close')->sole();
+
+        // The terminal took it, and the broker refused it.
+        TradeCommand::claimBatch($this->user->id, $this->account->id);
+        $command->fresh()->markFailed('10016 invalid stops');
+
+        $this->manage();
+
+        $again = TradeCommand::where('type', 'close')->sole();
+
+        $this->assertSame($command->id, $again->id, 'Re-armed under the same key, not duplicated beside it.');
+        $this->assertSame('pending', $again->status);
+        $this->assertNull($again->error);
+    }
+
+    // =====================================================================
     // HELPERS
     // =====================================================================
 

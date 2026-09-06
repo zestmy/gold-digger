@@ -36,6 +36,20 @@ class TradeCommand extends Model
      */
     public const WIRE_VERSION = 'GDCMD2';
 
+    /**
+     * How long a claimed command with no expiry may sit unfinished before the sweep gives
+     * up on the executor that took it.
+     *
+     * Executing a command takes seconds. A claim this old means the terminal claimed it and
+     * then stopped - a crash, a detach, a rejected line it never reported - and nothing else
+     * ever moves the row. Left at `claimed` it blocks its own retry: the next bar's enqueue
+     * finds it under the same idempotency key and collapses into it.
+     */
+    public const STALE_CLAIM_MINUTES = 10;
+
+    /** Statuses that mean "this attempt is over and nothing came of it". */
+    public const RETRYABLE_STATUSES = ['failed', 'expired'];
+
     /** Column order of the tab-separated wire format. Do not reorder - only append. */
     public const WIRE_COLUMNS = [
         'id', 'type', 'symbol', 'direction', 'volume',
@@ -119,7 +133,7 @@ class TradeCommand extends Model
      */
     public static function sweepExpired(): int
     {
-        return self::query()
+        $lapsed = self::query()
             ->whereIn('status', ['pending', 'claimed'])
             ->whereNotNull('expires_at')
             ->where('expires_at', '<=', now())
@@ -129,6 +143,23 @@ class TradeCommand extends Model
                 'error' => 'Expired before an executor completed it.',
                 'updated_at' => now(),
             ]);
+
+        // Closes and stop moves are queued with no expiry on purpose - a late exit is still
+        // the exit. That leaves one way for them to get stuck: claimed by a terminal that
+        // never reported back. Those are aged out here so the next evaluation can re-issue
+        // them; see STALE_CLAIM_MINUTES.
+        $abandoned = self::query()
+            ->where('status', 'claimed')
+            ->whereNull('expires_at')
+            ->where('claimed_at', '<=', now()->subMinutes(self::STALE_CLAIM_MINUTES))
+            ->update([
+                'status' => 'expired',
+                'completed_at' => now(),
+                'error' => 'Claimed but never completed; the executor may have stopped mid-command.',
+                'updated_at' => now(),
+            ]);
+
+        return $lapsed + $abandoned;
     }
 
     /**
@@ -157,6 +188,21 @@ class TradeCommand extends Model
      *
      * `firstOrCreate` on the unique idempotency_key is what makes a double-clicked
      * button, or a retried request, produce one position rather than two.
+     *
+     * ## A spent key is re-armed, not collapsed into
+     *
+     * Collapsing was unconditional, and the strategy's keys are fixed per rung - one
+     * `close:{trade}:tp1`, one `modify:{trade}:break_even` for the life of the position.
+     * So the first time the broker rejected a close (a 10016 on a break-even move is the
+     * documented case) or a terminal claimed one and died, every later bar's enqueue found
+     * the dead row and returned it. A reversal exit that failed once left the position
+     * running to its broker stop while the strategy believed it had acted.
+     *
+     * A row that is `failed` or `expired` is an attempt that is over. The caller asking
+     * again, with the same key, is the caller having re-evaluated and still wanting it - so
+     * the row goes back to `pending` with the fresh payload and a fresh expiry, keeping its
+     * attempt count. `done`, `pending` and `claimed` still collapse: those are a position
+     * that exists or an instruction that is still in flight.
      */
     public static function enqueue(
         User $user,
@@ -168,18 +214,32 @@ class TradeCommand extends Model
     ): self {
         $key = $idempotencyKey ?? (string) Str::uuid();
 
-        return self::firstOrCreate(
-            ['idempotency_key' => $key],
-            [
-                'user_id' => $user->id,
-                'broker_account_id' => $account?->id,
-                'trade_id' => $payload['trade_id'] ?? null,
-                'type' => $type,
-                'payload' => $payload,
-                'status' => 'pending',
-                'expires_at' => $expiresInSeconds ? now()->addSeconds($expiresInSeconds) : null,
-            ],
-        );
+        $attributes = [
+            'user_id' => $user->id,
+            'broker_account_id' => $account?->id,
+            'trade_id' => $payload['trade_id'] ?? null,
+            'type' => $type,
+            'payload' => $payload,
+            'status' => 'pending',
+            'expires_at' => $expiresInSeconds ? now()->addSeconds($expiresInSeconds) : null,
+        ];
+
+        $existing = self::where('idempotency_key', $key)->first();
+
+        if ($existing === null) {
+            return self::firstOrCreate(['idempotency_key' => $key], $attributes);
+        }
+
+        if (in_array($existing->status, self::RETRYABLE_STATUSES, true)) {
+            $existing->update($attributes + [
+                'result' => null,
+                'error' => null,
+                'claimed_at' => null,
+                'completed_at' => null,
+            ]);
+        }
+
+        return $existing;
     }
 
     /**

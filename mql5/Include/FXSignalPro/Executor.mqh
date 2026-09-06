@@ -604,6 +604,15 @@ bool CFXSExecutor::ClosePosition(const ulong ticket, const double volume, uint &
 //| so a break-even stop is rejected with 10016 exactly when price    |
 //| has come back close to entry - which is precisely when it is      |
 //| being asked for.                                                  |
+//|                                                                   |
+//| Only the levels the caller supplied are clamped. The one it left  |
+//| alone is carried across exactly as the position holds it: the     |
+//| broker already accepted that level, and re-clamping it against    |
+//| today's price is not a no-op once price has come near it. Every   |
+//| trailing move that landed within the stops level of the target    |
+//| pushed the target away from the market, and did so again on the   |
+//| next bar - so while the trail was active the take profit could    |
+//| never fill.                                                       |
 //+------------------------------------------------------------------+
 bool CFXSExecutor::ModifyPosition(const ulong ticket, const double sl_price_in,
                                   const double tp_price_in, uint &out_retcode)
@@ -619,9 +628,6 @@ bool CFXSExecutor::ModifyPosition(const ulong ticket, const double sl_price_in,
 
    const bool is_buy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
 
-   double sl = (sl_price_in > 0.0) ? sl_price_in : PositionGetDouble(POSITION_SL);
-   double tp = (tp_price_in > 0.0) ? tp_price_in : PositionGetDouble(POSITION_TP);
-
    MqlTick tick;
    if(!SymbolInfoTick(m_symbol, tick) || tick.ask <= 0.0 || tick.bid <= 0.0)
      {
@@ -629,9 +635,16 @@ bool CFXSExecutor::ModifyPosition(const ulong ticket, const double sl_price_in,
       return false;
      }
 
-   //--- Clamp against the price the position would be closed at.
+   //--- Clamp against the price the position would be closed at. Zero is "not
+   //--- requested", which ClampStops leaves untouched.
    const double price = is_buy ? tick.bid : tick.ask;
-   ClampStops(is_buy, price, sl, tp);
+
+   double sl_requested = (sl_price_in > 0.0) ? sl_price_in : 0.0;
+   double tp_requested = (tp_price_in > 0.0) ? tp_price_in : 0.0;
+   ClampStops(is_buy, price, sl_requested, tp_requested);
+
+   double sl = (sl_price_in > 0.0) ? sl_requested : PositionGetDouble(POSITION_SL);
+   double tp = (tp_price_in > 0.0) ? tp_requested : PositionGetDouble(POSITION_TP);
 
    sl = NormalizeDouble(sl, m_digits);
    tp = NormalizeDouble(tp, m_digits);
