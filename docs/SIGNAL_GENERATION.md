@@ -290,10 +290,11 @@ running deployment — but only for that symbol. Lending one instrument's pip va
 would size a position from a different market's numbers, which is a silently wrong trade rather
 than a visible failure.
 
-**Multi-symbol means one executor per symbol.** Each Expert Advisor instance resolves its own
-`BaseSymbol`, pushes its own bars and reports its own spec, against its own token. That is a
-deliberate choice over teaching one EA to loop: the instances are isolated, and it needs no
-refactor of code that has never been compiled.
+**Multi-symbol is one executor carrying several.** The EA's `BaseSymbols` input is a
+comma-separated list (up to `FXS_MAX_SYMBOLS`, eight); one instance resolves each broker
+name, pushes each instrument's bars and reports each spec alongside them. Running one
+instance per symbol, each with its own token, still works — it is the same wire either way —
+but it is no longer the only way.
 
 ---
 
@@ -335,22 +336,32 @@ Everything on the card is either stored on the row at generation or arithmetic o
 
 ## Not built
 
-- **News filter.** `news_filter_enabled` is stored; there is no news source.
-- **`confidence_score`** is always null. Nothing scores setups yet.
-- **Backtesting.** The evaluator answers "is there a signal now", not "where were all the
-  signals". Walking history deliberately is a different job — the schema supports it
-  (`candles` plus `signals.features`), nothing implements it.
+- **Confidence as a gate.** `confidence_score` is now written (from the setup-quality
+  reading, when there is one) but nothing refuses an entry because of it.
+
+Two things used to be listed here and now exist:
+
+- **News filter** — `App\Services\News\NewsBlackout`, fed by the scheduled `news:fetch`.
+  It fails closed: with the calendar missing or stale it holds entries as
+  `news_data_stale` rather than trading unprotected. See `routes/console.php`.
+- **Backtesting** — `App\Services\Backtest\Backtester` walks stored `candles` with the same
+  evaluator, and `backtest:optimise` sweeps parameters. See `BACKTESTING.md`.
 
 ---
 
-## What has not been verified
+## What has been verified, and what has not
 
-**The EA's candle push has never run.** It has never been compiled — the same caveat that
-covers the rest of `mql5/`, and for the same reason: no MetaEditor, no Windows terminal.
-Everything on the Laravel side is covered by tests, including the full path from a candle
-push to a queued command, but no real bar has ever made this round trip.
+**The EA's candle push has run.** It was exercised against the production dashboard by a
+live terminal during commissioning — see the commissioning section of `HANDOFF.md` — along
+with the heartbeat, `bot_logs`, the health checks and alert resolution. The EA compiles
+(`0 errors, 0 warnings`). Everything on the Laravel side is covered by tests, including the
+full path from a candle push to a queued command.
 
-Worth watching on first attach:
+**No position has yet been opened from a generated signal.** The kill switch stayed off
+throughout commissioning, so the pipeline has been watched as far as the signal row and no
+further. See `HANDOFF.md` for the current state of that.
+
+Worth watching on a fresh attach:
 
 - **`EntryTimeframe` / `TrendTimeframe` must match the strategy's.** If they disagree the
   bars are stored and nothing is ever generated, which looks exactly like a broken strategy.

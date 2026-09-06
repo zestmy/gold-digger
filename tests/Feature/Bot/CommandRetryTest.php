@@ -42,6 +42,7 @@ class CommandRetryTest extends TestCase
         $first = $this->enqueueClose(volume: 0.50);
         $first->markFailed('10016 invalid stops', ['retcode' => 10016]);
 
+        $this->travel(TradeCommand::RETRY_BACKOFF_SECONDS + 1)->seconds();
         $again = $this->enqueueClose(volume: 0.40);
 
         $this->assertSame($first->id, $again->id, 'Still one row per key - re-armed, not duplicated.');
@@ -73,9 +74,52 @@ class CommandRetryTest extends TestCase
         TradeCommand::claimBatch($this->user->id, $this->account->id);
         $command->fresh()->markFailed('rejected');
 
+        $this->travel(2)->minutes();
         $again = $this->enqueueClose(volume: 0.50);
 
         $this->assertSame(1, $again->attempts, 'A re-arm is a new attempt at the same instruction, not a new instruction.');
+    }
+
+    /**
+     * Management runs every minute. A close the broker will never accept must not be
+     * re-issued sixty times an hour, so each failure buys the row a longer rest.
+     */
+    public function test_a_spent_command_rests_longer_after_each_failed_attempt(): void
+    {
+        $command = $this->enqueueClose(volume: 0.50);
+        TradeCommand::claimBatch($this->user->id, $this->account->id);
+        $command->fresh()->markFailed('position not found');
+
+        // One attempt: a minute's rest.
+        $this->travel(30)->seconds();
+        $this->assertSame('failed', $this->enqueueClose(volume: 0.50)->status);
+
+        $this->travel(31)->seconds();
+        $this->assertSame('pending', $this->enqueueClose(volume: 0.50)->status);
+
+        // Two attempts: two minutes.
+        TradeCommand::claimBatch($this->user->id, $this->account->id);
+        $command->fresh()->markFailed('position not found');
+
+        $this->travel(90)->seconds();
+        $this->assertSame('failed', $this->enqueueClose(volume: 0.50)->status);
+
+        $this->travel(31)->seconds();
+        $this->assertSame('pending', $this->enqueueClose(volume: 0.50)->status);
+    }
+
+    /**
+     * Only a failure earns a rest. An expired row is one nobody tried, so there is nothing
+     * to back off from.
+     */
+    public function test_a_command_that_expired_unclaimed_is_re_armed_at_once(): void
+    {
+        TradeCommand::enqueue($this->user, 'open', ['symbol' => 'XAUUSD'], $this->account, 'signal:9', 60);
+
+        $this->travel(2)->minutes();
+        TradeCommand::sweepExpired();
+
+        $this->assertSame('pending', TradeCommand::enqueue($this->user, 'open', ['symbol' => 'XAUUSD'], $this->account, 'signal:9', 60)->status);
     }
 
     public function test_a_done_command_is_not_re_armed(): void

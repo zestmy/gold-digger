@@ -164,6 +164,57 @@ class PositionManagerTest extends TestCase
         $this->assertSame(1, TradeCommand::where('type', 'modify')->count());
     }
 
+    /**
+     * A refusal is not a decision. The broker rejects a stop move with 10016 when price has
+     * come back inside its stops level, which is transient - but the duplicate check used
+     * to see the failed row and conclude the level had been handled, so that stop was never
+     * proposed again while the position ran on unprotected.
+     */
+    public function test_a_trail_the_broker_refused_is_proposed_again_on_the_next_pass(): void
+    {
+        $this->settings->update(['copier_trail_distance_r' => 0.5]);
+
+        $this->trade();
+        $this->bars(high: 2660.0);
+
+        (new PositionManager)->manage($this->user);
+
+        $command = TradeCommand::where('type', 'modify')->firstOrFail();
+
+        // A failure earns the row a minute's rest before enqueue will re-arm it; this one
+        // has had two.
+        $command->update(['status' => 'failed', 'error' => '10016 Invalid stops', 'completed_at' => now()->subMinutes(2)]);
+
+        $actions = (new PositionManager)->manage($this->user);
+
+        $this->assertContains('trail', $actions);
+        // Re-armed on the same key, not duplicated beside the dead row.
+        $this->assertSame(1, TradeCommand::where('type', 'modify')->count());
+        $this->assertSame('pending', $command->fresh()->status);
+        $this->assertNull($command->fresh()->error);
+    }
+
+    /**
+     * The other side of the same line: a move the terminal completed is a stop that exists,
+     * and asking for it again would be a command per pass.
+     */
+    public function test_a_trail_the_terminal_completed_is_not_sent_again(): void
+    {
+        $this->settings->update(['copier_trail_distance_r' => 0.5]);
+
+        $this->trade();
+        $this->bars(high: 2660.0);
+
+        (new PositionManager)->manage($this->user);
+        TradeCommand::where('type', 'modify')->update(['status' => 'done', 'completed_at' => now()]);
+
+        (new PositionManager)->manage($this->user);
+
+        // Still one row, and still the completed one - neither duplicated nor re-armed.
+        $this->assertSame(1, TradeCommand::where('type', 'modify')->count());
+        $this->assertSame('done', TradeCommand::where('type', 'modify')->firstOrFail()->status);
+    }
+
     // =====================================================================
     // PROFIT LOCK
     // =====================================================================

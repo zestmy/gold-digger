@@ -197,8 +197,9 @@ final class TradeManager
         // stop to entry while the partial is still in flight would leave the full position
         // sitting on a break-even stop, which is a different trade from the one intended.
         $breakEven = $this->breakEvenPrice($strategy, $trade, $spec);
+        $pipSize = $spec['pip_size'];
 
-        if ($this->hasFilledRung($trade, 'tp1') && ! $this->stopAtOrBeyond($trade, $breakEven)) {
+        if ($this->hasFilledRung($trade, 'tp1') && ! $this->stopAtOrBeyond($trade, $breakEven, $pipSize)) {
             $this->queueBreakEven($trade, $breakEven);
             $actions[] = 'break_even';
         }
@@ -207,8 +208,8 @@ final class TradeManager
 
         $trailed = $this->trailingStop($strategy, $trade, $since, $spec);
 
-        if ($trailed !== null && ! $this->stopAtOrBeyond($trade, $trailed)) {
-            $this->queueTrail($trade, $trailed);
+        if ($trailed !== null && ! $this->stopAtOrBeyond($trade, $trailed, $pipSize)) {
+            $this->queueTrail($trade, $trailed, $pipSize);
             $actions[] = 'trail';
         }
 
@@ -376,8 +377,13 @@ final class TradeManager
      * "Past" means further into profit. A stop only ever moves one way: loosening it would
      * widen the risk on a position whose risk was decided when it opened, and no rule in this
      * system is allowed to do that.
+     *
+     * The tolerance is a twentieth of a pip, in the instrument's own pip. It was a fixed
+     * 0.005 of price, which is that on gold and fifty pips on a five-digit pair - so on
+     * EURUSD a trail had to beat the current stop by half a figure before it was worth
+     * sending, and a stop that should have followed price simply never moved.
      */
-    private function stopAtOrBeyond(Trade $trade, float $level): bool
+    private function stopAtOrBeyond(Trade $trade, float $level, ?float $pipSize = null): bool
     {
         // Zero is "no stop recorded", not a price. Compared as a price it sits below every
         // level a sell could be asked to move to, so a sell whose fill never carried a stop
@@ -388,8 +394,10 @@ final class TradeManager
 
         $current = (float) $trade->sl_price;
 
-        // Under a tenth of a pip on gold is not a move worth a command round trip.
-        $epsilon = 0.005;
+        // Under a twentieth of a pip is not a move worth a command round trip. The fallback
+        // is the gold figure this used to hardcode, for a spec with no pip size - which
+        // cannot trail anyway, and reaches here only for break-even.
+        $epsilon = $pipSize !== null && $pipSize > 0 ? 0.05 * $pipSize : 0.005;
 
         return $trade->direction === 'buy'
             ? $current >= $level - $epsilon
@@ -502,12 +510,15 @@ final class TradeManager
      * be queued; keyed on nothing, a stop that wandered by a fraction of a pip would produce a
      * command per bar.
      *
-     * The level is bucketed to whole pips-worth of price for the same reason - two proposals
-     * that round to the same stop are the same instruction.
+     * The level is bucketed to the nearest whole pip for the same reason - two proposals
+     * that round to the same stop are the same instruction. In the instrument's own pip:
+     * this used to round to two decimals, which is a point on gold and a hundred pips on
+     * a five-digit pair, so on EURUSD every trail for the life of the position shared one
+     * key and only the first was ever sent.
      */
-    private function queueTrail(Trade $trade, float $level): void
+    private function queueTrail(Trade $trade, float $level, ?float $pipSize = null): void
     {
-        $bucket = number_format($level, 2, '.', '');
+        $bucket = $this->pipBucket($level, $pipSize);
 
         TradeCommand::enqueue(
             user: $trade->user,
@@ -523,6 +534,26 @@ final class TradeManager
             idempotencyKey: "modify:{$trade->id}:trail:{$bucket}",
             expiresInSeconds: null,
         );
+    }
+
+    /**
+     * A price rounded to the nearest whole pip, rendered with a pip's worth of decimals.
+     *
+     * The rendering matters because this goes into an idempotency key: 1.1033 and 1.10330
+     * have to be the same string. The decimal count is derived from the pip size (0.0001
+     * is four, 0.1 is one), so a five-digit quote and a two-digit one each get their own
+     * precision and nothing beyond it. With no pip size the old two-decimal rendering is
+     * kept; nothing trails without one, so this is a fallback rather than a path.
+     */
+    private function pipBucket(float $level, ?float $pipSize): string
+    {
+        if ($pipSize === null || $pipSize <= 0) {
+            return number_format($level, 2, '.', '');
+        }
+
+        $decimals = max(0, (int) ceil(-log10($pipSize) - 1e-9));
+
+        return number_format(round($level / $pipSize) * $pipSize, $decimals, '.', '');
     }
 
     private function heartbeat(int $userId, ?int $brokerAccountId): ?BotHeartbeat

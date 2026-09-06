@@ -35,6 +35,22 @@ Schedule::command('commands:sweep')->everyFiveMinutes()->withoutOverlapping();
 // application code instead of a unique index MySQL cannot express.
 Schedule::command('bot:monitor')->everyMinute()->withoutOverlapping();
 
+// Position management, as a correction rather than the mechanism.
+//
+// The ladder, break-even, trail and the exits normally run from the candle push - on the
+// bar that closed, before that bar's entries are considered. That is the right trigger and
+// it stays the trigger. But it is also the *only* trigger, so a push that stops (a
+// whitelist edited, a symbol whose history will not load, a worker that died with queued
+// evaluation on) leaves every open position with nothing but its broker-side stop, and
+// nothing on the dashboard saying so beyond feed_stalled.
+//
+// This re-runs the same pass every minute against whatever bars are stored. Safe without
+// a new bar because TradeManager is idempotent by construction: every action carries a
+// fixed key, so the same bars produce the same keys and enqueue collapses them into the
+// rows that already exist. The one thing it changes is retry cadence - a close or stop
+// move the broker refused is re-armed on the next pass rather than the next bar.
+Schedule::command('trades:manage')->everyMinute()->withoutOverlapping();
+
 // The economic calendar behind the news blackout filter. Hourly: the week's schedule
 // barely moves, but `actual` values print through the day, and NewsBlackout stops
 // trusting the data after six hours - so this is five consecutive failures of headroom

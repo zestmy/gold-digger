@@ -50,6 +50,18 @@ class TradeCommand extends Model
     /** Statuses that mean "this attempt is over and nothing came of it". */
     public const RETRYABLE_STATUSES = ['failed', 'expired'];
 
+    /**
+     * How long a spent command rests before it can be re-armed, per attempt so far.
+     *
+     * Trade management runs every minute now, not only on a new bar, and a close the
+     * broker refuses for a reason that will not change - the position is already gone,
+     * the ticket is not this account's - would otherwise be re-issued sixty times an hour,
+     * each one a bot_logs error, until reconciliation caught up. One minute after the
+     * first failure, two after the second, and so on: the first retry is still quick, and
+     * a command that is never going to work stops shouting about it.
+     */
+    public const RETRY_BACKOFF_SECONDS = 60;
+
     /** Column order of the tab-separated wire format. Do not reorder - only append. */
     public const WIRE_COLUMNS = [
         'id', 'type', 'symbol', 'direction', 'volume',
@@ -230,7 +242,7 @@ class TradeCommand extends Model
             return self::firstOrCreate(['idempotency_key' => $key], $attributes);
         }
 
-        if (in_array($existing->status, self::RETRYABLE_STATUSES, true)) {
+        if (in_array($existing->status, self::RETRYABLE_STATUSES, true) && $existing->readyToRetry()) {
             $existing->update($attributes + [
                 'result' => null,
                 'error' => null,
@@ -240,6 +252,25 @@ class TradeCommand extends Model
         }
 
         return $existing;
+    }
+
+    /**
+     * Has a spent command rested long enough to be asked for again?
+     *
+     * Only a failure earns a rest: an executor tried, and the broker said no. An expired
+     * row is one nobody tried, so there is nothing to back off from and it is ready at
+     * once. Measured from when the failed attempt ended, scaled by how many there have
+     * been.
+     */
+    public function readyToRetry(): bool
+    {
+        if ($this->status !== 'failed' || $this->completed_at === null) {
+            return true;
+        }
+
+        $rest = self::RETRY_BACKOFF_SECONDS * max(1, (int) $this->attempts);
+
+        return $this->completed_at->lte(now()->subSeconds($rest));
     }
 
     /**

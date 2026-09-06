@@ -210,8 +210,9 @@ outcome as well as the procedure. What is left:
   the terminal launched. Compile externally and the terminal keeps running the old binary
   with no indication anything has changed. Remove the EA from the chart and re-attach —
   and check the Journal for `loaded successfully` with a timestamp later than the `.ex5`,
-  because "I reloaded it" and "it reloaded" are different claims. The EA prints
-  `EA <version> attached on <symbol>` on init; that line is the proof.
+  because "I reloaded it" and "it reloaded" are different claims. The EA logs
+  `EA <version> attached carrying <symbols> (terminal build <n>)` on init — to `bot_logs`
+  as well as the Journal — and that line, with the new version in it, is the proof.
 - **`WebRequest` error 4014** means the URL is not whitelisted, or was whitelisted with a
   trailing path.
 - **Symbol names are not `XAUUSD` everywhere.** `.env.example` hardcodes it; real servers

@@ -23,6 +23,25 @@ Management runs **before** entry generation, so a reversal or timeout exit is qu
 of the same bar's new entry — the EA then claims them in that order: out of the old trade,
 then into the new one.
 
+### And again every minute, as a correction
+
+The push is the trigger, but it is no longer the *only* one. `trades:manage` is scheduled
+every minute in `routes/console.php` (`withoutOverlapping`), re-running the same pass over
+whatever bars are stored. Before that, a push that stopped — a whitelist edited, a symbol
+whose history would not load, a worker that died with queued evaluation on — left every open
+position with nothing but its broker-side stop.
+
+It is safe without a new bar because every action carries a fixed idempotency key: the same
+bars produce the same keys, and `TradeCommand::enqueue` collapses them into the rows that
+already exist. Running it three times against one stored series queues one `tp1` close, not
+three — that property is pinned in `tests/Feature/Monitoring/ScheduledCorrectionsTest.php`.
+What the schedule does change is retry cadence: a close or stop move the broker refused is
+re-armed on the next minute rather than the next bar.
+
+It does not, and cannot, see what the feed has stopped delivering. With no new bars there is
+nothing new to detect, which is why `feed_stalled` is **critical** while positions are open
+(see `MONITORING.md`).
+
 ---
 
 ## Why the ladder is detected here at all
@@ -203,13 +222,21 @@ answer a different question from the one being asked.
 
 ## Not built
 
-- **Trailing stops.** The stop moves once, to break-even. Nothing trails it behind price.
 - **Partial-close accounting against `tp3_close_pct`.** The final rung closes whatever
   remains, so the column is descriptive rather than enforced.
-- **Reconciliation.** A position closed at the broker while the EA was detached is still
-  back-filled only by `OnTradeTransaction` when it reattaches, and a position opened outside
-  the bot is not in `trades` at all, so nothing manages it.
+- **Managing an adopted position.** Reconciliation (`PositionReconciler`, see
+  `RECONCILIATION.md`) now records positions it finds on the terminal and closes `trades`
+  rows the broker no longer holds — but an adopted position carries `origin = 'adopted'`,
+  this class only manages `origin = 'bot'`, and that is deliberate. There is no way to promote one to a strategy.
 - **Intrabar detection.** See the cost section above.
+- **Tolerances for instruments whose pip is not a power of ten.** The "stop already there"
+  tolerance and the trail's idempotency bucket are derived from `pip_size` — a twentieth of
+  a pip and one whole pip respectively — which is exact for 0.1, 0.01 and 0.0001. An
+  index quoted in 0.25 steps would bucket coarsely rather than wrongly.
+
+Trailing stops and reconciliation used to be listed here. Both exist: trailing is
+`strategies.trail_trigger_pips` / `trail_distance_pips` (above), and reconciliation has its
+own document.
 
 ---
 

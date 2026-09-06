@@ -552,6 +552,8 @@ class TradeManagementTest extends TestCase
         TradeCommand::claimBatch($this->user->id, $this->account->id);
         $command->fresh()->markFailed('10016 invalid stops');
 
+        // A failure earns the row a minute's rest before it is asked for again.
+        $this->travel(2)->minutes();
         $this->manage();
 
         $again = TradeCommand::where('type', 'close')->sole();

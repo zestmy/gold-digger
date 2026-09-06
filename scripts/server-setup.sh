@@ -144,7 +144,11 @@ echo "[9/10] Setting up queue worker..."
 cat > /etc/supervisor/conf.d/$APP_NAME-worker.conf << 'SUPERVISOR'
 [program:gold-digger-worker]
 process_name=%(program_name)s_%(process_num)02d
-command=php /var/www/gold-digger/artisan queue:work --sleep=3 --tries=3 --max-time=3600
+; --queue names every queue this worker drains, and the order is priority. Strategy
+; evaluation (App\Jobs\EvaluateNewBars) goes onto config('trading.queue'), which is
+; "strategy" - a worker left on the default queue alone stores every bar and never
+; evaluates one, and nothing but the queue_stalled alert says so.
+command=php /var/www/gold-digger/artisan queue:work --queue=strategy,default --sleep=3 --tries=3 --max-time=3600
 autostart=true
 autorestart=true
 stopasgroup=true

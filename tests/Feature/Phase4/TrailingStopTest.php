@@ -7,6 +7,7 @@ use App\Models\BotSettings;
 use App\Models\BrokerAccount;
 use App\Models\Candle;
 use App\Models\Strategy;
+use App\Models\SymbolSpec;
 use App\Models\Trade;
 use App\Models\TradeCommand;
 use App\Models\TradePartial;
@@ -294,6 +295,147 @@ class TrailingStopTest extends TestCase
 
         $this->assertNotNull($trail);
         $this->assertLessThan(self::ENTRY, $trail['sl']);
+    }
+
+    // =====================================================================
+    // THE TOLERANCES ARE IN PIPS, NOT IN GOLD
+    // =====================================================================
+
+    /**
+     * A five-digit pair on the same account. Pip 0.0001, so the "is the stop already
+     * there" tolerance and the trail's idempotency bucket both have to be a hundred
+     * times finer than gold's - which they were not, because both were gold constants.
+     */
+    private function fiveDigitPair(): void
+    {
+        SymbolSpec::create([
+            'broker_account_id' => $this->account->id,
+            'base_symbol' => 'EURUSD',
+            'symbol' => 'EURUSDm',
+            'pip_size' => 0.0001,
+            'digits' => 5,
+            'pip_value_per_lot' => 10.0,
+            'volume_min' => 0.01,
+            'volume_step' => 0.01,
+            'last_seen_at' => now(),
+        ]);
+
+        $this->strategy->update([
+            'symbol' => 'EURUSDm',
+            'trail_trigger_pips' => 10,
+            'trail_distance_pips' => 20,
+        ]);
+    }
+
+    private function openFiveDigitTrade(float $sl): Trade
+    {
+        return $this->openTrade([
+            'symbol' => 'EURUSDm',
+            'entry_price' => 1.10000,
+            'sl_price' => $sl,
+            'tp1_price' => 1.12000,
+            'tp2_price' => 1.13000,
+            'tp3_price' => 1.14000,
+        ]);
+    }
+
+    /**
+     * Flat bars with a one-pip range, then one whose high is $peak. seedSeries() puts a
+     * whole point either side of each close, which is the width of the entire chart here.
+     */
+    private function seedFiveDigitRunTo(float $peak): void
+    {
+        Candle::where('symbol', 'EURUSDm')->delete();
+
+        $rows = [];
+
+        for ($i = 60; $i >= 0; $i--) {
+            $last = $i === 0;
+
+            $rows[] = [
+                'user_id' => $this->user->id,
+                'broker_account_id' => $this->account->id,
+                'symbol' => 'EURUSDm',
+                'timeframe' => 'M5',
+                'open_time' => $this->lastBar->copy()->subMinutes(5 * $i),
+                'open' => 1.10000,
+                'high' => $last ? $peak : 1.10010,
+                'low' => 1.09990,
+                'close' => $last ? $peak - 0.00010 : 1.10000,
+                'tick_volume' => 100,
+                'spread_points' => 10,
+                'source' => 'test',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ];
+        }
+
+        Candle::insert($rows);
+    }
+
+    /**
+     * Three pips of improvement is a real move on EURUSD. Under the old fixed 0.005
+     * tolerance - fifty pips here - the stop read as already there and never followed.
+     */
+    public function test_a_trail_three_pips_better_than_the_stop_is_queued_on_a_five_digit_pair(): void
+    {
+        $this->fiveDigitPair();
+
+        // Stop already at +30 pips from an earlier move; the run to 1.10530 trails to 1.10330.
+        $this->openFiveDigitTrade(sl: 1.10300);
+        $this->seedFiveDigitRunTo(1.10530);
+
+        $this->manage();
+
+        $trail = collect($this->modifies())->firstWhere('reason', 'trail');
+
+        $this->assertNotNull($trail, 'a three-pip improvement should be sent');
+        $this->assertEqualsWithDelta(1.10330, $trail['sl'], 1e-6);
+    }
+
+    /**
+     * The idempotency bucket is one pip wide. Two proposals a third of a pip apart are
+     * the same instruction; one a whole pip further on is a new one. The old bucket
+     * rounded to two decimals - a hundred pips - so every trail for the life of the
+     * position shared a key and only the first was ever sent.
+     */
+    public function test_trail_proposals_within_a_fraction_of_a_pip_share_one_key(): void
+    {
+        $this->fiveDigitPair();
+        $this->openFiveDigitTrade(sl: 1.10300);
+
+        $this->seedFiveDigitRunTo(1.10530);   // trails to 1.10330
+        $this->manage();
+
+        $this->seedFiveDigitRunTo(1.10533);   // trails to 1.10333 - same pip
+        $this->manage();
+
+        $this->assertCount(1, array_filter($this->modifies(), fn ($m) => $m['reason'] === 'trail'));
+
+        $this->seedFiveDigitRunTo(1.10540);   // trails to 1.10340 - one pip on
+        $this->manage();
+
+        $trails = TradeCommand::where('type', 'modify')->orderBy('id')->pluck('idempotency_key')->all();
+
+        $this->assertCount(2, $trails);
+        $this->assertStringEndsWith(':trail:1.1033', $trails[0]);
+        $this->assertStringEndsWith(':trail:1.1034', $trails[1]);
+    }
+
+    /**
+     * Gold is unchanged by the pip-derived tolerances: its key is still the price to a
+     * pip, and a stop within a twentieth of a pip still reads as already there.
+     */
+    public function test_gold_keys_the_trail_to_a_tenth_of_a_point(): void
+    {
+        $this->strategy->update(['trail_trigger_pips' => 50, 'trail_distance_pips' => 20]);
+
+        $this->openTrade();
+        $this->seedRunTo(self::ENTRY + 20, self::ENTRY + 18);   // high 2021.00, trails to 2019.00
+
+        $this->manage();
+
+        $this->assertStringEndsWith(':trail:2019.0', TradeCommand::where('type', 'modify')->firstOrFail()->idempotency_key);
     }
 
     // =====================================================================

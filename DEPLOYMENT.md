@@ -114,6 +114,22 @@ cd /var/www/gold-digger
 ./scripts/deploy.sh
 ```
 
+Both `scripts/deploy.sh` and the GitHub Actions job refuse to start if the queue worker is
+not a running supervisor program (`supervisorctl status 'gold-digger-worker:*'`). Nothing is
+touched when that check fails - the site keeps serving the previous release - and the
+message names the fix. Both also lift maintenance mode on every exit, so a failed step no
+longer strands the site on "be right back"; the code is whatever the failing step left
+behind, which is worth checking, but it is up.
+
+### The queue worker
+
+The worker is a **supervisor** program, not a systemd unit - `scripts/server-setup.sh`
+writes `/etc/supervisor/conf.d/gold-digger-worker.conf`. It drains **`--queue=strategy,default`**:
+strategy evaluation (`App\Jobs\EvaluateNewBars`) goes onto the `strategy` queue named in
+`config/trading.php`, so a worker started on the default queue alone stores every bar and
+never evaluates one. With `QUEUE_STRATEGY_EVALUATION=true` that is a bot that has silently
+stopped trading, and the only thing that says so is the `queue_stalled` alert.
+
 ---
 
 ## Server Management
@@ -132,13 +148,13 @@ tail -f /var/www/gold-digger/storage/logs/worker.log
 
 ### Restart Services
 ```bash
-# PHP-FPM
-sudo systemctl restart php8.2-fpm
+# PHP-FPM (the unit is named for the installed version; deploy.sh derives it)
+sudo systemctl restart php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-fpm
 
 # Nginx
 sudo systemctl restart nginx
 
-# Queue workers
+# Queue workers - supervisor, not systemd
 sudo supervisorctl restart gold-digger-worker:*
 ```
 
@@ -293,6 +309,12 @@ php artisan storage:link
 sudo supervisorctl status
 sudo supervisorctl restart gold-digger-worker:*
 ```
+
+If the program is not listed at all, `scripts/server-setup.sh` step 9 was never run on this
+box: write `/etc/supervisor/conf.d/gold-digger-worker.conf` from that script, then
+`sudo supervisorctl reread && sudo supervisorctl update`. If it is running and bars are
+still not being evaluated, check its command line includes `--queue=strategy,default` -
+a worker on the default queue alone never sees strategy evaluation.
 
 ---
 

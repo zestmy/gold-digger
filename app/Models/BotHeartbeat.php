@@ -9,8 +9,14 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 /**
  * Bot Heartbeat Model
  *
- * Last known state of an executor. One row per user+source, overwritten on each poll.
- * This is what BotStatusCard reads instead of its hardcoded $isOnline = false.
+ * Last known state of an executor. One row per user + broker account + source, overwritten
+ * on each poll. This is what BotStatusCard reads instead of its hardcoded $isOnline = false.
+ *
+ * The account is part of the key because the row carries that account's numbers -
+ * resolved symbol, pip size, balance, open positions - and a second executor under the
+ * same user used to overwrite them on every poll. Anything that knows which account it is
+ * asking about filters on `broker_account_id`; the dashboard card, which does not, shows
+ * the most recently seen executor.
  */
 class BotHeartbeat extends Model
 {

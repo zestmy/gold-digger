@@ -106,7 +106,7 @@ final class HealthMonitor
         foreach ([
             $this->executorOffline($heartbeat, $openPositions),
             $this->algoTradingBlocked($heartbeat, $settings),
-            $this->feedStalled($user, $heartbeat, $settings),
+            $this->feedStalled($user, $heartbeat, $settings, $openPositions),
             $this->dailyLossLimit($user, $settings, $heartbeat),
             $this->queueStalled(),
             $this->booksDisagree($user),
@@ -215,9 +215,16 @@ final class HealthMonitor
      * but not this one, or a symbol whose history will not load. From the dashboard the two
      * look identical: no signals, no explanation.
      *
+     * Critical when positions are open, for the same reason executorOffline is. The ladder,
+     * the reversal exit and the trail are all read off bars: with none arriving, the
+     * scheduled `trades:manage` pass re-reads the same stale series every minute and finds
+     * nothing new, so an open position is protected by its broker-side stop and nothing
+     * else. A warning otherwise - no bars means no entries, which costs opportunity rather
+     * than capital.
+     *
      * @return array<string, mixed>|null
      */
-    private function feedStalled(User $user, ?BotHeartbeat $heartbeat, BotSettings $settings): ?array
+    private function feedStalled(User $user, ?BotHeartbeat $heartbeat, BotSettings $settings, int $openPositions = 0): ?array
     {
         if ($heartbeat === null || ! $heartbeat->isOnline() || ! $settings->is_active) {
             return null;
@@ -280,16 +287,26 @@ final class HealthMonitor
             return null;
         }
 
+        $silentFor = $newest->diffForHumans(syntax: Carbon::DIFF_ABSOLUTE);
+
         return [
             'key' => 'feed_stalled:'.$timeframe,
-            'level' => 'warning',
-            'title' => "No {$timeframe} bars for ".$newest->diffForHumans(syntax: Carbon::DIFF_ABSOLUTE),
+            'level' => $openPositions > 0 ? 'critical' : 'warning',
+            'title' => $openPositions > 0
+                ? "No {$timeframe} bars for {$silentFor} with {$openPositions} position(s) open"
+                : "No {$timeframe} bars for {$silentFor}",
             'body' => 'The executor is reporting but has stopped pushing price bars, so no signal can be '
-                .'generated. Check that the /candles URL is whitelisted for WebRequest and that Push Candles '
+                .'generated'
+                .($openPositions > 0
+                    ? ' and open positions are not being managed: the take-profit ladder, reversal exit '
+                      .'and trailing stop all read bars, so only the broker-side stop is protecting them'
+                    : '')
+                .'. Check that the /candles URL is whitelisted for WebRequest and that Push Candles '
                 .'is enabled. Markets being closed will also do this.',
             'context' => [
                 'timeframe' => $timeframe,
                 'newest_bar' => $newest->toIso8601String(),
+                'open_positions' => $openPositions,
             ],
         ];
     }
@@ -412,9 +429,14 @@ final class HealthMonitor
             'title' => $carriesTrading
                 ? 'Strategy evaluation is queued and nothing is running it'
                 : 'Queued work is not being processed',
+            // The remedy names supervisor because that is what scripts/server-setup.sh
+            // installs. This used to say `systemctl start gold-digger-worker`, which on
+            // this box is a unit that does not exist - an alert whose fix does not work
+            // costs the reader the very minutes it was raised to save.
             'body' => sprintf(
-                '%d job(s) waiting, the oldest for %d minutes. %sStart a worker: '
-                .'systemctl start gold-digger-worker (or php artisan queue:work)',
+                '%d job(s) waiting, the oldest for %d minutes. %sRestart the worker: '
+                .'sudo supervisorctl restart gold-digger-worker:* (or run php artisan '
+                .'queue:work --queue=strategy,default by hand)',
                 $depth,
                 (int) round($waitingFor / 60),
                 $carriesTrading

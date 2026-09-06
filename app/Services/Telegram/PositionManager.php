@@ -329,7 +329,15 @@ final class PositionManager
      */
     private function queue(Trade $trade, BotHeartbeat $heartbeat, string $type, array $payload, string $key): bool
     {
-        $existing = TradeCommand::where('idempotency_key', $key)->exists();
+        // Only a row that is still live counts as "already queued". A `failed` or `expired`
+        // row is an attempt that is over - a trail the broker refused with 10016 because
+        // price had come back near the level, say - and TradeCommand::enqueue re-arms
+        // those on the same key. This check used to look at any row regardless of status,
+        // so one rejection meant that stop level was never proposed again for the life of
+        // the position, while the trade carried on as though it had been protected.
+        $existing = TradeCommand::where('idempotency_key', $key)
+            ->whereNotIn('status', TradeCommand::RETRYABLE_STATUSES)
+            ->exists();
 
         if ($existing) {
             return false;

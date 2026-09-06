@@ -79,7 +79,7 @@ Set the inputs:
 |---|---|
 | `ApiBaseUrl` | Must match the whitelisted URL exactly |
 | `ApiToken` | From step 3 |
-| `BaseSymbol` | `XAUUSD`. Broker suffixes are resolved automatically |
+| `BaseSymbols` | `XAUUSD`, or a comma-separated list (`XAUUSD,EURUSD`; up to `FXS_MAX_SYMBOLS`, eight). Broker suffixes are resolved per symbol |
 | `PipSize` | **`0.10` for gold.** See the warning below |
 | `MagicNumber` | Identifies this EA's positions; `close_all` only touches these |
 | `Deviation` | `20`–`30` points. Gold moves fast; tighter values requote |
@@ -115,16 +115,20 @@ The EA requests `Accept: text/plain` from `GET /api/v1/bot/commands` and receive
 version header followed by one tab-separated line per command:
 
 ```
-GDCMD1
-17\topen\tXAUUSD\tbuy\t0.05\t30\t15\t\t\t\tentry signal\t
-18\tclose\t\t\t0.05\t\t\t\t\t987654\t\ttp1
+GDCMD2
+17\topen\tXAUUSD\tbuy\t0.05\t30\t15\t\t\t\tentry signal\t\t
+18\tclose\t\t\t0.05\t\t\t\t\t987654\t\ttp1\t
 ```
 
-Columns, in order — see `TradeCommand::WIRE_COLUMNS`:
+Thirteen columns, in order — see `TradeCommand::WIRE_COLUMNS` and `FXS_WIRE_COLUMNS`:
 
 ```
-id  type  symbol  direction  volume  sl_pips  tp_pips  sl_price  tp_price  ticket  comment  reason
+id  type  symbol  direction  volume  sl_pips  tp_pips  sl_price  tp_price  ticket  comment  reason  entry_price
 ```
+
+The version was bumped to `GDCMD2` when `entry_price` was appended for pending orders. An
+EA compiled against `GDCMD1` refuses the whole batch with a message naming both versions,
+rather than reading a thirteen-column line as twelve. The list is append-only.
 
 **Why not JSON?** MQL5 ships no JSON parser, and an Expert Advisor executing real orders
 is a poor place to debug a hand-rolled one. A fixed-column line is parsed with a single
@@ -190,13 +194,29 @@ wrong value here does not fail loudly — it trades a size nobody chose.
 
 ### More than one instrument
 
-Run **one EA instance per symbol**, each with its own token and its own `BaseSymbol`. Each
-pushes its own bars and reports that instrument's specification alongside them, which the
-dashboard stores in `symbol_specs`.
+One EA instance carries several. `BaseSymbols` is a comma-separated list (up to
+`FXS_MAX_SYMBOLS`, eight); the EA resolves each broker name at attach, keeps one executor per
+symbol, pushes each instrument's bars and reports that instrument's specification alongside
+them, which the dashboard stores in `symbol_specs`. The heartbeat's `symbols` list names
+every instrument the terminal will accept an order on; `resolved_symbol` is still the primary.
 
-Deliberately one instance per symbol rather than one EA looping over several: the instances are
-isolated from each other, and it needs no refactor of code that has never been through a
-compiler.
+Running one instance per symbol, each with its own token, also works — the wire is the same —
+and is the way to put two instruments on two different accounts.
+
+### One heartbeat row per executor
+
+`bot_heartbeats` is keyed on **user + broker account + source**. The row carries that
+account's numbers — resolved symbol, pip size, balance, open positions — so two executors
+under one user (two accounts, or two terminals) each keep their own. The account comes from
+the token's binding first and the payload's `broker_account_id` second; an unbound token
+that names neither gets a row with a null account, and NULL is distinct in a unique index,
+so those never collide either.
+
+Keyed on user + source alone, as it used to be, two executors overwrote each other on every
+poll and the strategy layer's lookup by account found no row for whichever had lost the
+race — `no_account_snapshot` on every other signal, with nothing on the dashboard looking
+wrong. The Bot Status card, which has no account in hand, shows the most recently seen
+executor.
 
 ### Candles
 

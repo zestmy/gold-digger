@@ -17,9 +17,9 @@ first — this is what addresses it.
 | `executor_offline` | critical with positions open, else warning | A heartbeat arrives within `STALE_AFTER_SECONDS` |
 | `algo_trading_disabled` | critical | The terminal reports Algo Trading on |
 | `broker_disconnected` | critical | The terminal reports the broker connected |
-| `feed_stalled:{timeframe}` | warning | A bar arrives within three bar-lengths |
+| `feed_stalled:{timeframe}` | critical with positions open, else warning | A bar arrives within three bar-lengths |
 | `daily_loss_limit` | critical | Realised losses fall back inside the limit — in practice, tomorrow |
-| `queue_stalled` | critical | A worker starts draining the queue *(only when queued evaluation is on)* |
+| `queue_stalled` | critical when queued evaluation is on, else warning | A worker starts draining the queue |
 
 Every condition has an explicit clear rule. That is not decoration: an alert that never resolves
 teaches you to ignore the channel it arrives on, and then the channel is worse than nothing.
@@ -40,6 +40,22 @@ jobs drained promptly is a busy system; one job sitting for an hour is a dead on
 An executor can heartbeat perfectly while its candle push fails — a whitelist entry that covers
 one URL and not the other, or a symbol whose history will not load. From the dashboard that is
 indistinguishable from a strategy that has simply seen no setups: no signals, no explanation.
+
+It escalates to **critical** while positions are open, for the same reason `executor_offline`
+does. The take-profit ladder, the reversal exit and the trail are all read off bars; with none
+arriving, an open position is protected by its broker-side stop and nothing else. The
+scheduled `trades:manage` pass (below) does not change that — it re-reads the same stale
+series every minute and finds nothing new. With nothing open, a stalled feed costs
+opportunity rather than capital, and stays a warning.
+
+### The management pass runs on a schedule too
+
+`trades:manage` is scheduled every minute, `withoutOverlapping`, beside `bot:monitor`. Trade
+management normally runs from the candle push, and that stays the trigger; the schedule is
+the correction for a push that has stopped, so that a queued close or stop move the executor
+never got to claim is re-issued, and one the broker refused is retried, without waiting for a
+bar that may not come. It is safe to run without a new bar because every action carries a
+fixed idempotency key — see `TRADE_MANAGEMENT.md`.
 
 ---
 
@@ -113,6 +129,16 @@ simply never arrive, which is the failure mode this feature exists to prevent. C
 `withoutOverlapping` is what lets `HealthMonitor` keep "one open incident per key" in
 application code rather than a unique index, since MySQL treats NULLs as distinct and cannot
 express "unique among unresolved rows".
+
+The `queue_stalled` remedy names supervisor — `sudo supervisorctl restart gold-digger-worker:*`
+— because that is what `scripts/server-setup.sh` installs; there is no systemd unit for the
+worker. The worker must drain `--queue=strategy,default`: strategy evaluation goes onto the
+`strategy` queue, and a worker on the default queue alone is exactly the silent failure this
+alert exists for. See `DEPLOYMENT.md`.
+
+The monitor reads the user's most recently seen heartbeat. `bot_heartbeats` is keyed per
+executor (user + broker account + source, see `MT5_EA_BRIDGE.md`), so with two executors under
+one user the offline check follows whichever polled last; a per-account sweep is not built.
 
 ---
 

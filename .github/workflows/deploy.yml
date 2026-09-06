@@ -97,6 +97,28 @@ jobs:
             cd /var/www/gold-digger
 
             echo "Starting deployment..."
+
+            # Preflight, before anything is touched: the queue worker must exist as a
+            # supervisor program. Strategy evaluation goes onto the `strategy` queue, so
+            # a box with no worker stores every bar and never evaluates one, and the only
+            # thing that says so is the queue_stalled alert - fifteen minutes later. A
+            # deploy that succeeded onto a box with no worker was reporting the wrong
+            # thing, and it is cheaper to refuse here with the site still up than to find
+            # out from an empty signals page.
+            #
+            # `supervisorctl status` exits non-zero both when the program is unknown and
+            # when it is known but not RUNNING; either is a deploy onto a box that will
+            # not trade, so both stop it.
+            if ! supervisorctl status 'gold-digger-worker:*'; then
+              echo "ERROR: supervisor program gold-digger-worker is missing or not running."
+              echo "       Install it with scripts/server-setup.sh (step 9), or check"
+              echo "       /etc/supervisor/conf.d/gold-digger-worker.conf, then:"
+              echo "         sudo supervisorctl reread && sudo supervisorctl update"
+              echo "         sudo supervisorctl restart gold-digger-worker:*"
+              echo "       Nothing has been deployed; the site is still serving."
+              exit 1
+            fi
+
             php artisan down --retry=60 || true
 
             git config --global --add safe.directory /var/www/gold-digger
@@ -131,8 +153,9 @@ jobs:
 
             # Workers hold code in memory for the life of the process, so one started
             # before a deploy keeps running the old classes until it recycles. This tells
-            # them to finish the current job and exit; systemd restarts them on the new
-            # code. Harmless when no worker is running.
+            # them to finish the current job and exit; supervisor (autorestart=true in
+            # scripts/server-setup.sh - there is no systemd unit for the worker) starts
+            # them again on the new code. Harmless when no worker is running.
             php artisan queue:restart || true
 
             chown -R www-data:www-data /var/www/gold-digger

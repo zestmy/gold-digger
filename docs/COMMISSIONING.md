@@ -72,7 +72,7 @@ Any chart — the EA works off its own timer and ignores the chart's symbol and 
 | Input | Set it to |
 |---|---|
 | `ApiBaseUrl`, `ApiToken` | Your dashboard and the token from above |
-| `BaseSymbol` | `XAUUSD` — suffixes are resolved at runtime |
+| `BaseSymbols` | `XAUUSD` — suffixes are resolved at runtime. Comma-separated for more than one instrument on this terminal |
 | `PipSize` | **`0.10`** for gold. Read the note below before changing it |
 | `EntryTimeframe` / `TrendTimeframe` | **Must match the strategy's.** If they disagree, bars accumulate and nothing is ever generated |
 | `DemoOnly` | Leave on |
@@ -158,10 +158,13 @@ risking a position.
 > command that carries no payload for this check**, precisely because it is the fragile shape;
 > an `open` with every column populated would have sailed through and proved less.
 
-> **Found.** A command that an executor claims but never reports on has no reaper.
-> `commands:sweep` only expires rows still `pending`, on the reasoning that no executor ever
-> held them. Three rows are stranded at `claimed` from the above and will stay that way. Not
-> harmful — nothing re-serves them — but do not read `claimed` as "in flight".
+> **Found, since fixed.** A command that an executor claimed but never reported on had no
+> reaper: `commands:sweep` only expired rows still `pending`, and three rows from the above
+> were stranded at `claimed`. It now sweeps `claimed` rows past their expiry as well, and
+> a claimed row with *no* expiry — closes and stop moves are queued without one on purpose —
+> is aged out after `TradeCommand::STALE_CLAIM_MINUTES` (ten) so the next evaluation can
+> re-issue it under the same key. `claimed` still does not mean "in flight"; it means "an
+> executor took it within the last ten minutes".
 
 **A signal.** Watch the Signals page. Early rows will mostly carry a `skip_reason` — that is
 the system working, not failing. Each reason names the one gate that would have to change.
