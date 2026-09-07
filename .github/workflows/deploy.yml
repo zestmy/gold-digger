@@ -98,31 +98,24 @@ jobs:
 
             echo "Starting deployment..."
 
-            # Preflight, before anything is touched: the queue worker must exist as a
-            # supervisor program. Strategy evaluation goes onto the `strategy` queue, so
-            # a box with no worker stores every bar and never evaluates one, and the only
-            # thing that says so is the queue_stalled alert - fifteen minutes later. A
-            # deploy that succeeded onto a box with no worker was reporting the wrong
-            # thing, and it is cheaper to refuse here with the site still up than to find
-            # out from an empty signals page.
-            #
-            # `supervisorctl status` exits non-zero both when the program is unknown and
-            # when it is known but not RUNNING; either is a deploy onto a box that will
-            # not trade, so both stop it.
-            if ! supervisorctl status 'gold-digger-worker:*'; then
-              echo "ERROR: supervisor program gold-digger-worker is missing or not running."
-              echo "       Install it with scripts/server-setup.sh (step 9), or check"
-              echo "       /etc/supervisor/conf.d/gold-digger-worker.conf, then:"
-              echo "         sudo supervisorctl reread && sudo supervisorctl update"
-              echo "         sudo supervisorctl restart gold-digger-worker:*"
-              echo "       Nothing has been deployed; the site is still serving."
-              exit 1
-            fi
-
-            php artisan down --retry=60 || true
-
             git config --global --add safe.directory /var/www/gold-digger
             git fetch origin main
+
+            # Preflight, before anything is touched: the queue worker must exist and be
+            # running. Strategy evaluation goes onto the `strategy` queue, so a box with
+            # no worker stores every bar and never evaluates one, and the only thing that
+            # says so is the queue_stalled alert - fifteen minutes later.
+            #
+            # The first run of this check found the production box had no supervisor at
+            # all, so the check provisions rather than merely refuses: scripts/
+            # ensure-worker.sh installs supervisor and the program when they are missing
+            # and fails only if the worker still will not run. It is read straight out of
+            # the fetched ref, because the working tree is still the previous release at
+            # this point and the script may not be in it yet. Nothing on disk has changed
+            # if this fails, and the site is still serving.
+            git show origin/main:scripts/ensure-worker.sh | bash
+
+            php artisan down --retry=60 || true
             git reset --hard origin/main
 
             export COMPOSER_ALLOW_SUPERUSER=1

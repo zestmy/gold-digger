@@ -114,12 +114,16 @@ cd /var/www/gold-digger
 ./scripts/deploy.sh
 ```
 
-Both `scripts/deploy.sh` and the GitHub Actions job refuse to start if the queue worker is
-not a running supervisor program (`supervisorctl status 'gold-digger-worker:*'`). Nothing is
-touched when that check fails - the site keeps serving the previous release - and the
-message names the fix. Both also lift maintenance mode on every exit, so a failed step no
-longer strands the site on "be right back"; the code is whatever the failing step left
-behind, which is worth checking, but it is up.
+Both `scripts/deploy.sh` and the GitHub Actions job start by running
+`scripts/ensure-worker.sh`, read straight out of the ref being deployed: it installs
+supervisor if the box has none, writes the `gold-digger-worker` program if it is missing,
+starts it if it is stopped, and fails the deploy only if the worker still will not run.
+Nothing else is touched when that fails - the site keeps serving the previous release. It
+provisions rather than merely checks because the first deploy to check found the
+production box had never had supervisor at all, which meant no queued job had ever run
+there. Both paths also lift maintenance mode on every exit, so a failed step no longer
+strands the site on "be right back"; the code is whatever the failing step left behind,
+which is worth checking, but it is up.
 
 ### The queue worker
 

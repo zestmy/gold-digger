@@ -139,29 +139,10 @@ PHPFPM
 
 systemctl restart php${PHP_VERSION}-fpm
 
-# Configure Supervisor for queue worker
+# Configure Supervisor for queue worker. The same script the deploy runs before every
+# release, so a box set up here and a box the deploy found bare end up identical.
 echo "[9/10] Setting up queue worker..."
-cat > /etc/supervisor/conf.d/$APP_NAME-worker.conf << 'SUPERVISOR'
-[program:gold-digger-worker]
-process_name=%(program_name)s_%(process_num)02d
-; --queue names every queue this worker drains, and the order is priority. Strategy
-; evaluation (App\Jobs\EvaluateNewBars) goes onto config('trading.queue'), which is
-; "strategy" - a worker left on the default queue alone stores every bar and never
-; evaluates one, and nothing but the queue_stalled alert says so.
-command=php /var/www/gold-digger/artisan queue:work --queue=strategy,default --sleep=3 --tries=3 --max-time=3600
-autostart=true
-autorestart=true
-stopasgroup=true
-killasgroup=true
-user=www-data
-numprocs=2
-redirect_stderr=true
-stdout_logfile=/var/www/gold-digger/storage/logs/worker.log
-stopwaitsecs=3600
-SUPERVISOR
-
-supervisorctl reread
-supervisorctl update
+APP_DIR="/var/www/$APP_NAME" bash "$(dirname "$0")/ensure-worker.sh"
 
 # Setup cron for Laravel scheduler
 echo "[10/10] Setting up Laravel scheduler..."

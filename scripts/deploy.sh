@@ -23,17 +23,11 @@ cd $APP_DIR
 # Preflight, before anything is touched. Strategy evaluation goes onto the `strategy`
 # queue, so a box whose worker is missing stores every bar and never evaluates one, and
 # the only thing that says so is the queue_stalled alert - a quarter of an hour later.
-# Refusing here, with the site still up, is cheaper than finding out from an empty
-# signals page. Non-zero covers both "no such program" and "known but not running".
-if ! sudo supervisorctl status 'gold-digger-worker:*'; then
-    echo "ERROR: supervisor program gold-digger-worker is missing or not running."
-    echo "       Install it with scripts/server-setup.sh (step 9), or check"
-    echo "       /etc/supervisor/conf.d/gold-digger-worker.conf, then:"
-    echo "         sudo supervisorctl reread && sudo supervisorctl update"
-    echo "         sudo supervisorctl restart gold-digger-worker:*"
-    echo "       Nothing has been deployed; the site is still serving."
-    exit 1
-fi
+# ensure-worker.sh installs supervisor and the program when they are missing and fails
+# only if the worker still will not run - with the site still up either way. Read from
+# the branch being deployed, since the working tree is still the previous release.
+git fetch origin
+git show "origin/$BRANCH:scripts/ensure-worker.sh" | APP_DIR="$APP_DIR" bash
 
 # `set -e` plus `php artisan down` means any failure below would otherwise leave the site
 # in maintenance mode with nobody told. The trap lifts it on every exit, success or not:
@@ -52,7 +46,6 @@ php artisan down --retry=60 || true
 
 # Pull latest code
 echo "[2/8] Pulling latest code..."
-git fetch origin
 git reset --hard origin/$BRANCH
 
 # Install PHP dependencies
