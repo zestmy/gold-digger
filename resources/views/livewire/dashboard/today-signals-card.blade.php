@@ -86,11 +86,13 @@
                                 @else
                                     <span class="text-green-300">{{ implode(' / ', array_map($price, $row['targets'])) }}</span>
                                 @endif
-                                @if($row['reward_ratio'] !== null)
-                                    <span class="ml-2 text-gray-500">R:R</span>
-                                    <span class="text-gray-200">1:{{ rtrim(rtrim(number_format($row['reward_ratio'], 1), '0'), '.') }}</span>
-                                @endif
                             </p>
+                            @if($row['reward_ratio'] !== null)
+                                <p class="truncate">
+                                    <span class="text-gray-500">R:R</span>
+                                    <span class="text-gray-200">1:{{ rtrim(rtrim(number_format($row['reward_ratio'], 1), '0'), '.') }}</span>
+                                </p>
+                            @endif
                         </div>
 
                         {{-- Confidence, for the signals that carry a computed one --}}

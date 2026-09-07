@@ -84,12 +84,12 @@
                 <div class="w-full max-w-md rounded-xl border border-gray-700 bg-gray-800 p-6 shadow-2xl shadow-black/40" aria-label="Example signal card">
                     <div class="flex items-start justify-between gap-4">
                         <div>
-                            <p class="text-xs uppercase tracking-wide text-gray-500">Latest signal</p>
+                            <p class="text-xs uppercase tracking-wide text-gray-500">Example signal</p>
                             <p class="mt-1 text-2xl font-semibold text-white">
                                 XAUUSD
                                 <span class="ml-1 rounded bg-red-400/10 px-2 py-0.5 align-middle text-sm font-semibold text-red-400">SELL</span>
                             </p>
-                            <p class="mt-1 text-xs text-gray-500">M5 &middot; AI &middot; 13:05 UTC</p>
+                            <p class="mt-1 text-xs text-gray-500">M5 &middot; AI &middot; what every card carries</p>
                         </div>
                         <div class="text-right">
                             <p class="text-3xl font-semibold tabular-nums text-green-400">92%</p>
@@ -125,10 +125,10 @@
                     </dl>
 
                     <ul class="mt-5 space-y-1.5 border-t border-gray-700 pt-4 text-xs text-gray-400">
-                        <li class="flex gap-x-2"><span class="text-green-400">&#10003;</span> H1 trend down, entry EMA cross confirmed</li>
-                        <li class="flex gap-x-2"><span class="text-green-400">&#10003;</span> ADX 31.4, trend present</li>
-                        <li class="flex gap-x-2"><span class="text-green-400">&#10003;</span> RSI 42.1 and MACD histogram below zero</li>
-                        <li class="flex gap-x-2"><span class="text-gray-500">&ndash;</span> Session: London/New York overlap</li>
+                        <li class="flex gap-x-2"><span class="text-green-400">&#10003;</span> Higher-timeframe trend and entry bias, agreed or not</li>
+                        <li class="flex gap-x-2"><span class="text-green-400">&#10003;</span> Trend strength, momentum and volatility as measured</li>
+                        <li class="flex gap-x-2"><span class="text-green-400">&#10003;</span> Session and news calendar checked at the bar</li>
+                        <li class="flex gap-x-2"><span class="text-gray-500">&ndash;</span> Whether to enter at market, rest a limit, or leave it</li>
                     </ul>
                 </div>
             </div>
