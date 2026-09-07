@@ -97,17 +97,58 @@ final class HealthMonitor
             return [];
         }
 
-        $heartbeat = BotHeartbeat::where('user_id', $user->id)
+        // One executor per broker account, each watched on its own. Heartbeats are keyed
+        // by account, and reading only the newest row meant a user running two terminals
+        // was told about whichever had reported most recently - which is, by definition,
+        // the one that is fine. The newest row per account is the state of that account.
+        $heartbeats = BotHeartbeat::where('user_id', $user->id)
             ->orderByDesc('last_seen_at')
-            ->first();
+            ->get()
+            ->unique(fn (BotHeartbeat $h) => $h->broker_account_id ?? 'unbound')
+            ->values();
 
         $conditions = [];
 
+        if ($heartbeats->isEmpty()) {
+            $conditions[] = $this->executorOffline(null, $openPositions);
+        }
+
+        // Keys stay as they were for the one-account case, which is nearly every account,
+        // and grow an account suffix only when there is more than one to tell apart - so
+        // an incident opened before a second terminal existed is the same incident after.
+        $several = $heartbeats->count() > 1;
+
+        foreach ($heartbeats as $heartbeat) {
+            $accountPositions = $heartbeat->broker_account_id === null
+                ? $openPositions
+                : Trade::where('user_id', $user->id)
+                    ->where('broker_account_id', $heartbeat->broker_account_id)
+                    ->whereIn('status', ['open', 'partially_closed'])
+                    ->count();
+
+            $suffix = ($several && $heartbeat->broker_account_id !== null)
+                ? ':'.$heartbeat->broker_account_id
+                : '';
+
+            foreach ([
+                $this->executorOffline($heartbeat, $accountPositions),
+                $this->algoTradingBlocked($heartbeat, $settings),
+                $this->feedStalled($user, $heartbeat, $settings, $accountPositions),
+            ] as $condition) {
+                if ($condition === null) {
+                    continue;
+                }
+
+                $condition['key'] .= $suffix;
+                $condition['context']['broker_account_id'] = $heartbeat->broker_account_id;
+                $conditions[] = $condition;
+            }
+        }
+
         foreach ([
-            $this->executorOffline($heartbeat, $openPositions),
-            $this->algoTradingBlocked($heartbeat, $settings),
-            $this->feedStalled($user, $heartbeat, $settings, $openPositions),
-            $this->dailyLossLimit($user, $settings, $heartbeat),
+            // Account-wide by construction: the limit is a share of a balance, and the
+            // balance read is the newest one reported.
+            $this->dailyLossLimit($user, $settings, $heartbeats->first()),
             $this->queueStalled(),
             $this->booksDisagree($user),
         ] as $condition) {

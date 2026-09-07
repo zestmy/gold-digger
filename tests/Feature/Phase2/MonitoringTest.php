@@ -194,6 +194,60 @@ class MonitoringTest extends TestCase
     }
 
     /**
+     * Two terminals, two accounts. Reading only the newest heartbeat reported on whichever
+     * terminal was fine; the one that had gone quiet was invisible precisely because the
+     * other kept reporting.
+     */
+    public function test_each_account_is_watched_on_its_own(): void
+    {
+        $this->heartbeat();
+
+        $second = BrokerAccount::create([
+            'user_id' => $this->user->id, 'label' => 'Live', 'broker_name' => 'Elev8',
+            'account_number' => '87654321', 'server' => 'Elev8-Live', 'is_demo' => false, 'is_active' => true,
+        ]);
+
+        BotHeartbeat::create([
+            'user_id' => $this->user->id, 'broker_account_id' => $second->id, 'source' => 'mql5_ea',
+            'algo_trading_enabled' => true, 'broker_connected' => true, 'resolved_symbol' => self::SYMBOL,
+            'last_seen_at' => now()->subMinutes(10),
+        ]);
+
+        app(HealthMonitor::class)->sweep();
+
+        $this->assertContains("executor_offline:{$second->id}", $this->keys());
+        $this->assertNotContains('executor_offline', $this->keys());
+        $this->assertNotContains("executor_offline:{$this->account->id}", $this->keys());
+
+        $alert = Alert::where('key', "executor_offline:{$second->id}")->firstOrFail();
+        $this->assertSame($second->id, $alert->context['broker_account_id']);
+    }
+
+    /**
+     * And the positions that make an outage critical are the ones on that account.
+     */
+    public function test_an_offline_account_is_judged_by_its_own_positions(): void
+    {
+        $this->heartbeat();
+        $this->openTrade();
+
+        $second = BrokerAccount::create([
+            'user_id' => $this->user->id, 'label' => 'Live', 'broker_name' => 'Elev8',
+            'account_number' => '87654321', 'server' => 'Elev8-Live', 'is_demo' => false, 'is_active' => true,
+        ]);
+
+        BotHeartbeat::create([
+            'user_id' => $this->user->id, 'broker_account_id' => $second->id, 'source' => 'mql5_ea',
+            'algo_trading_enabled' => true, 'broker_connected' => true, 'last_seen_at' => now()->subMinutes(10),
+        ]);
+
+        app(HealthMonitor::class)->sweep();
+
+        // The open position is on the healthy account; the quiet one holds nothing.
+        $this->assertSame('warning', Alert::where('key', "executor_offline:{$second->id}")->firstOrFail()->level);
+    }
+
+    /**
      * Offline with nothing at stake is worth telling somebody about, but it is not the same
      * as offline while holding positions.
      */

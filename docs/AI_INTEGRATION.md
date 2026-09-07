@@ -86,7 +86,10 @@ committed part is what the open positions would lose at their stops — entry to
 stop, times the lots still held, in money through the symbol's pip value — and it comes off
 before the next position is sized, so three positions cannot each be sized against the
 same untouched balance. A position whose stop or pip value is unknown is counted as one
-full stake rather than as nothing. When everything left is already at risk the reason is
+full stake rather than as nothing, and so is an entry the executor has been asked for but
+has not yet filled - the two-minute window between approval and fill is exactly when a
+second signal used to be sized against the same figure. When everything left is already
+at risk the reason is
 `ai_fund_committed`, distinct from the fund being exhausted: nothing has been lost, and
 nothing more opens until something resolves. Settings also refuse a risk percentage times
 the concurrent-trade cap that exceeds a hundred, and a channel's own risk override is

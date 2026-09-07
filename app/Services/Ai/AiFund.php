@@ -5,6 +5,7 @@ namespace App\Services\Ai;
 use App\Models\BotSettings;
 use App\Models\SymbolSpec;
 use App\Models\Trade;
+use App\Models\TradeCommand;
 
 /**
  * AI Fund
@@ -96,6 +97,13 @@ final class AiFund
 
         $committed = (float) $open->sum(fn (Trade $trade) => $this->committedRisk($trade) ?? $stake);
 
+        // An entry the executor has been asked for but has not yet filled is money the
+        // fund has already agreed to risk. Two signals approved inside the same two-minute
+        // window used to be sized from the same remaining figure, because neither had a
+        // position row yet; each in-flight open now costs the stake it was sized with.
+        $inFlight = $this->inFlightOpens($userId);
+        $committed += $inFlight * $stake;
+
         $remaining = max(0.0, $unspent - $committed);
 
         return [
@@ -106,6 +114,7 @@ final class AiFund
             'committed' => round($committed, 2),
             'remaining' => round($remaining, 2),
             'open_trades' => $open->count(),
+            'in_flight' => $inFlight,
             'max_concurrent' => $maxConcurrent,
             'risk_percentage' => $riskPct,
             // Falls with the fund. A losing run shrinks its own stake rather than betting
@@ -115,6 +124,23 @@ final class AiFund
             'exhausted' => $configured && $unspent <= 0.0,
             'blocked_reason' => $this->blockedReason($enabled, $configured, $unspent, $remaining, $open->count(), $maxConcurrent),
         ];
+    }
+
+    /**
+     * AI entries queued for the executor and not yet reported as filled.
+     *
+     * Only live rows: pending or claimed, and inside their expiry. A done command has a
+     * position row that is counted as itself; a failed or expired one risked nothing.
+     * Counted as a whole stake each rather than measured, because a market order has no
+     * entry price to measure the stop from until it fills.
+     */
+    private function inFlightOpens(int $userId): int
+    {
+        return TradeCommand::where('user_id', $userId)
+            ->whereIn('type', ['open', 'open_pending'])
+            ->inFlight()
+            ->where('payload->origin', self::ORIGIN)
+            ->count();
     }
 
     /**

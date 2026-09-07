@@ -8,6 +8,7 @@ use App\Models\BrokerAccount;
 use App\Models\Strategy;
 use App\Models\SymbolSpec;
 use App\Models\Trade;
+use App\Models\TradeCommand;
 use App\Models\User;
 use App\Services\Ai\AiFund;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -365,6 +366,54 @@ class AiFundTest extends TestCase
         // A fourth is sized from the 50 that is actually left, not from 200 again.
         $this->assertSame(12.5, $state['risk_per_trade']);
         $this->assertNull($state['blocked_reason']);
+    }
+
+    /**
+     * The window between approval and fill. A second signal inside it has no position row
+     * to measure, and used to be sized from the same untouched figure.
+     */
+    public function test_an_entry_queued_but_not_yet_filled_commits_its_stake(): void
+    {
+        $this->fund(['ai_max_concurrent_trades' => 4, 'ai_risk_percentage' => 25.00]);
+
+        $queued = fn (string $key, string $status) => TradeCommand::create([
+            'user_id' => $this->user->id, 'broker_account_id' => $this->account->id, 'type' => 'open',
+            'payload' => ['symbol' => 'XAUUSD', 'origin' => AiFund::ORIGIN, 'volume' => 0.1],
+            'status' => $status, 'idempotency_key' => $key, 'expires_at' => now()->addMinutes(2),
+        ]);
+
+        $queued('telegram:1', 'pending');
+        $queued('telegram:2', 'claimed');
+        // Over, one way or the other: neither risks anything now.
+        $queued('telegram:3', 'failed');
+        $queued('telegram:4', 'expired');
+        // The strategy's own entry is not the fund's.
+        TradeCommand::create([
+            'user_id' => $this->user->id, 'broker_account_id' => $this->account->id, 'type' => 'open',
+            'payload' => ['symbol' => 'XAUUSD', 'volume' => 0.1], 'status' => 'pending', 'idempotency_key' => 'signal:1',
+        ]);
+
+        $state = $this->state();
+
+        $this->assertSame(2, $state['in_flight']);
+        // Two stakes of 50 committed out of 200.
+        $this->assertSame(100.0, $state['committed']);
+        $this->assertSame(100.0, $state['remaining']);
+        $this->assertSame(25.0, $state['risk_per_trade']);
+    }
+
+    public function test_a_queued_entry_that_waited_out_its_window_commits_nothing(): void
+    {
+        $this->fund(['ai_max_concurrent_trades' => 4, 'ai_risk_percentage' => 25.00]);
+
+        TradeCommand::create([
+            'user_id' => $this->user->id, 'broker_account_id' => $this->account->id, 'type' => 'open',
+            'payload' => ['symbol' => 'XAUUSD', 'origin' => AiFund::ORIGIN], 'status' => 'pending',
+            'idempotency_key' => 'telegram:9', 'expires_at' => now()->subMinute(),
+        ]);
+
+        $this->assertSame(0, $this->state()['in_flight']);
+        $this->assertSame(200.0, $this->state()['remaining']);
     }
 
     /**

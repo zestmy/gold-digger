@@ -136,9 +136,18 @@ worker. The worker must drain `--queue=strategy,default`: strategy evaluation go
 `strategy` queue, and a worker on the default queue alone is exactly the silent failure this
 alert exists for. See `DEPLOYMENT.md`.
 
-The monitor reads the user's most recently seen heartbeat. `bot_heartbeats` is keyed per
-executor (user + broker account + source, see `MT5_EA_BRIDGE.md`), so with two executors under
-one user the offline check follows whichever polled last; a per-account sweep is not built.
+`bot_heartbeats` is keyed per executor (user + broker account + source, see
+`MT5_EA_BRIDGE.md`), and the monitor watches each account on its own: the offline, blocked
+and stalled-feed checks run against the newest row for every account the user has, with
+that account's own open positions deciding whether an outage is critical. Reading only the
+user's newest heartbeat, as it used to, reported on whichever terminal was fine - the one
+that had gone quiet was invisible precisely because the other kept polling.
+
+Incident keys are unchanged for the one-account case, which is nearly every account, and
+gain an account suffix (`executor_offline:7`) only when the user has more than one, so an
+incident opened before a second terminal existed is the same incident after. The daily
+loss limit stays account-wide: it is a share of a balance, and the balance read is the
+newest one reported.
 
 ---
 
