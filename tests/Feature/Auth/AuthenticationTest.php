@@ -70,9 +70,9 @@ class AuthenticationTest extends TestCase
 
         $this->get('/dashboard')
             ->assertOk()
-            ->assertSee('Live Trades')
+            ->assertSee('Trades')
             ->assertSee('Signals')
-            ->assertSee('Strategies');
+            ->assertSee('Providers');
     }
 
     public function test_users_can_logout(): void

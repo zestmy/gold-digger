@@ -1,43 +1,26 @@
 <div>
     <x-slot name="header">
-        Dashboard
+        Home
     </x-slot>
 
-    <!-- Dashboard Grid -->
+    {{-- Home is a glance, not a console. Four numbers, today's signals, and how the
+         month and the terminal are doing. Everything else is one destination away:
+         the archive on Signals, the positions on Trades, the controls on Auto-Trade. --}}
     <div class="space-y-6">
-        <!-- Top Row: Bot Status + Today's Stats -->
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
-            <!-- Bot Status Card (1 column) -->
-            <div class="lg:col-span-1">
+        <!-- Row 1: signals today, open positions, net P&L today, AI fund -->
+        <livewire:dashboard.today-stats-card />
+
+        <div class="grid grid-cols-1 gap-6 xl:grid-cols-3">
+            <!-- Row 2 left: what fired today, from both sources -->
+            <div class="xl:col-span-2">
+                <livewire:dashboard.today-signals-card />
+            </div>
+
+            <!-- Row 2 right: the month's curve, and the terminal that trades it -->
+            <div class="space-y-6">
+                <livewire:dashboard.daily-chart-card />
                 <livewire:dashboard.bot-status-card />
             </div>
-
-            <!-- Today's Stats Card (2 columns) -->
-            <div class="lg:col-span-2">
-                <livewire:dashboard.today-stats-card />
-            </div>
-        </div>
-
-        <!-- Market Context: what the strategy is looking at, and whether it is allowed to act -->
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
-            <livewire:dashboard.trend-card />
-            <livewire:dashboard.session-card />
-            <livewire:dashboard.news-card />
-        </div>
-
-        <!-- Written analysis of the same numbers the cards above show -->
-        <livewire:dashboard.ai-analysis-card />
-
-        <!-- Quick Actions Row -->
-        <livewire:dashboard.quick-actions-card />
-
-        <!-- Bottom Row: Recent Trades + Daily Chart -->
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <!-- Recent Trades -->
-            <livewire:dashboard.recent-trades-card />
-
-            <!-- Daily Chart -->
-            <livewire:dashboard.daily-chart-card />
         </div>
     </div>
 </div>

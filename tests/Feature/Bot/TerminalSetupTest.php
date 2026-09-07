@@ -177,6 +177,23 @@ class TerminalSetupTest extends TestCase
         Livewire::test(TerminalSetup::class)->assertViewHas('whitelistUrl', 'https://fx.example.com');
     }
 
+    // =====================================================================
+    // WHERE IT SITS
+    // =====================================================================
+
+    /**
+     * The terminal is one of four connection steps. The page that shows all four is one
+     * click back, and the header above is the destination's, not this page's own.
+     */
+    public function test_the_page_links_back_to_the_connection_overview(): void
+    {
+        $this->get(route('terminal'))
+            ->assertOk()
+            ->assertSee('href="'.route('setup').'"', false)
+            ->assertSee('<h1 class="text-lg font-semibold text-white">Auto-Trade</h1>', false)
+            ->assertDontSee('<h2 class="text-xl font-semibold text-gray-100">Terminal</h2>', false);
+    }
+
     /**
      * @return array<string, string>
      */

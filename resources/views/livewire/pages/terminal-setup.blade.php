@@ -1,9 +1,18 @@
 <div>
     <x-slot name="header">
-        Terminal Setup
+        Auto-Trade
     </x-slot>
 
+    <x-page-tabs group="auto-trade" />
+
     <div class="space-y-6">
+        {{-- Where this sits in the whole: the terminal is one of the four connection
+             steps, and the page that shows all four is one click back. --}}
+        <p class="text-sm text-gray-400">
+            Four steps to get an Expert Advisor talking to this dashboard.
+            <a href="{{ route('setup') }}" class="text-yellow-500 hover:text-yellow-400">See where this fits in the connection &rarr;</a>
+        </p>
+
         <!-- 1. The EA -->
         <div class="rounded-lg bg-gray-800 p-6">
             <div class="flex flex-wrap items-start justify-between gap-4">
@@ -187,9 +196,14 @@
                 would still be refused with 10027.
             </p>
 
-            <a href="{{ route('dashboard') }}" class="mt-3 inline-block text-xs text-yellow-500 hover:text-yellow-400">
-                Watch Bot Status &rarr;
-            </a>
+            <div class="mt-3 flex flex-wrap gap-x-4 text-xs">
+                <a href="{{ route('setup') }}" class="text-yellow-500 hover:text-yellow-400">
+                    Back to Connection &rarr;
+                </a>
+                <a href="{{ route('dashboard') }}" class="text-gray-400 hover:text-gray-200">
+                    Watch Bot Status &rarr;
+                </a>
+            </div>
         </div>
     </div>
 </div>

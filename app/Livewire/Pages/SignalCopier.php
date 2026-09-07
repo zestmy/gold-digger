@@ -17,9 +17,10 @@ use Livewire\Component;
 use Livewire\WithPagination;
 
 /**
- * Signal Copier
+ * Copied Signals
  *
- * The pipeline, stage by stage: captured, parsed, reviewed, executed.
+ * The Telegram copier's pipeline, stage by stage: captured, parsed, reviewed, executed.
+ * The "Copied" tab under Signals, beside the AI feed it is judged against.
  *
  * ## Why the decline rate is at the top
  *
@@ -40,7 +41,7 @@ use Livewire\WithPagination;
  * gate is re-checked when you do - an approval from twenty minutes ago is not permission.
  */
 #[Layout('layouts.app')]
-#[Title('Signal Copier - FXSignalPro')]
+#[Title('Copied signals - FXSignalPro')]
 class SignalCopier extends Component
 {
     use WithPagination;

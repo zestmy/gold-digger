@@ -1,7 +1,9 @@
 <div>
     <x-slot name="header">
-        Analytics
+        Trades
     </x-slot>
+
+    <x-page-tabs group="trades" />
 
     <!-- Period Selector -->
     <div class="mb-6 flex flex-wrap items-center gap-2">

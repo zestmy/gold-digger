@@ -158,7 +158,7 @@ All under `/api/v1/bot`, all requiring `Authorization: Bearer <token>`.
 | `POST` | `/commands/{id}/result` | Report retcode, ticket, fill price, or the failure |
 | `POST` | `/fills` | Record an open, partial close, or full close |
 | `POST` | `/heartbeat` | Liveness, account snapshot and symbol specification; returns the kill-switch state |
-| `POST` | `/logs` | Write into `bot_logs`, shown on `/logs` |
+| `POST` | `/logs` | Write into `bot_logs`, shown on `/settings/activity` |
 | `POST` | `/candles` | Push closed bars. A genuinely new bar triggers signal generation |
 | `POST` | `/positions` | Full snapshot of open positions, so `trades` can be corrected |
 
@@ -338,7 +338,7 @@ of anything the command asked for, and treats zero as "no stop" rather than as a
 | `Wire protocol mismatch` | EA compiled from a different commit than the dashboard is running |
 | Commands claimed but nothing happens | Check `DryRun`. It reports every command as not-executed |
 | `10016` on every order | The pip trap. Set `PipSize` to `0.10` |
-| Nothing in `/logs` | The EA logs failures there; silence means it is not reaching the API at all |
+| Nothing in `/settings/activity` | The EA logs failures there; silence means it is not reaching the API at all |
 
 The Experts tab in the terminal carries the same messages with more detail.
 

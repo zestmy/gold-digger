@@ -134,8 +134,8 @@ class AccessAndTruthTest extends TestCase
     {
         $this->get('/')
             ->assertSuccessful()
-            ->assertSee('Sign In')
-            ->assertDontSee('Create Free Account');
+            ->assertSee('Log in')
+            ->assertDontSee('Start free');
     }
 
     public function test_the_grant_command_toggles_admin_access(): void

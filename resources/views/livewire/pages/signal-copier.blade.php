@@ -1,21 +1,23 @@
 <div>
     <x-slot name="header">
-        Signal Copier
+        Signals
     </x-slot>
+
+    <x-page-tabs group="signals" />
 
     <div class="space-y-6">
         <!-- What this is, and what it is not -->
         <div class="rounded-lg border border-gray-700 bg-gray-800/50 p-4">
             <p class="text-sm text-gray-300">
-                Signals captured from Telegram, parsed, reviewed, and executed against the AI fund.
+                Copied signals are the ones captured from Telegram, parsed, reviewed, and executed against the AI fund.
             </p>
             <p class="mt-1 text-xs text-gray-500">
-                Only enabled channels can produce a tradeable signal &mdash; anything else is recorded
+                Only a channel you are following can produce a tradeable signal &mdash; anything else is recorded
                 and never traded. Nothing is executed until you press Execute, and every gate is
                 checked again when you do.
             </p>
             <a href="{{ route('signals.channels') }}" class="mt-2 inline-block text-xs text-yellow-500 hover:text-yellow-400">
-                Channels, and what each has been worth &rarr;
+                Providers, and what each has been worth &rarr;
             </a>
         </div>
 

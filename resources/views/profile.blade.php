@@ -1,34 +1,42 @@
+{{-- Settings > Account. The stock Breeze profile page, in this application's shell:
+     the same header, the same tab strip and the same cards every other page uses, so
+     the account is not the one screen that looks like it came from somewhere else. --}}
 <x-app-layout>
     <x-slot name="header">
-        <h2 class="font-semibold text-xl text-gray-800 dark:text-gray-200 leading-tight">
-            {{ __('Profile') }}
-        </h2>
+        Settings
     </x-slot>
 
-    <div class="py-12">
-        <div class="max-w-7xl mx-auto sm:px-6 lg:px-8 space-y-6">
-            <div class="p-4 sm:p-8 bg-white dark:bg-gray-800 shadow sm:rounded-lg">
-                <div class="max-w-xl">
-                    <livewire:profile.update-profile-information-form />
-                </div>
-            </div>
+    <x-page-tabs group="settings" />
 
-            <div class="p-4 sm:p-8 bg-white dark:bg-gray-800 shadow sm:rounded-lg">
-                <div class="max-w-xl">
-                    <livewire:profile.update-password-form />
-                </div>
+    <div class="mx-auto max-w-3xl space-y-6">
+        <div class="rounded-lg border border-gray-700 bg-gray-800 p-6">
+            <div class="max-w-xl">
+                <livewire:profile.update-profile-information-form />
             </div>
+        </div>
 
-            <div class="p-4 sm:p-8 bg-white dark:bg-gray-800 shadow sm:rounded-lg">
-                <div class="max-w-3xl">
-                    <livewire:profile.account-security />
-                </div>
+        {{-- Where the copier announces itself. Beside the profile rather than under
+             Auto-Trade because it is a property of the person being told, not of the
+             terminal doing the trading. --}}
+        <div class="rounded-lg border border-gray-700 bg-gray-800 p-6">
+            <div class="max-w-xl">
+                <livewire:profile.telegram-alerts-form />
             </div>
+        </div>
 
-            <div class="p-4 sm:p-8 bg-white dark:bg-gray-800 shadow sm:rounded-lg">
-                <div class="max-w-xl">
-                    <livewire:profile.delete-user-form />
-                </div>
+        <div class="rounded-lg border border-gray-700 bg-gray-800 p-6">
+            <div class="max-w-xl">
+                <livewire:profile.update-password-form />
+            </div>
+        </div>
+
+        <div class="rounded-lg border border-gray-700 bg-gray-800 p-6">
+            <livewire:profile.account-security />
+        </div>
+
+        <div class="rounded-lg border border-red-500/20 bg-gray-800 p-6">
+            <div class="max-w-xl">
+                <livewire:profile.delete-user-form />
             </div>
         </div>
     </div>

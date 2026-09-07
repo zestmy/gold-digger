@@ -4,8 +4,10 @@
 
 <div>
     <x-slot name="header">
-        Telegram Accounts
+        Providers
     </x-slot>
+
+    <x-page-tabs group="providers" />
 
     {{-- Polled only while a sign-in is under way, so an idle page is not refetching every
          few seconds for nothing. --}}

@@ -1,9 +1,92 @@
+@php
+    use App\Models\TelegramAccount as Acct;
+
+    // Chip labels are built here rather than inline in the loop directive: a bracket inside
+    // a directive's string argument throws Blade's parenthesis matching, and every directive
+    // after it is left uncompiled.
+    $chips = [
+        'following' => 'Following ('.$counts['following'].')',
+        'recording' => 'Recording only ('.$counts['recording'].')',
+        'all' => 'All seen ('.$counts['all'].')',
+    ];
+@endphp
+
 <div>
     <x-slot name="header">
-        Signal Channels
+        Providers
     </x-slot>
 
+    <x-page-tabs group="providers" />
+
     <div class="space-y-6">
+        <!-- The accounts the channels are read through -->
+        {{--
+            Above the channels, because a provider that has gone quiet is more often an
+            account that has stopped being read than a channel that has stopped posting.
+        --}}
+        <div class="rounded-lg border border-gray-700 bg-gray-800 p-4">
+            <div class="flex items-center justify-between gap-3">
+                <h2 class="text-sm font-semibold text-white">Connected accounts</h2>
+                <a href="{{ route('signals.accounts') }}" class="text-xs text-yellow-500 hover:text-yellow-400">
+                    Manage accounts &rarr;
+                </a>
+            </div>
+
+            @forelse($accounts as $account)
+                {{-- Block form, not the one-line form: the rows loop below opens a block of
+                     its own, and Blade would pair a one-liner here with that block's closer. --}}
+                @php
+                    $state = $account->login_state;
+                @endphp
+                <div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm {{ $loop->first ? '' : 'border-t border-gray-700 pt-3' }}">
+                    <span class="font-medium text-gray-100">{{ $account->name() }}</span>
+
+                    @if($state === Acct::ACTIVE && $account->isConnected())
+                        <span class="rounded bg-green-900/40 px-2 py-0.5 text-xs text-green-400">CONNECTED</span>
+                    @elseif($state === Acct::ACTIVE)
+                        {{-- Signed in but nothing has read it lately. Not idle: the sign-in is
+                             good, and sending somebody to redo it would be the wrong fix. --}}
+                        <span class="rounded bg-amber-900/40 px-2 py-0.5 text-xs text-amber-400">SIGNED IN, NOT READING</span>
+                    @elseif($account->loggingIn())
+                        <span class="rounded bg-yellow-900/40 px-2 py-0.5 text-xs text-yellow-400">SIGNING IN</span>
+                    @elseif($state === Acct::FAILED)
+                        <span class="rounded bg-red-900/40 px-2 py-0.5 text-xs text-red-400">FAILED</span>
+                    @else
+                        <span class="rounded bg-gray-700 px-2 py-0.5 text-xs text-gray-400">IDLE</span>
+                    @endif
+
+                    @if($account->login_phone)
+                        {{-- Enough to tell two numbers apart, not enough to dial one. --}}
+                        <span class="font-mono text-xs text-gray-500">{{ Str::mask($account->login_phone, '*', 3, -3) }}</span>
+                    @endif
+
+                    <span class="text-xs text-gray-500">
+                        @if($account->last_seen_at)
+                            last heard <x-local-time :value="$account->last_seen_at" relative />
+                        @else
+                            never heard from
+                        @endif
+                    </span>
+                </div>
+            @empty
+                <p class="mt-3 text-sm text-gray-400">
+                    <a href="{{ route('signals.accounts') }}" class="text-yellow-500 hover:text-yellow-400">
+                        Connect a Telegram account to follow providers &rarr;
+                    </a>
+                </p>
+            @endforelse
+        </div>
+
+        <!-- Following, recording, everything -->
+        <div class="flex flex-wrap gap-2">
+            @foreach($chips as $key => $label)
+                <button type="button" wire:click="$set('show', '{{ $key }}')"
+                        class="rounded-full px-3 py-1 text-xs font-medium {{ $show === $key ? 'bg-yellow-500 text-gray-900' : 'bg-gray-800 text-gray-300 hover:bg-gray-700' }}">
+                    {{ $label }}
+                </button>
+            @endforeach
+        </div>
+
         <!-- Search and window -->
         <div class="space-y-3">
             <div class="flex flex-wrap items-center gap-3">
@@ -53,7 +136,7 @@
                             {{ $row['label'] }}
 
                             @if($row['enabled'])
-                                <span class="rounded bg-green-900/40 px-2 py-0.5 text-xs text-green-400">LIVE</span>
+                                <span class="rounded bg-green-900/40 px-2 py-0.5 text-xs text-green-400">FOLLOWING</span>
                             @else
                                 <span class="rounded bg-gray-700 px-2 py-0.5 text-xs text-gray-400">RECORDING ONLY</span>
                             @endif
@@ -71,14 +154,20 @@
                     </div>
 
                     @if($id)
-                        <button type="button" wire:click="toggle({{ $id }})"
+                        {{-- The only control that arms a channel, so it is a switch with a
+                             name rather than a verb: what it does is the same in both
+                             directions, and the state is the thing to read. --}}
+                        <button type="button" role="switch" aria-checked="{{ $row['enabled'] ? 'true' : 'false' }}"
+                                wire:click="toggle({{ $id }})"
                                 wire:confirm="{{ $row['enabled']
-                                    ? 'Stop trading this channel? Its messages will still be recorded.'
-                                    : 'Trade this channel? Its signals will be parsed, reviewed and can place real orders.' }}"
-                                class="{{ $row['enabled']
-                                    ? 'bg-gray-700 text-gray-200 hover:bg-gray-600'
-                                    : 'bg-yellow-500 text-gray-900 hover:bg-yellow-400' }} shrink-0 rounded-md px-4 py-2 text-sm font-medium">
-                            {{ $row['enabled'] ? 'Stop trading' : 'Enable' }}
+                                    ? 'Switch auto-trade off for this channel? Its messages will still be recorded.'
+                                    : 'Switch auto-trade on for this channel? Its signals will be parsed, reviewed and can place real orders.' }}"
+                                class="flex shrink-0 items-center gap-2 rounded-md bg-gray-900/60 px-3 py-2 text-sm font-medium text-gray-200 hover:bg-gray-700">
+                            Auto-trade
+                            <span class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors {{ $row['enabled'] ? 'bg-yellow-500' : 'bg-gray-600' }}">
+                                <span class="inline-block h-4 w-4 rounded-full bg-white transition-transform {{ $row['enabled'] ? 'translate-x-4' : 'translate-x-0.5' }}"></span>
+                            </span>
+                            <span class="text-xs {{ $row['enabled'] ? 'text-yellow-400' : 'text-gray-500' }}">{{ $row['enabled'] ? 'on' : 'off' }}</span>
                         </button>
                     @endif
                 </div>
@@ -151,7 +240,7 @@
                     <p class="mt-4 rounded-md bg-gray-900 p-3 text-xs text-gray-400">
                         Nothing has closed yet.
                         @if(! $row['enabled'])
-                            This channel is recorded but not enabled, so nothing here will ever trade until you turn it on.
+                            This channel is recording only, so nothing here will ever trade until auto-trade is switched on.
                         @elseif($row['parsed'] === 0)
                             Nothing parsed either &mdash; the format may not be one the parser recognises.
                         @endif
@@ -281,14 +370,27 @@
             </div>
         @empty
             <div class="rounded-lg bg-gray-800 p-8 text-center">
-                <p class="text-sm text-gray-400">No messages captured yet.</p>
+                <p class="text-sm text-gray-400">
+                    {{ $show === 'all' ? 'No messages captured yet.' : 'No channels here.' }}
+                </p>
                 <p class="mt-2 text-xs text-gray-500">
-                    The bot sees only chats it has been added to. To read a provider's channel, run the
-                    account collector in <code class="text-gray-400">tools/telegram-collector/</code> &mdash;
-                    it signs in as your own Telegram account and posts what it sees here.
+                    @if($show === 'all')
+                        The bot sees only chats it has been added to. To read a provider's channel, run the
+                        account collector in <code class="text-gray-400">tools/telegram-collector/</code> &mdash;
+                        it signs in as your own Telegram account and posts what it sees here.
+                    @else
+                        Nothing that has posted is {{ $show === 'following' ? 'being followed' : 'recording only' }} right now.
+                    @endif
                 </p>
             </div>
         @endforelse
+
+        {{-- What the switch means, said once under the list rather than on every row. --}}
+        <p class="text-xs text-gray-500">
+            A channel switched on is the only thing that arms it. Every signal it posts is still reviewed
+            against your own market data and the AI fund before anything is placed. Signals from a channel
+            that is recording only are kept, scored, and never traded.
+        </p>
 
         <!-- Registered, never posted -->
         @if($idle->isNotEmpty())
@@ -350,12 +452,13 @@
                                     <span class="ml-2 rounded bg-gray-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-gray-400">group</span>
                                 @endif
                             </div>
-                            <button type="button" wire:click="toggle({{ $channel->id }})"
+                            <button type="button" role="switch" aria-checked="{{ $channel->is_enabled ? 'true' : 'false' }}"
+                                    wire:click="toggle({{ $channel->id }})"
                                     wire:confirm="{{ $channel->is_enabled
-                                        ? 'Stop trading this channel?'
-                                        : 'Trade this channel? Its signals will be parsed, reviewed and can place real orders.' }}"
+                                        ? 'Switch auto-trade off for this channel?'
+                                        : 'Switch auto-trade on for this channel? Its signals will be parsed, reviewed and can place real orders.' }}"
                                     class="{{ $channel->is_enabled ? 'text-green-400 hover:text-green-300' : 'text-gray-500 hover:text-gray-300' }}">
-                                {{ $channel->is_enabled ? 'Enabled' : 'Enable' }}
+                                Auto-trade {{ $channel->is_enabled ? 'on' : 'off' }}
                             </button>
                         </li>
                     @endforeach

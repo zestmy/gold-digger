@@ -44,7 +44,8 @@ class UserObserver
             'max_concurrent_trades' => 3,
             'allowed_sessions' => ['london', 'newyork', 'overlap'],
             'news_filter_enabled' => true,
-            'capture_screenshots' => true,
+            // No capture_screenshots here: nothing has ever written a screenshot, no form
+            // offers the flag any more, and the column's own default covers it.
         ]);
 
         // Create default strategy based on "Fira-Style" gold scalping

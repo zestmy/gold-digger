@@ -10,7 +10,7 @@ use Livewire\Attributes\Url;
 use Livewire\Component;
 
 #[Layout('layouts.app')]
-#[Title('Analytics - FXSignalPro')]
+#[Title('Performance - FXSignalPro')]
 class Analytics extends Component
 {
     /**

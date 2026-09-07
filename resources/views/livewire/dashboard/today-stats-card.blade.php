@@ -1,35 +1,53 @@
-<div class="rounded-lg bg-gray-800 p-6">
-    <h3 class="text-sm font-medium text-gray-400">Today's Performance</h3>
+{{-- Polls every 30s, the same cadence as the signals list beneath, so the count on the
+     tile and the rows in the list change together rather than one lagging the other. --}}
+<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" wire:poll.30s="loadStats">
+    {{-- Signals today --}}
+    <div class="rounded-lg border border-gray-700 bg-gray-800 p-5">
+        <p class="text-sm font-medium text-gray-400">Signals today</p>
+        <p class="mt-2 text-3xl font-semibold tabular-nums text-white">{{ $aiSignals + $copiedSignals }}</p>
+        <p class="mt-1 text-xs text-gray-500">{{ $aiSignals }} AI &middot; {{ $copiedSignals }} copied</p>
+    </div>
 
-    <div class="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <!-- Trades Count -->
-        <div class="rounded-lg bg-gray-900 p-4">
-            <p class="text-sm text-gray-500">Trades</p>
-            <p class="mt-1 text-2xl font-semibold text-white">{{ $tradesCount }}</p>
-        </div>
+    {{-- Open positions --}}
+    <div class="rounded-lg border border-gray-700 bg-gray-800 p-5">
+        <p class="text-sm font-medium text-gray-400">Open positions</p>
+        <p class="mt-2 text-3xl font-semibold tabular-nums text-white">{{ $openPositions }}</p>
+        <p class="mt-1 truncate text-xs text-gray-500">
+            @if($openPositions === 0)
+                nothing at risk
+            @else
+                {{ implode(' · ', $openSymbols) }}
+            @endif
+        </p>
+    </div>
 
-        <!-- Gross P&L -->
-        <div class="rounded-lg bg-gray-900 p-4">
-            <p class="text-sm text-gray-500">Gross P&L</p>
-            <p class="mt-1 text-2xl font-semibold {{ $grossPnl >= 0 ? 'text-green-400' : 'text-red-400' }}">
-                ${{ number_format($grossPnl, 2) }}
+    {{-- Net P&L today --}}
+    <div class="rounded-lg border border-gray-700 bg-gray-800 p-5 ring-1 ring-inset ring-yellow-500/10">
+        <p class="text-sm font-medium text-gray-400">Net P&amp;L today</p>
+        <p class="mt-2 text-3xl font-semibold tabular-nums {{ $netPnl > 0 ? 'text-green-400' : ($netPnl < 0 ? 'text-red-400' : 'text-white') }}">
+            {{ $netPnl < 0 ? '-' : '' }}${{ number_format(abs($netPnl), 2) }}
+        </p>
+        <p class="mt-1 text-xs tabular-nums text-gray-500">
+            30 days:
+            <span class="{{ $netPnl30d > 0 ? 'text-green-400/80' : ($netPnl30d < 0 ? 'text-red-400/80' : '') }}">{{ $netPnl30d < 0 ? '-' : '+' }}${{ number_format(abs($netPnl30d), 2) }}</span>
+        </p>
+    </div>
+
+    {{-- AI fund --}}
+    <div class="rounded-lg border border-gray-700 bg-gray-800 p-5">
+        <p class="text-sm font-medium text-gray-400">AI fund</p>
+        @if($fundConfigured)
+            <p class="mt-2 text-3xl font-semibold tabular-nums text-white">
+                ${{ number_format($fundRemaining, 0) }}<span class="text-base font-normal text-gray-500"> of ${{ number_format($fundCap, 0) }}</span>
             </p>
-        </div>
-
-        <!-- Total Costs -->
-        <div class="rounded-lg bg-gray-900 p-4">
-            <p class="text-sm text-gray-500">Costs</p>
-            <p class="mt-1 text-2xl font-semibold text-orange-400">
-                -${{ number_format($totalCosts, 2) }}
+            <p class="mt-1 text-xs tabular-nums text-gray-500">${{ number_format($fundCommitted, 2) }} committed</p>
+        @else
+            {{-- Absent is not zero: no cap means nobody has decided how much the AI may
+                 risk, and the tile should send them to decide rather than show $0. --}}
+            <p class="mt-2 text-3xl font-semibold text-gray-600">&mdash;</p>
+            <p class="mt-1 text-xs text-gray-500">
+                No cap set. <a href="{{ route('settings') }}" class="text-yellow-500 hover:text-yellow-400">Set one &rarr;</a>
             </p>
-        </div>
-
-        <!-- Net P&L (Gold highlighted) -->
-        <div class="rounded-lg bg-gray-900 p-4 ring-1 ring-yellow-500/20">
-            <p class="text-sm text-yellow-500">Net P&L</p>
-            <p class="mt-1 text-2xl font-semibold {{ $netPnl >= 0 ? 'text-yellow-400' : 'text-red-400' }}">
-                ${{ number_format($netPnl, 2) }}
-            </p>
-        </div>
+        @endif
     </div>
 </div>

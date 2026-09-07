@@ -4,9 +4,9 @@
     {{-- ================================================================ --}}
     <div>
         <header>
-            <h2 class="text-lg font-medium text-gray-900 dark:text-gray-100">Two-factor authentication</h2>
+            <h2 class="text-lg font-medium text-gray-100">Two-factor authentication</h2>
 
-            <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+            <p class="mt-1 text-sm text-gray-400">
                 A session here can enable autonomous trading, raise the AI capital cap and queue orders.
                 A password on its own is thin protection for that.
             </p>
@@ -98,9 +98,9 @@
     {{-- ================================================================ --}}
     <div class="border-t border-gray-700 pt-8">
         <header>
-            <h2 class="text-lg font-medium text-gray-900 dark:text-gray-100">Where you are signed in</h2>
+            <h2 class="text-lg font-medium text-gray-100">Where you are signed in</h2>
 
-            <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+            <p class="mt-1 text-sm text-gray-400">
                 Every browser holding a session on this account. If one is not you, sign the others out
                 and change your password.
             </p>

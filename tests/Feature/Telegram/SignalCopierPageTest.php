@@ -208,10 +208,15 @@ class SignalCopierPageTest extends TestCase
         $this->assertSame(0, TradeCommand::count());
     }
 
-    public function test_the_page_renders(): void
+    public function test_the_page_renders_as_the_copied_tab_under_signals(): void
     {
         $this->signal();
 
-        $this->get(route('signals.copier'))->assertOk()->assertSee('Signal Copier');
+        $this->get(route('signals.copier'))
+            ->assertOk()
+            ->assertSee('Copied signals')
+            // The page's own copy uses the menu's words, so the tab and the body agree.
+            ->assertSee('Providers, and what each has been worth')
+            ->assertDontSee('Signal Copier');
     }
 }

@@ -118,7 +118,7 @@ Two concrete implications:
 1. **Add a `trade_commands` table and a small API.** The dashboard's Start/Stop/Close-All buttons
    enqueue a command; the executor polls, acts, and reports back. That turns the three stubbed methods
    in `QuickActionsCard` into real features regardless of which executor you pick.
-2. **Every executor writes to `bot_logs`.** The table and the `/logs` page already exist and are
+2. **Every executor writes to `bot_logs`.** The table and the `/settings/activity` page already exist and are
    explicitly designed for cross-system logging. Right now they are empty, which is why the failure is
    invisible from the dashboard.
 
@@ -291,7 +291,7 @@ practice.
 ### Phase 2.1 — Make the bot a first-class part of the repo ✓
 
 - [x] `bot/` package with `requirements.txt` and the diagnostic/executor pair
-- [x] `POST /api/v1/bot/logs` + a `BotLog` writer so failures appear on `/logs` instead of a console
+- [x] `POST /api/v1/bot/logs` + a `BotLog` writer so failures appear on `/settings/activity` instead of a console
 - [x] `POST /api/v1/bot/heartbeat` + `bot_heartbeats` table, wired to `BotStatusCard` (replaces the
       hardcoded `$isOnline = false`)
 - [x] Token auth for the API — `bot_tokens`, issued with `php artisan bot:token`

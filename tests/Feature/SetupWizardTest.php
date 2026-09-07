@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Livewire\Pages\Setup;
 use App\Models\BotHeartbeat;
 use App\Models\BotSettings;
+use App\Models\BotToken;
 use App\Models\BrokerAccount;
 use App\Models\TelegramChannel;
 use App\Models\User;
@@ -39,22 +40,38 @@ class SetupWizardTest extends TestCase
         ]);
     }
 
-    public function test_a_fresh_account_starts_at_the_first_unmet_step(): void
+    // =====================================================================
+    // THE STEPS ARE DERIVED
+    // =====================================================================
+
+    public function test_an_account_with_no_broker_account_starts_at_the_first_step(): void
     {
+        $this->account->delete();
+
         Livewire::actingAs($this->user)->test(Setup::class)
             ->assertViewHas('current', 0)
             ->assertViewHas('ready', false)
-            ->assertSee('Signal source');
+            ->assertSee('How a signal becomes a trade on your MT5')
+            ->assertSee('No broker account added yet');
+    }
+
+    public function test_a_fresh_account_starts_at_the_first_unmet_step(): void
+    {
+        // A broker account exists from setUp, so the terminal is the first thing not true.
+        Livewire::actingAs($this->user)->test(Setup::class)
+            ->assertViewHas('current', 1)
+            ->assertViewHas('ready', false)
+            ->assertSee('No token issued, no terminal has connected');
     }
 
     public function test_completed_steps_are_marked_from_the_system_not_from_a_flag(): void
     {
-        $this->channel(enabled: true);
+        $this->onlineTerminal();
 
         Livewire::actingAs($this->user)->test(Setup::class)
-            // Source and channels are both satisfied by one enabled channel existing.
+            // Account and terminal are both satisfied; sources are next.
             ->assertViewHas('current', 2)
-            ->assertSee('Terminal');
+            ->assertSee('Signal sources');
     }
 
     /**
@@ -72,7 +89,7 @@ class SetupWizardTest extends TestCase
 
         Livewire::actingAs($this->user)->test(Setup::class)
             ->assertViewHas('ready', false)
-            ->assertViewHas('current', 1);
+            ->assertViewHas('current', 2);
     }
 
     public function test_a_stale_terminal_is_not_counted_as_connected(): void
@@ -82,7 +99,7 @@ class SetupWizardTest extends TestCase
         $this->onlineTerminal(lastSeen: now()->subHour());
 
         Livewire::actingAs($this->user)->test(Setup::class)
-            ->assertViewHas('current', 2)
+            ->assertViewHas('current', 1)
             ->assertViewHas('ready', false);
     }
 
@@ -104,9 +121,103 @@ class SetupWizardTest extends TestCase
     public function test_the_terminal_step_says_no_broker_password_is_stored(): void
     {
         Livewire::actingAs($this->user)->test(Setup::class)
-            ->set('step', 2)
+            ->set('step', 1)
             ->assertSee('No broker password is stored');
     }
+
+    // =====================================================================
+    // EACH STEP LINKS INTO ITS TAB
+    // =====================================================================
+
+    public function test_each_step_links_to_the_page_that_completes_it(): void
+    {
+        $html = Livewire::actingAs($this->user)->test(Setup::class)->html();
+
+        foreach (['broker-accounts', 'terminal', 'signals.channels', 'settings'] as $route) {
+            $this->assertStringContainsString('href="'.route($route).'"', $html, "link to {$route}");
+        }
+    }
+
+    /**
+     * The archive is useless without a token to paste into it, so the download is offered
+     * only once one exists - otherwise the first thing on the page sends people the wrong way.
+     */
+    public function test_the_ea_download_is_offered_once_a_token_exists(): void
+    {
+        Livewire::actingAs($this->user)->test(Setup::class)
+            ->assertDontSee('Download EA')
+            ->assertDontSee(route('terminal.download'));
+
+        BotToken::generate($this->user, 'VPS', $this->account);
+
+        Livewire::actingAs($this->user)->test(Setup::class)
+            ->assertSee('Download EA')
+            ->assertSee(route('terminal.download'));
+    }
+
+    public function test_the_risk_step_summarises_the_numbers_that_matter(): void
+    {
+        BotSettings::where('user_id', $this->user->id)->update([
+            'risk_percentage' => 1.50, 'max_daily_loss_percentage' => 4.00,
+        ]);
+
+        Livewire::actingAs($this->user)->test(Setup::class)
+            ->assertSee('1.5% per trade · 4% daily stop · no fund set');
+
+        $this->fund();
+
+        Livewire::actingAs($this->user)->test(Setup::class)
+            ->assertSee('1.5% per trade · 4% daily stop · fund $500.00');
+    }
+
+    // =====================================================================
+    // THE SWITCH IN THE HEADER
+    // =====================================================================
+
+    public function test_the_header_shows_whether_auto_trade_is_on(): void
+    {
+        Livewire::actingAs($this->user)->test(Setup::class)
+            ->assertViewHas('autoTrade', false)
+            ->assertSee('Auto-trade off');
+
+        BotSettings::where('user_id', $this->user->id)->update(['is_active' => true]);
+
+        Livewire::actingAs($this->user)->test(Setup::class)
+            ->assertViewHas('autoTrade', true)
+            ->assertSee('Auto-trade on');
+    }
+
+    /**
+     * The same flag the risk tab's master switch flips, so the two can never disagree.
+     */
+    public function test_the_header_pill_toggles_the_same_flag_as_the_master_switch(): void
+    {
+        $component = Livewire::actingAs($this->user)->test(Setup::class)->call('toggleAutoTrade');
+
+        $this->assertTrue((bool) BotSettings::where('user_id', $this->user->id)->value('is_active'));
+        $component->assertSee('Auto-trade on');
+
+        $component->call('toggleAutoTrade');
+
+        $this->assertFalse((bool) BotSettings::where('user_id', $this->user->id)->value('is_active'));
+        $component->assertSee('Auto-trade off');
+    }
+
+    /**
+     * A user created outside registration has no settings row until something writes one.
+     */
+    public function test_the_pill_creates_the_settings_row_when_a_user_has_none(): void
+    {
+        BotSettings::where('user_id', $this->user->id)->delete();
+
+        Livewire::actingAs($this->user)->test(Setup::class)->call('toggleAutoTrade');
+
+        $this->assertTrue((bool) BotSettings::where('user_id', $this->user->id)->sole()->is_active);
+    }
+
+    // =====================================================================
+    // HELPERS
+    // =====================================================================
 
     private function channel(bool $enabled): TelegramChannel
     {

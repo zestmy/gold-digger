@@ -22,7 +22,7 @@ computes the indicators and queues the order. See
 reversal and time exits, and the break-even stop. Positions the dashboard did not open
 are picked up by [`docs/RECONCILIATION.md`](docs/RECONCILIATION.md).
 
-> **Looking for something to trade?** [`docs/MARKET_SCAN.md`](docs/MARKET_SCAN.md) — `/analysis`
+> **Looking for something to trade?** [`docs/MARKET_SCAN.md`](docs/MARKET_SCAN.md) — `/signals/scan`
 > ranks every instrument there are bars for on measured evidence, then asks one question of a
 > model: of this shortlist, which. The ranking is arithmetic and works with no API key.
 
@@ -175,23 +175,18 @@ Either way, creating a user also creates:
 | `/` | Landing page |
 | `/login` | Sign in |
 | `/register` | Sign up — only defined when `REGISTRATION_ENABLED=true` |
-| `/dashboard` | Stats, bot status and the start / stop / close-all controls |
-| `/setup` | The four things that must be true before a copied signal becomes a position |
-| `/terminal` | Issue the EA's token; `/terminal/download` ships the EA configured for this dashboard |
-| `/trades/live` | Open positions |
-| `/trades/history` | Closed trades |
-| `/signals` | Every decision the strategy layer made, including the refusals |
-| `/signals/copier` | The Telegram copier: captured signals, reviews, executions |
-| `/signals/channels` | Which providers are on, and what each has been worth |
-| `/signals/accounts` | Telegram accounts, hosted or self-collected |
-| `/analysis` | Every instrument ranked on measured evidence, plus one model question |
-| `/strategies` | Strategy configuration; `/strategies/improve` is the AI proposer with walk-forward |
-| `/broker-accounts` | MT5 account management |
-| `/analytics` | Performance analytics, computed from `trades` on request |
-| `/settings` | Bot settings |
-| `/logs` | Bot logs, written by the EA, the monitor and the copier |
-| `/profile` | Password, two-factor, active sessions |
+| `/dashboard` | **Home** — today's signals, open positions, the 30-day curve, terminal status and the auto-trade controls |
+| `/signals` | **Signals** — the AI signals with the entry card; `/signals/copied` is the Telegram copier pipeline; `/signals/scan` ranks every instrument on measured evidence |
+| `/providers` | **Providers** — which Telegram channels are followed and what each has been worth; `/providers/accounts` manages the accounts that read them |
+| `/trades` | **Trades** — open positions; `/trades/history` closed trades; `/trades/performance` the analytics computed from `trades` |
+| `/auto-trade` | **Auto-Trade** — the four things that must be true before a signal becomes a position; `/auto-trade/terminal` issues the EA token (`/auto-trade/terminal/download` ships the EA configured for this dashboard); `/auto-trade/accounts` MT5 accounts; `/auto-trade/risk` risk, sessions, filters and the AI fund |
+| `/settings` | **Settings** — profile, password, two-factor, sessions, Telegram alerts; `/settings/activity` is the log written by the EA, the monitor and the copier |
+| `/strategies` | Operator only: strategy parameters; `/strategies/improve` is the AI proposer with walk-forward. Both 403 for a subscriber |
 | `/admin` | Filament support console, for `users.is_admin` only |
+
+The older addresses (`/setup`, `/terminal`, `/broker-accounts`, `/trades/live`, `/analytics`,
+`/analysis`, `/signals/copier`, `/signals/channels`, `/signals/accounts`, `/logs`,
+`/profile`) redirect to where the page went.
 
 ## Bot API
 

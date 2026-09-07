@@ -1,7 +1,9 @@
 <div>
     <x-slot name="header">
-        Trade History
+        Trades
     </x-slot>
+
+    <x-page-tabs group="trades" />
 
     <!-- Summary Stats -->
     <div class="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">

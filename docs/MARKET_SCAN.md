@@ -1,6 +1,6 @@
 # Market Scan
 
-`/analysis` scans every instrument this account has stored bars for, ranks them on measured
+`/signals/scan` scans every instrument this account has stored bars for, ranks them on measured
 evidence, and proposes the ones worth attention. One of them can then be opened for its
 structure, its levels and a plan.
 

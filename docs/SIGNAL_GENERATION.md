@@ -367,5 +367,5 @@ Worth watching on a fresh attach:
   bars are stored and nothing is ever generated, which looks exactly like a broken strategy.
 - **The first push needs `HistoryBars` ≥ ~100** or the indicators never warm up. ADX alone
   needs `2 × period` bars before it reads at all.
-- **`bot_logs` will show the push failing** before anything else does. If `/logs` is silent,
+- **`bot_logs` will show the push failing** before anything else does. If `/settings/activity` is silent,
   the EA is not reaching the API at all.

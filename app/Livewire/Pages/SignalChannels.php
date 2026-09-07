@@ -3,6 +3,7 @@
 namespace App\Livewire\Pages;
 
 use App\Models\BotSettings;
+use App\Models\TelegramAccount;
 use App\Models\TelegramChannel;
 use App\Services\Telegram\ChannelPerformance;
 use Illuminate\Support\Carbon;
@@ -37,9 +38,16 @@ use Livewire\Component;
  * trade count sits beside every rate for exactly that reason, and rows below a handful of
  * closed trades say so in words - dropping them instead would hide a new provider
  * entirely, which is worse than showing one honestly.
+ *
+ * ## The accounts sit above the channels
+ *
+ * A channel is only reachable through a Telegram account that is signed in and being
+ * read, and "why has this provider gone quiet" is answered by that account's state more
+ * often than by anything on the channel's row. One strip at the top says which accounts
+ * are connected, and a user with none is told that following a provider starts there.
  */
 #[Layout('layouts.app')]
-#[Title('Signal Channels - FXSignalPro')]
+#[Title('Providers - FXSignalPro')]
 class SignalChannels extends Component
 {
     /** A private chat named by its owner, waiting to be turned into a chat id. */
@@ -62,6 +70,17 @@ class SignalChannels extends Component
     /** Hide the ones that have never posted anything, which is most of them. */
     #[Url]
     public bool $onlyActive = false;
+
+    /**
+     * Which channels to list by what they are allowed to do: 'following' for the ones
+     * armed to trade, 'recording' for the ones only being kept, or 'all'.
+     *
+     * The distinction the page is about. A hundred channels an account has joined and the
+     * three that can place an order are not one list, and the three are the ones a reader
+     * most needs to be able to find again.
+     */
+    #[Url]
+    public string $show = 'all';
 
     public ?int $expanded = null;
 
@@ -255,6 +274,12 @@ class SignalChannels extends Component
 
         $rows = $performance->forUser((int) Auth::id(), $since);
 
+        if ($this->show !== 'all') {
+            $rows = $rows->filter(
+                fn (array $row) => $row['enabled'] === ($this->show === 'following'),
+            )->values();
+        }
+
         if ($this->search !== '') {
             $needle = mb_strtolower($this->search);
 
@@ -265,12 +290,22 @@ class SignalChannels extends Component
             )->values();
         }
 
+        $seen = TelegramChannel::where('user_id', Auth::id())->count();
+        $following = TelegramChannel::where('user_id', Auth::id())->where('is_enabled', true)->count();
+
         return view('livewire.pages.signal-channels', [
             'rows' => $rows,
+            'accounts' => TelegramAccount::where('user_id', Auth::id())->orderBy('id')->get(),
+            'counts' => [
+                'following' => $following,
+                'recording' => $seen - $following,
+                'all' => $seen,
+            ],
             // Registered but silent: a channel enabled weeks ago that has posted nothing
             // is a different problem from one posting signals nobody takes.
             'idle' => $this->onlyActive ? collect() : TelegramChannel::where('user_id', Auth::id())
                 ->whereDoesntHave('signals')
+                ->when($this->show !== 'all', fn ($q) => $q->where('is_enabled', $this->show === 'following'))
                 ->when($this->search !== '', fn ($q) => $q->where(function ($q) {
                     $q->where('title', 'like', '%'.$this->search.'%')
                         ->orWhere('username', 'like', '%'.$this->search.'%')

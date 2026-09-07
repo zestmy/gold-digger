@@ -11,6 +11,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -25,8 +26,17 @@ use Livewire\WithPagination;
  * tell a strategy that saw nothing from one blocked by a filter, and no way at all to tell
  * either from a broken data feed.
  *
- * The feed panel at the top exists for that last case: if bars have stopped arriving, no
- * signal will ever be generated and every other explanation on this page is a red herring.
+ * The feed strip above the list exists for that last case: if bars have stopped arriving,
+ * no signal will ever be generated and every other explanation on this page is a red
+ * herring. It is one line while bars are flowing and a full panel only when they are not,
+ * because a healthy feed is not what anybody came here to read about.
+ *
+ * ## Feed on the left, one signal on the right
+ *
+ * The list answers "what has fired", the card answers "what do I do about this one". They
+ * used to be stacked, which meant the card pushed the list below the fold and picking a
+ * different row scrolled the reader away from the thing they had just picked. Side by
+ * side, choosing a row changes the card without moving anything else.
  */
 #[Layout('layouts.app')]
 #[Title('Signals - FXSignalPro')]
@@ -38,14 +48,38 @@ class Signals extends Component
     public string $filter = '';
 
     /**
+     * Which instruments the feed shows: 'gold', 'majors' or 'all'.
+     *
+     * Gold is its own chip because for most accounts here it is most of the feed, and
+     * "everything except gold" is the question the other chip answers. Anything not
+     * priced in XAU counts as a major, which is a simplification the feed can afford: the
+     * point is to split the pile in two, not to classify instruments.
+     */
+    public string $instrument = 'all';
+
+    /**
      * The signal shown on the card, or null for the newest.
      *
      * The card is the point of the page for somebody about to place a trade: the row says
      * what fired, the card says what to do about it against the price now. Any row can be
      * put on it, because the question "was that one worth taking" is asked about old
      * signals as often as new ones.
+     *
+     * In the URL, so the Home page can send somebody straight to one row and so a card
+     * somebody is looking at can be sent to somebody else.
      */
+    #[Url]
     public ?int $selected = null;
+
+    /**
+     * Newest bar per instrument and timeframe, for this render only.
+     *
+     * Private, so Livewire never carries it between requests: it is a memo for the card
+     * and the list sharing one lookup, not state.
+     *
+     * @var array<string, Candle|null>
+     */
+    private array $lastBars = [];
 
     public function show(int $signalId): void
     {
@@ -80,13 +114,22 @@ class Signals extends Component
         $this->resetPage();
     }
 
+    public function updatingInstrument(): void
+    {
+        $this->resetPage();
+    }
+
     public function render()
     {
         $strategyIds = Strategy::where('user_id', Auth::id())->pluck('id');
 
         $base = Signal::whereIn('strategy_id', $strategyIds);
 
-        $signals = (clone $base)
+        // The instrument chip narrows the list and the reason counts together, so the
+        // chips describe the slice on screen rather than a pile the reader cannot see.
+        $scoped = $this->forInstrument(clone $base);
+
+        $signals = (clone $scoped)
             ->with(['strategy', 'resultingTrade'])
             ->when($this->filter === 'taken', fn ($q) => $q->whereNull('skip_reason'))
             ->when($this->filter !== '' && $this->filter !== 'taken', fn ($q) => $q->where('skip_reason', $this->filter))
@@ -95,7 +138,7 @@ class Signals extends Component
 
         // Counts per reason, so the filter chips show where the signals are actually going
         // rather than making the user try each one.
-        $byReason = (clone $base)
+        $byReason = (clone $scoped)
             ->selectRaw('skip_reason, count(*) as total')
             ->groupBy('skip_reason')
             ->orderByDesc('total')
@@ -116,11 +159,31 @@ class Signals extends Component
             'feed' => $this->feed($heartbeat),
             'featured' => $featured,
             'card' => $featured === null ? null : $this->card($featured, $heartbeat),
+            'readings' => $this->readings($signals->items(), $heartbeat),
         ]);
     }
 
     /**
+     * Scope a query to the instrument chip.
+     *
+     * Only XAU is checked because that is the whole distinction the chips draw. A symbol
+     * with a broker suffix (`XAUUSDm`) still starts with XAU, which is why this is a
+     * prefix and not a list.
+     */
+    private function forInstrument($query)
+    {
+        return match ($this->instrument) {
+            'gold' => $query->where('symbol', 'like', 'XAU%'),
+            'majors' => $query->where('symbol', 'not like', 'XAU%'),
+            default => $query,
+        };
+    }
+
+    /**
      * The signal on the card: the one asked for, if it is this user's, else the newest.
+     *
+     * Looked up against everything the user has rather than the filtered slice, so a link
+     * to one signal still lands on it whatever chips happen to be set.
      */
     private function featured($base): ?Signal
     {
@@ -146,18 +209,64 @@ class Signals extends Component
      */
     private function card(Signal $signal, ?BotHeartbeat $heartbeat): array
     {
-        $bar = $heartbeat?->broker_account_id === null
-            ? null
-            : Candle::query()
-                ->series($heartbeat->broker_account_id, $signal->symbol, $signal->timeframe)
-                ->orderByDesc('open_time')
-                ->first();
+        $bar = $this->lastClose($signal, $heartbeat);
 
         return app(SignalCard::class)->for(
             $signal,
             $bar === null ? null : (float) $bar->close,
             $bar?->open_time,
         );
+    }
+
+    /**
+     * Each listed row read the same way the card reads it, so the list can say in a chip
+     * what the card says in a headline.
+     *
+     * The same maths as the card rather than a cheaper approximation: a row that said
+     * "enter now" beside a card that said "too late" for the same signal would be the
+     * page disagreeing with itself. One close lookup per instrument and timeframe, not
+     * per row, since a page of gold signals on M5 shares one last bar.
+     *
+     * @param  array<int, Signal>  $signals
+     * @return array<int, array<string, mixed>>
+     */
+    private function readings(array $signals, ?BotHeartbeat $heartbeat): array
+    {
+        $readings = [];
+
+        foreach ($signals as $signal) {
+            $bar = $this->lastClose($signal, $heartbeat);
+
+            $readings[$signal->id] = app(SignalCard::class)->for(
+                $signal,
+                $bar === null ? null : (float) $bar->close,
+                $bar?->open_time,
+            );
+        }
+
+        return $readings;
+    }
+
+    /**
+     * The newest stored bar for a signal's instrument and timeframe, fetched once per
+     * pair for the render.
+     */
+    private function lastClose(Signal $signal, ?BotHeartbeat $heartbeat): ?Candle
+    {
+        if ($heartbeat?->broker_account_id === null) {
+            return null;
+        }
+
+        $key = $signal->symbol.'|'.$signal->timeframe;
+
+        if (! array_key_exists($key, $this->lastBars)) {
+            $this->lastBars[$key] = Candle::query()
+                ->series($heartbeat->broker_account_id, $signal->symbol, $signal->timeframe)
+                ->orderByDesc('open_time')
+                ->first();
+        }
+
+        return $this->lastBars[$key];
     }
 
     /**

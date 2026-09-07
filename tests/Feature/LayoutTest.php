@@ -41,8 +41,31 @@ class LayoutTest extends TestCase
     {
         $html = $this->shell();
 
-        foreach (['Overview', 'Copier', 'Configure'] as $section) {
-            $this->assertSame(2, substr_count($html, ">{$section}<"), "{$section} heading");
+        foreach (['Home', 'Signals', 'Providers', 'Trades', 'Auto-Trade'] as $destination) {
+            $this->assertSame(2, substr_count($html, ">{$destination}</span>"), "{$destination} link");
+        }
+    }
+
+    /**
+     * Six destinations and nothing else for a subscriber: the operator tools are gated
+     * server-side and their links are not offered to somebody who would get a 403.
+     */
+    public function test_a_subscriber_sees_six_destinations_and_no_operator_tools(): void
+    {
+        $html = $this->shell();
+
+        $this->assertSame(2, substr_count($html, '>Settings</span>'));
+        $this->assertStringNotContainsString('>Strategies</span>', $html);
+        $this->assertStringNotContainsString('>Improve</span>', $html);
+        $this->assertStringNotContainsString('>Admin Panel</span>', $html);
+    }
+
+    public function test_an_administrator_sees_the_operator_tools_under_admin(): void
+    {
+        $html = $this->actingAs(User::factory()->create(['is_admin' => true]))->get('/dashboard')->getContent();
+
+        foreach (['Strategies', 'Improve', 'Admin Panel'] as $tool) {
+            $this->assertSame(2, substr_count($html, ">{$tool}</span>"), "{$tool} link");
         }
     }
 
@@ -74,7 +97,6 @@ class LayoutTest extends TestCase
         // The fault was JSON.parse('['Overview']'), which is a syntax error and took the
         // whole nav down silently.
         $this->assertStringNotContainsString("'['", $html);
-        $this->assertStringContainsString("localStorage.getItem('gd-nav-open')", $html);
     }
 
     public function test_the_session_bar_is_in_the_frame_on_every_page(): void

@@ -93,7 +93,7 @@ A notification outage must not become a monitoring outage.
 ## Setting up Telegram
 
 Off unless both values are set. Unconfigured is not an error: incidents are still recorded and
-visible on `/logs`, they simply reach nobody.
+visible on `/settings/activity`, they simply reach nobody.
 
 1. Message [@BotFather](https://t.me/BotFather), `/newbot`, and keep the token.
 2. Send your new bot any message.
@@ -163,7 +163,7 @@ it still meant one customer's malformed symbol spec could stop everybody else's 
 trailed.
 
 `TenantSweep` runs each account inside `Tenant::for()` and catches what it throws. The
-failure becomes an incident on `/logs` filed against the tenant it happened for, the sweep
+failure becomes an incident on `/settings/activity` filed against the tenant it happened for, the sweep
 continues, and the command reports how many accounts it could not finish — because a
 scheduled run nobody watches is exactly where a partial sweep would otherwise pass for a
 complete one.
@@ -186,7 +186,7 @@ Everything above watches the *bot*. `ErrorReporter` watches this software, which
 existed nothing did: a 500 on a customer settings page was invisible until they emailed, and
 the only way to find one was reading `laravel.log` over SSH.
 
-Every unhandled exception becomes a `critical` row on `/logs` with source `app`, carrying the
+Every unhandled exception becomes a `critical` row on `/settings/activity` with source `app`, carrying the
 exception class, the file and line, and the first frame inside `app/`. Laravel's own logging is
 untouched - this adds an incident, it does not replace the stack trace in the file.
 
@@ -223,7 +223,7 @@ becomes an outage, and there is nowhere useful for it to go.
   class.
 - **Acknowledgement.** You cannot silence an incident from the dashboard; it clears when the
   condition clears.
-- **Alerts on the dashboard.** They are recorded and visible on `/logs`, but there is no banner.
+- **Alerts on the dashboard.** They are recorded and visible on `/settings/activity`, but there is no banner.
   The Bot Status card covers the offline and blocked cases already.
-- **Command failure alerting.** Repeated broker rejections are visible on `/logs` and do not
+- **Command failure alerting.** Repeated broker rejections are visible on `/settings/activity` and do not
   raise. Defining when that has "cleared" needs more thought than the other conditions did.

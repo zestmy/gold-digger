@@ -67,11 +67,17 @@ components. Registration is off unless `REGISTRATION_ENABLED=true` — the route
 defined at all when disabled, so `Route::has('register')` is the single source of truth
 and the landing page hides its sign-up buttons rather than linking to a 403.
 
-`/setup` is the four things that have to be true before a copied signal can become a
-position, each read from the system on every render rather than remembered. `/terminal`
-issues the EA's token and `/terminal/download` ships the EA source with this dashboard's
-`APP_URL` written into its default input, because telling people to edit MQL5 before
-their first compile is a step that gets skipped.
+The menu is six destinations - Home, Signals, Providers, Trades, Auto-Trade, Settings -
+organised around what a subscriber does rather than how the system is built, with the
+pages inside each destination as tabs (`App\View\Components\PageTabs`). The strategy
+editor and the improver are operator tools under Admin: a subscriber chooses instruments
+and risk, not EMA periods.
+
+`/auto-trade` is the four things that have to be true before a signal can become a
+position, each read from the system on every render rather than remembered.
+`/auto-trade/terminal` issues the EA's token and `/auto-trade/terminal/download` ships the
+EA source with this dashboard's `APP_URL` written into its default input, because telling
+people to edit MQL5 before their first compile is a step that gets skipped.
 
 Filament 3 at `/admin` is the support console, gated by `users.is_admin`. It has no login
 page of its own — an administrator signs in at `/login`, where the two-factor challenge

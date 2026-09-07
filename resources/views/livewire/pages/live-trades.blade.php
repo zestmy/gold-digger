@@ -1,7 +1,9 @@
 <div>
     <x-slot name="header">
-        Live Trades
+        Trades
     </x-slot>
+
+    <x-page-tabs group="trades" />
 
     <!-- Account Info & Actions -->
     <div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">

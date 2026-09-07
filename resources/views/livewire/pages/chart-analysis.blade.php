@@ -1,8 +1,8 @@
 {{--
-    Chart Analysis
+    Market scan
 
     A scan across every instrument with stored bars, ranked on measured evidence, with one
-    instrument openable for its structure and levels.
+    instrument openable for its structure and levels. The "Market scan" tab under Signals.
 
     ## Two kinds of number on this page
 
@@ -27,12 +27,20 @@
 
 <div>
     <x-slot name="header">
-        Chart Analysis
+        Signals
     </x-slot>
+
+    <x-page-tabs group="signals" />
 
     <div class="space-y-6">
         <!-- What to scan -->
         <div class="rounded-lg bg-gray-800 p-4">
+            <p class="mb-3 text-sm text-gray-300">
+                Market scan ranks every instrument there are bars for on measured evidence, and can open one
+                for its structure, levels and a plan.
+                <span class="text-gray-500">Nothing on this page places an order.</span>
+            </p>
+
             <div class="flex flex-wrap items-end gap-4">
                 <div>
                     <label for="timeframe" class="block text-xs text-gray-500">Timeframe</label>

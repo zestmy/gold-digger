@@ -13,8 +13,22 @@ use Livewire\Attributes\Title;
 use Livewire\Attributes\Validate;
 use Livewire\Component;
 
+/**
+ * Risk & filters
+ *
+ * What the subscriber decides about auto-trading: whether it is on, how much a trade and a
+ * day may lose, when and what to trade, and the two AI budgets. The strategy's own
+ * parameters are not here - they are the product's, tuned by the operator, and a page that
+ * mixed the two would invite somebody to retune a strategy they cannot backtest.
+ *
+ * ## What is deliberately not on this page any more
+ *
+ * `capture_screenshots` was a checkbox for a feature that never existed: nothing in the
+ * system has ever written a trade screenshot. The column stays until a drop migration is
+ * decided on, but a setting that changes nothing is a lie on a form, so it is not offered.
+ */
 #[Layout('layouts.app')]
-#[Title('Settings - FXSignalPro')]
+#[Title('Risk & filters - FXSignalPro')]
 class Settings extends Component
 {
     #[Validate('boolean')]
@@ -130,9 +144,6 @@ class Settings extends Component
     #[Validate('required|in:provider,strategy')]
     public string $copier_levels = 'provider';
 
-    #[Validate('boolean')]
-    public bool $capture_screenshots = true;
-
     public array $availableSessions = [
         'asian' => 'Asian Session (Tokyo)',
         'london' => 'London Session',
@@ -177,7 +188,6 @@ class Settings extends Component
             $this->ai_autonomous_symbols = implode(', ', (array) ($settings->ai_autonomous_symbols ?? [])) ?: null;
             $this->ai_max_concurrent_trades = (int) ($settings->ai_max_concurrent_trades ?? 1);
             $this->copier_levels = (string) ($settings->copier_levels ?? 'provider');
-            $this->capture_screenshots = $settings->capture_screenshots ?? true;
         }
     }
 
@@ -233,7 +243,6 @@ class Settings extends Component
             'ai_autonomous_symbols' => $this->symbolList(),
             'ai_max_concurrent_trades' => $this->ai_max_concurrent_trades,
             'copier_levels' => $this->copier_levels,
-            'capture_screenshots' => $this->capture_screenshots,
         ]);
 
         $this->dispatch('notify', message: 'Settings saved successfully!', type: 'success');

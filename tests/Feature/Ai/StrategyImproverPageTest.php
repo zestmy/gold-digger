@@ -35,7 +35,7 @@ class StrategyImproverPageTest extends TestCase
 
         config(['ai.key' => 'sk-or-test']);
 
-        $this->user = User::factory()->create();
+        $this->user = User::factory()->create(['is_admin' => true]);
         $this->strategy = Strategy::where('user_id', $this->user->id)->firstOrFail();
 
         $this->actingAs($this->user);

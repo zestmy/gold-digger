@@ -1,20 +1,25 @@
 <div>
     <x-slot name="header">
-        Settings
+        Auto-Trade
     </x-slot>
 
+    <x-page-tabs group="auto-trade" />
+
     <form wire:submit="save" class="space-y-6">
-        <!-- Bot Master Switch -->
-        <div class="rounded-lg bg-gray-800 p-6">
-            <div class="flex items-center justify-between">
+        <!-- Auto-trade: the master switch -->
+        <div class="rounded-lg border border-gray-700 bg-gray-800 p-6">
+            <div class="flex items-center justify-between gap-4">
                 <div>
-                    <h3 class="text-lg font-semibold text-white">Trading Bot</h3>
-                    <p class="text-sm text-gray-400">Master switch to enable or disable the trading bot</p>
+                    <h3 class="text-lg font-semibold text-white">Auto-trade</h3>
+                    <p class="text-sm text-gray-400">Signals become trades on your MT5 when this is on.</p>
                 </div>
                 <button
                     type="button"
                     wire:click="toggleBot"
-                    class="relative inline-flex h-8 w-14 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-offset-2 focus:ring-offset-gray-800 {{ $is_active ? 'bg-yellow-500' : 'bg-gray-600' }}"
+                    role="switch"
+                    aria-checked="{{ $is_active ? 'true' : 'false' }}"
+                    aria-label="Auto-trade"
+                    class="relative inline-flex h-8 w-14 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-offset-2 focus:ring-offset-gray-800 {{ $is_active ? 'bg-yellow-500' : 'bg-gray-600' }}"
                 >
                     <span class="inline-block h-6 w-6 transform rounded-full bg-white shadow-lg transition-transform {{ $is_active ? 'translate-x-7' : 'translate-x-1' }}"></span>
                 </button>
@@ -24,14 +29,14 @@
                     <svg class="mr-2 h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
                         <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
                     </svg>
-                    Bot is active and ready to trade
+                    Auto-trade is on. Approved signals are sent to your terminal as orders.
                 </div>
             @else
                 <div class="mt-4 flex items-center text-sm text-gray-500">
                     <svg class="mr-2 h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
                         <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
                     </svg>
-                    Bot is paused
+                    Auto-trade is off. Signals are still read and recorded; nothing is sent to your terminal.
                 </div>
             @endif
         </div>
@@ -544,23 +549,6 @@
             </div>
         </div>
 
-        <!-- Screenshot Settings -->
-        <div class="rounded-lg bg-gray-800 p-6">
-            <h3 class="mb-4 text-lg font-semibold text-white">Screenshot Settings</h3>
-            <div class="flex items-start space-x-3">
-                <input
-                    type="checkbox"
-                    id="capture_screenshots"
-                    wire:model="capture_screenshots"
-                    class="mt-1 h-4 w-4 rounded border-gray-600 bg-gray-700 text-yellow-500 focus:ring-yellow-500 focus:ring-offset-gray-800"
-                >
-                <div>
-                    <label for="capture_screenshots" class="text-sm font-medium text-gray-300 cursor-pointer">Capture Trade Screenshots</label>
-                    <p class="text-xs text-gray-500">Automatically capture chart screenshots when trades are opened/closed for review</p>
-                </div>
-            </div>
-        </div>
-
         <!-- Save Button -->
         <div class="flex justify-end">
             <button
@@ -575,5 +563,11 @@
                 <span wire:loading wire:target="save">Saving...</span>
             </button>
         </div>
+
+        {{-- Said once, at the foot, so nobody goes looking for EMA periods or ATR
+             multipliers on this page and concludes they are hidden. --}}
+        <p class="border-t border-gray-800 pt-4 text-xs text-gray-500">
+            Strategy parameters are managed by FXSignal Pro. You choose instruments and risk.
+        </p>
     </form>
 </div>

@@ -12,7 +12,7 @@ Isolation used to be 93 hand-written `where('user_id', Auth::id())` clauses. Tha
 mechanism, it is a convention, and the thing about a convention enforced by memory is that
 nothing tells you the one time it was forgotten.
 
-`/logs` was that one time. `bot_logs` had no owner column at all, so:
+`/settings/activity` was that one time. `bot_logs` had no owner column at all, so:
 
 - every tenant read every other tenant's executor output — rejected orders, retcodes,
   symbols, the shape of somebody else's trading;
@@ -40,7 +40,7 @@ they exist they are redundant rather than load-bearing, and removing 93 of them 
 change that introduced the mechanism would have meant trusting the new thing before it had
 run anywhere.
 
-One place has no such clause to fall back on. `/logs` — the page that caused all this — was
+One place has no such clause to fall back on. `/settings/activity` — the page that caused all this — was
 fixed by giving `bot_logs` an owner and the trait, not by adding a `where()`: `clearLog()` is
 still `BotLog::find($id)?->delete()` and `clearAllLogs()` is still `BotLog::query()->delete()`.
 There the scope is the whole of the isolation, and `TenantIsolationTest` drives both actions
@@ -220,4 +220,4 @@ Honest list, so nobody assumes more than is true:
   command that iterates users should use it; nothing forces one to.
 - **Per-tenant alert routing** now exists (`users.telegram_chat_id`), but a tenant who
   configures neither Telegram nor a reachable mailbox still hears nothing. The incident is
-  recorded on `/logs` either way.
+  recorded on `/settings/activity` either way.

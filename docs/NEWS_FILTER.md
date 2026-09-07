@@ -141,7 +141,7 @@ still ahead of you even once its scheduled minute is behind you.
 | `SignalGenerator::firstObjection()` | Refuses the entry, records the signal with `skip_reason` |
 | `SignalQuality` | Scores "Clear of high-impact news" as one factor among the ambient ones |
 | `SignalReviewer` | Same veto applied to copied Telegram signals |
-| `NewsCard` | Dashboard countdown to the next release, and whether we are inside a window |
+| `BotStatusCard` | One line on Home: the next release and whether we are inside a window |
 | `AiAnalysisCard` | Explains the current state in words to the model and the reader |
 
 The copier consulting the same object as the executor is the point: a signal someone else posted

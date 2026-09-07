@@ -3,8 +3,8 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>FXSignalPro - AI-Powered Signal Copying &amp; Trade Synchronization</title>
-    <meta name="description" content="Copy Telegram trading signals into MetaTrader with AI review, per-channel risk controls and a capped fund.">
+    <title>FXSignalPro - AI trading signals for Gold and the majors</title>
+    <meta name="description" content="AI trading signals for Gold, EURUSD, GBPUSD, USDJPY and GBPJPY, each with its entry zone, stop, three targets and a computed confidence score. Follow by hand or auto-trade on your own MetaTrader 5.">
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.bunny.net">
@@ -12,228 +12,275 @@
 
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
-<body class="antialiased bg-gray-950">
+@php
+    // Registration is off by default; see routes/auth.php. The route is the single source
+    // of truth, so with it absent every "Start free" on the page becomes "Log in" rather
+    // than pointing at a door that answers 404.
+    $canRegister = Route::has('register');
+    $ctaLabel = $canRegister ? 'Start free' : 'Log in';
+    $ctaHref = $canRegister ? route('register') : route('login');
+@endphp
+<body class="font-sans antialiased bg-gray-900 text-gray-300">
     <!-- Navigation -->
-    <nav class="fixed top-0 left-0 right-0 z-50 bg-gray-950/80 backdrop-blur-lg border-b border-gray-800">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex items-center justify-between h-16">
-                <!-- Logo -->
-                <div class="flex items-center space-x-3">
-                    <div class="flex items-center justify-center w-10 h-10 rounded-lg bg-gradient-to-br from-yellow-400 to-yellow-600">
-                        <svg class="w-6 h-6 text-gray-900" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-                        </svg>
-                    </div>
-                    <span class="text-xl font-bold text-white">FXSignalPro</span>
-                </div>
+    <nav class="fixed inset-x-0 top-0 z-50 border-b border-gray-800 bg-gray-900/80 backdrop-blur-lg">
+        <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+            <a href="/" class="text-xl font-bold tracking-tight text-white">
+                FX<span class="text-yellow-400">Signal</span>Pro
+            </a>
 
-                <!-- Auth Links -->
-                <div class="flex items-center space-x-4">
-                    @auth
-                        <a href="{{ route('dashboard') }}" class="text-gray-300 hover:text-white transition-colors">Dashboard</a>
-                    @else
-                        <a href="{{ route('login') }}" class="text-gray-300 hover:text-white transition-colors">Login</a>
-                        {{-- Registration is off by default; see config/auth.php. Login is already
-                             beside this, so the button simply goes away. --}}
-                        @if(Route::has('register'))
-                            <a href="{{ route('register') }}" class="px-4 py-2 rounded-lg bg-yellow-500 text-gray-900 font-semibold hover:bg-yellow-400 transition-colors">
-                                Get Started
-                            </a>
-                        @endif
-                    @endauth
-                </div>
-            </div>
-        </div>
-    </nav>
-
-    <!-- Hero Section -->
-    <section class="relative min-h-screen flex items-center justify-center overflow-hidden pt-16">
-        <!-- Background Effects -->
-        <div class="absolute inset-0 bg-gradient-to-b from-yellow-500/5 via-transparent to-transparent"></div>
-        <div class="absolute top-1/4 left-1/4 w-96 h-96 bg-yellow-500/10 rounded-full blur-3xl"></div>
-        <div class="absolute bottom-1/4 right-1/4 w-96 h-96 bg-yellow-600/10 rounded-full blur-3xl"></div>
-
-        <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 text-center">
-            <!-- Badge -->
-            <div class="inline-flex items-center px-4 py-2 rounded-full bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-sm font-medium mb-8">
-                <span class="w-2 h-2 rounded-full bg-yellow-400 animate-pulse mr-2"></span>
-                Automated Trading Bot
-            </div>
-
-            <!-- Headline -->
-            <h1 class="text-4xl sm:text-6xl lg:text-7xl font-bold text-white mb-6">
-                Copy Signals
-                <span class="text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-yellow-600">Without Copying Mistakes</span>
-            </h1>
-
-            <p class="text-xl text-gray-400 max-w-2xl mx-auto mb-10">
-                Telegram signals read, reviewed against your own market data, and executed in your
-                MetaTrader terminal &mdash; sized from a fund you cap, with per-channel results so you
-                can see which providers are actually worth following.
-            </p>
-
-            <!-- CTA Buttons -->
-            <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+            <div class="flex items-center gap-x-5">
                 @auth
-                    <a href="{{ route('dashboard') }}" class="px-8 py-4 rounded-lg bg-yellow-500 text-gray-900 font-semibold text-lg hover:bg-yellow-400 transition-colors shadow-lg shadow-yellow-500/25">
-                        Go to Dashboard
-                    </a>
+                    <a href="{{ route('dashboard') }}" class="text-sm font-medium text-gray-300 transition-colors hover:text-white">Dashboard</a>
                 @else
-                    @if(Route::has('register'))
-                        <a href="{{ route('register') }}" class="px-8 py-4 rounded-lg bg-yellow-500 text-gray-900 font-semibold text-lg hover:bg-yellow-400 transition-colors shadow-lg shadow-yellow-500/25">
-                            Start Trading Now
-                        </a>
-                        <a href="{{ route('login') }}" class="px-8 py-4 rounded-lg bg-gray-800 text-white font-semibold text-lg hover:bg-gray-700 transition-colors border border-gray-700">
-                            Sign In
-                        </a>
-                    @else
-                        {{-- No sign-up to offer, so signing in becomes the primary action rather
-                             than the page pointing at a door that is not there. --}}
-                        <a href="{{ route('login') }}" class="px-8 py-4 rounded-lg bg-yellow-500 text-gray-900 font-semibold text-lg hover:bg-yellow-400 transition-colors shadow-lg shadow-yellow-500/25">
-                            Sign In
+                    <a href="{{ route('login') }}" class="text-sm font-medium text-gray-300 transition-colors hover:text-white">Log in</a>
+                    @if($canRegister)
+                        <a href="{{ route('register') }}" class="rounded-md bg-yellow-500 px-4 py-2 text-sm font-semibold text-gray-900 transition-colors hover:bg-yellow-400">
+                            Start free
                         </a>
                     @endif
                 @endauth
             </div>
+        </div>
+    </nav>
 
-            <!-- Stats -->
-            <div class="mt-20 grid grid-cols-2 md:grid-cols-4 gap-8">
-                <div class="text-center">
-                    <p class="text-3xl font-bold text-yellow-400">24/7</p>
-                    <p class="text-gray-500 mt-1">Automated Trading</p>
+    <!-- Hero -->
+    <section class="relative overflow-hidden pt-16">
+        <div class="pointer-events-none absolute inset-0 bg-gradient-to-b from-yellow-500/5 via-transparent to-transparent"></div>
+        <div class="pointer-events-none absolute -top-24 right-0 h-96 w-96 rounded-full bg-yellow-500/10 blur-3xl"></div>
+
+        <div class="relative mx-auto grid max-w-7xl gap-12 px-4 py-20 sm:px-6 lg:grid-cols-2 lg:items-center lg:px-8 lg:py-28">
+            <div>
+                <p class="font-mono text-xs font-medium uppercase tracking-[0.2em] text-yellow-400">
+                    Gold &middot; EURUSD &middot; GBPUSD &middot; USDJPY &middot; GBPJPY
+                </p>
+
+                <h1 class="mt-5 text-4xl font-bold leading-tight tracking-tight text-white sm:text-5xl lg:text-6xl">
+                    AI trading signals, with the reasoning shown and the entry told plainly
+                </h1>
+
+                <p class="mt-6 max-w-xl text-lg leading-relaxed text-gray-400">
+                    Every signal carries its entry zone, stop, three targets and a confidence score
+                    computed from what actually agreed. Follow it by hand, or let FXSignal Pro place
+                    it on your own MetaTrader 5 with the risk you set.
+                </p>
+
+                <div class="mt-8 flex flex-col items-start gap-4 sm:flex-row sm:items-center">
+                    @auth
+                        <a href="{{ route('dashboard') }}" class="rounded-md bg-yellow-500 px-6 py-3 text-base font-semibold text-gray-900 shadow-lg shadow-yellow-500/20 transition-colors hover:bg-yellow-400">
+                            Go to Dashboard
+                        </a>
+                    @else
+                        <a href="{{ $ctaHref }}" class="rounded-md bg-yellow-500 px-6 py-3 text-base font-semibold text-gray-900 shadow-lg shadow-yellow-500/20 transition-colors hover:bg-yellow-400">
+                            {{ $ctaLabel }}
+                        </a>
+                        <p class="text-sm text-gray-500">No card. Delayed signals on the free plan.</p>
+                    @endauth
                 </div>
-                <div class="text-center">
-                    <p class="text-3xl font-bold text-yellow-400">3-Level</p>
-                    <p class="text-gray-500 mt-1">Take Profit System</p>
-                </div>
-                <div class="text-center">
-                    <p class="text-3xl font-bold text-yellow-400">ATR-Based</p>
-                    <p class="text-gray-500 mt-1">Risk Management</p>
-                </div>
-                <div class="text-center">
-                    <p class="text-3xl font-bold text-yellow-400">Real-time</p>
-                    <p class="text-gray-500 mt-1">Analytics</p>
+            </div>
+
+            {{-- A signal card, as the app draws one. Static markup: the numbers are an
+                 example, not a live signal, and the page must say nothing it cannot show. --}}
+            <div class="lg:justify-self-end">
+                <div class="w-full max-w-md rounded-xl border border-gray-700 bg-gray-800 p-6 shadow-2xl shadow-black/40" aria-label="Example signal card">
+                    <div class="flex items-start justify-between gap-4">
+                        <div>
+                            <p class="text-xs uppercase tracking-wide text-gray-500">Latest signal</p>
+                            <p class="mt-1 text-2xl font-semibold text-white">
+                                XAUUSD
+                                <span class="ml-1 rounded bg-red-400/10 px-2 py-0.5 align-middle text-sm font-semibold text-red-400">SELL</span>
+                            </p>
+                            <p class="mt-1 text-xs text-gray-500">M5 &middot; AI &middot; 13:05 UTC</p>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-3xl font-semibold tabular-nums text-green-400">92%</p>
+                            <p class="text-xs text-gray-500">confidence &middot; A</p>
+                        </div>
+                    </div>
+
+                    <div class="mt-5 rounded-md border border-yellow-500/20 bg-yellow-500/5 p-3">
+                        <p class="text-xs font-semibold uppercase tracking-wide text-yellow-400">Set limit order</p>
+                        <p class="mt-1 text-sm text-gray-300">
+                            Price has moved past the entry zone. Set a SELL limit at
+                            <span class="tabular-nums text-white">4,579.82 &ndash; 4,585.82</span> and let price come back to it.
+                        </p>
+                    </div>
+
+                    <dl class="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 text-sm tabular-nums">
+                        <div>
+                            <dt class="text-xs text-gray-500">Entry zone</dt>
+                            <dd class="mt-0.5 text-white">4,579.82 &ndash; 4,585.82</dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs text-gray-500">Stop</dt>
+                            <dd class="mt-0.5 text-red-300">4,591.82</dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs text-gray-500">Targets</dt>
+                            <dd class="mt-0.5 text-green-300">4,570.82 / 4,561.82 / 4,552.82</dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs text-gray-500">R:R</dt>
+                            <dd class="mt-0.5 text-white">1:2.3</dd>
+                        </div>
+                    </dl>
+
+                    <ul class="mt-5 space-y-1.5 border-t border-gray-700 pt-4 text-xs text-gray-400">
+                        <li class="flex gap-x-2"><span class="text-green-400">&#10003;</span> H1 trend down, entry EMA cross confirmed</li>
+                        <li class="flex gap-x-2"><span class="text-green-400">&#10003;</span> ADX 31.4, trend present</li>
+                        <li class="flex gap-x-2"><span class="text-green-400">&#10003;</span> RSI 42.1 and MACD histogram below zero</li>
+                        <li class="flex gap-x-2"><span class="text-gray-500">&ndash;</span> Session: London/New York overlap</li>
+                    </ul>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- Features Section -->
-    <section class="py-24 bg-gray-900/50">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="text-center mb-16">
-                <h2 class="text-3xl sm:text-4xl font-bold text-white mb-4">Powerful Trading Features</h2>
-                <p class="text-gray-400 max-w-2xl mx-auto">Signal capture, AI review, risk-based sizing and position management &mdash; on forex, metals, indices and crypto.</p>
+    <!-- Proof strip -->
+    <section class="border-y border-gray-800 bg-gray-900/60">
+        <div class="mx-auto grid max-w-7xl gap-8 px-4 py-12 sm:px-6 md:grid-cols-3 lg:px-8">
+            <div class="flex gap-x-4">
+                <svg class="mt-0.5 h-6 w-6 shrink-0 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div>
+                    <h2 class="font-semibold text-white">Every signal timestamped, every outcome kept</h2>
+                    <p class="mt-1 text-sm text-gray-400">The record includes the signals that lost and the ones that were never taken, with the reason.</p>
+                </div>
             </div>
-
-            <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-                <!-- Feature 1 -->
-                <div class="p-6 rounded-2xl bg-gray-800/50 border border-gray-700/50 hover:border-yellow-500/30 transition-colors">
-                    <div class="w-12 h-12 rounded-lg bg-yellow-500/10 flex items-center justify-center mb-4">
-                        <svg class="w-6 h-6 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
-                        </svg>
-                    </div>
-                    <h3 class="text-xl font-semibold text-white mb-2">EMA Crossover Strategy</h3>
-                    <p class="text-gray-400">Multi-timeframe trend following with configurable fast/slow EMA periods and ADX filter for high-probability entries.</p>
+            <div class="flex gap-x-4">
+                <svg class="mt-0.5 h-6 w-6 shrink-0 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div>
+                    <h2 class="font-semibold text-white">Confidence is computed, not claimed</h2>
+                    <p class="mt-1 text-sm text-gray-400">The score is the share of factors that agreed at the bar, and the card lists each one that did not.</p>
                 </div>
-
-                <!-- Feature 2 -->
-                <div class="p-6 rounded-2xl bg-gray-800/50 border border-gray-700/50 hover:border-yellow-500/30 transition-colors">
-                    <div class="w-12 h-12 rounded-lg bg-yellow-500/10 flex items-center justify-center mb-4">
-                        <svg class="w-6 h-6 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
-                        </svg>
-                    </div>
-                    <h3 class="text-xl font-semibold text-white mb-2">Advanced Risk Management</h3>
-                    <p class="text-gray-400">ATR-based stop losses, configurable risk percentage per trade, and maximum daily loss limits to protect your capital.</p>
-                </div>
-
-                <!-- Feature 3 -->
-                <div class="p-6 rounded-2xl bg-gray-800/50 border border-gray-700/50 hover:border-yellow-500/30 transition-colors">
-                    <div class="w-12 h-12 rounded-lg bg-yellow-500/10 flex items-center justify-center mb-4">
-                        <svg class="w-6 h-6 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/>
-                        </svg>
-                    </div>
-                    <h3 class="text-xl font-semibold text-white mb-2">3-Level Take Profit</h3>
-                    <p class="text-gray-400">Lock in profits progressively with TP1, TP2, and TP3 levels. Partial close percentages ensure you never miss a winning trade.</p>
-                </div>
-
-                <!-- Feature 4 -->
-                <div class="p-6 rounded-2xl bg-gray-800/50 border border-gray-700/50 hover:border-yellow-500/30 transition-colors">
-                    <div class="w-12 h-12 rounded-lg bg-yellow-500/10 flex items-center justify-center mb-4">
-                        <svg class="w-6 h-6 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                        </svg>
-                    </div>
-                    <h3 class="text-xl font-semibold text-white mb-2">Session Filters</h3>
-                    <p class="text-gray-400">Trade only during optimal market sessions - Asian, London, New York, or the high-volatility overlap periods.</p>
-                </div>
-
-                <!-- Feature 5 -->
-                <div class="p-6 rounded-2xl bg-gray-800/50 border border-gray-700/50 hover:border-yellow-500/30 transition-colors">
-                    <div class="w-12 h-12 rounded-lg bg-yellow-500/10 flex items-center justify-center mb-4">
-                        <svg class="w-6 h-6 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
-                        </svg>
-                    </div>
-                    <h3 class="text-xl font-semibold text-white mb-2">Real-time Analytics</h3>
-                    <p class="text-gray-400">Track your performance with detailed P&L breakdown, win rate statistics, and daily equity charts.</p>
-                </div>
-
-                <!-- Feature 6 -->
-                <div class="p-6 rounded-2xl bg-gray-800/50 border border-gray-700/50 hover:border-yellow-500/30 transition-colors">
-                    <div class="w-12 h-12 rounded-lg bg-yellow-500/10 flex items-center justify-center mb-4">
-                        <svg class="w-6 h-6 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-                        </svg>
-                    </div>
-                    <h3 class="text-xl font-semibold text-white mb-2">Trade Screenshots</h3>
-                    <p class="text-gray-400">Automatically capture chart screenshots at entry and exit for post-trade analysis and strategy refinement.</p>
+            </div>
+            <div class="flex gap-x-4">
+                <svg class="mt-0.5 h-6 w-6 shrink-0 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                </svg>
+                <div>
+                    <h2 class="font-semibold text-white">Your broker, your account, your risk</h2>
+                    <p class="mt-1 text-sm text-gray-400">Auto-trade runs on your own MetaTrader 5. Funds never leave your account, and you set the size of every position.</p>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- CTA Section -->
+    <!-- How it works -->
     <section class="py-24">
-        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-            <h2 class="text-3xl sm:text-4xl font-bold text-white mb-6">Ready to Start Trading?</h2>
-            <p class="text-xl text-gray-400 mb-10">
-                @if(Route::has('register'))
-                    Join FXSignalPro and put every signal through the same checks before it reaches your account.
-                @else
-                    Sign in to see what each of your channels has actually been worth.
-                @endif
-            </p>
-            @guest
-                <a href="{{ Route::has('register') ? route('register') : route('login') }}" class="inline-flex items-center px-8 py-4 rounded-lg bg-yellow-500 text-gray-900 font-semibold text-lg hover:bg-yellow-400 transition-colors shadow-lg shadow-yellow-500/25">
-                    {{ Route::has('register') ? 'Create Free Account' : 'Sign In' }}
-                    <svg class="ml-2 w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
-                    </svg>
-                </a>
-            @endguest
+        <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div class="max-w-2xl">
+                <h2 class="text-3xl font-bold tracking-tight text-white sm:text-4xl">How it works</h2>
+                <p class="mt-3 text-gray-400">Three steps, and none of them asks you to trust a number you cannot check.</p>
+            </div>
+
+            <div class="mt-12 grid gap-6 md:grid-cols-3">
+                <div class="rounded-xl border border-gray-700 bg-gray-800 p-6">
+                    <span class="inline-flex h-9 w-9 items-center justify-center rounded-md bg-yellow-500/10 font-mono text-sm font-semibold text-yellow-400">1</span>
+                    <h3 class="mt-4 text-lg font-semibold text-white">Signals arrive with their reasoning</h3>
+                    <p class="mt-2 text-sm leading-relaxed text-gray-400">
+                        On each bar close the strategy reads the trend, momentum and volatility of Gold and the majors. When enough agrees, a signal is written with its zone, stop, targets, and the factors it was scored on.
+                    </p>
+                </div>
+                <div class="rounded-xl border border-gray-700 bg-gray-800 p-6">
+                    <span class="inline-flex h-9 w-9 items-center justify-center rounded-md bg-yellow-500/10 font-mono text-sm font-semibold text-yellow-400">2</span>
+                    <h3 class="mt-4 text-lg font-semibold text-white">Read the card, or let it trade</h3>
+                    <p class="mt-2 text-sm leading-relaxed text-gray-400">
+                        The card tells you the order to place against the price now: enter at market, set a limit, or wait. Or connect your MetaTrader 5 and let auto-trade place it, sized to the risk you set and protected as it moves.
+                    </p>
+                </div>
+                <div class="rounded-xl border border-gray-700 bg-gray-800 p-6">
+                    <span class="inline-flex h-9 w-9 items-center justify-center rounded-md bg-yellow-500/10 font-mono text-sm font-semibold text-yellow-400">3</span>
+                    <h3 class="mt-4 text-lg font-semibold text-white">See what each source is worth</h3>
+                    <p class="mt-2 text-sm leading-relaxed text-gray-400">
+                        Every outcome is kept against the signal that produced it, for the AI and for every Telegram provider you follow. Win rate, profit factor and drawdown per source, on the same rules for all of them.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing -->
+    <section class="border-t border-gray-800 bg-gray-900/60 py-24" id="pricing">
+        <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div class="max-w-2xl">
+                <h2 class="text-3xl font-bold tracking-tight text-white sm:text-4xl">Pricing</h2>
+                <p class="mt-3 text-gray-400">Start on the free plan. Pricing for Pro and Auto is announced at launch.</p>
+            </div>
+
+            <div class="mt-12 grid gap-6 lg:grid-cols-3">
+                <!-- Free -->
+                <div class="flex flex-col rounded-xl border border-gray-700 bg-gray-800 p-6">
+                    <h3 class="text-lg font-semibold text-white">Free</h3>
+                    <p class="mt-1 text-sm text-gray-500">See what the signals look like before paying for them.</p>
+                    <p class="mt-6 text-2xl font-semibold text-white">$0</p>
+                    <ul class="mt-6 flex-1 space-y-3 text-sm text-gray-300">
+                        <li class="flex gap-x-3"><span class="text-yellow-400">&#10003;</span> Gold signals, 30 minutes delayed</li>
+                        <li class="flex gap-x-3"><span class="text-yellow-400">&#10003;</span> Signal history with every outcome</li>
+                        <li class="flex gap-x-3"><span class="text-yellow-400">&#10003;</span> 1 provider, recording only</li>
+                    </ul>
+                    @auth
+                        <a href="{{ route('dashboard') }}" class="mt-8 block rounded-md border border-gray-600 px-4 py-2.5 text-center text-sm font-semibold text-white transition-colors hover:border-gray-500 hover:bg-gray-700/60">Go to Dashboard</a>
+                    @else
+                        <a href="{{ $ctaHref }}" class="mt-8 block rounded-md border border-gray-600 px-4 py-2.5 text-center text-sm font-semibold text-white transition-colors hover:border-gray-500 hover:bg-gray-700/60">{{ $ctaLabel }}</a>
+                    @endauth
+                </div>
+
+                <!-- Pro -->
+                <div class="flex flex-col rounded-xl border border-yellow-500/40 bg-gray-800 p-6 ring-1 ring-yellow-500/20">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-lg font-semibold text-white">Pro</h3>
+                        <span class="rounded bg-yellow-500/10 px-2 py-0.5 text-xs font-semibold text-yellow-400">Real-time</span>
+                    </div>
+                    <p class="mt-1 text-sm text-gray-500">Every signal the moment it fires, on every instrument.</p>
+                    <p class="mt-6 text-sm font-medium text-gray-400">Pricing announced at launch</p>
+                    <ul class="mt-6 flex-1 space-y-3 text-sm text-gray-300">
+                        <li class="flex gap-x-3"><span class="text-yellow-400">&#10003;</span> Real-time AI signals, Gold and the majors</li>
+                        <li class="flex gap-x-3"><span class="text-yellow-400">&#10003;</span> Telegram alerts</li>
+                        <li class="flex gap-x-3"><span class="text-yellow-400">&#10003;</span> Unlimited providers, each scored</li>
+                        <li class="flex gap-x-3"><span class="text-yellow-400">&#10003;</span> Market scan on demand</li>
+                    </ul>
+                    @auth
+                        <a href="{{ route('dashboard') }}" class="mt-8 block rounded-md bg-yellow-500 px-4 py-2.5 text-center text-sm font-semibold text-gray-900 transition-colors hover:bg-yellow-400">Go to Dashboard</a>
+                    @else
+                        <a href="{{ $ctaHref }}" class="mt-8 block rounded-md bg-yellow-500 px-4 py-2.5 text-center text-sm font-semibold text-gray-900 transition-colors hover:bg-yellow-400">{{ $ctaLabel }}</a>
+                    @endauth
+                </div>
+
+                <!-- Auto -->
+                <div class="flex flex-col rounded-xl border border-gray-700 bg-gray-800 p-6">
+                    <h3 class="text-lg font-semibold text-white">Auto</h3>
+                    <p class="mt-1 text-sm text-gray-500">Everything in Pro, placed on your own terminal.</p>
+                    <p class="mt-6 text-sm font-medium text-gray-400">Pricing announced at launch</p>
+                    <ul class="mt-6 flex-1 space-y-3 text-sm text-gray-300">
+                        <li class="flex gap-x-3"><span class="text-yellow-400">&#10003;</span> Everything in Pro</li>
+                        <li class="flex gap-x-3"><span class="text-yellow-400">&#10003;</span> Auto-trade on your own MT5</li>
+                        <li class="flex gap-x-3"><span class="text-yellow-400">&#10003;</span> Copier with review, sizing and protection</li>
+                        <li class="flex gap-x-3"><span class="text-yellow-400">&#10003;</span> Capped AI fund</li>
+                    </ul>
+                    @auth
+                        <a href="{{ route('dashboard') }}" class="mt-8 block rounded-md border border-gray-600 px-4 py-2.5 text-center text-sm font-semibold text-white transition-colors hover:border-gray-500 hover:bg-gray-700/60">Go to Dashboard</a>
+                    @else
+                        <a href="{{ $ctaHref }}" class="mt-8 block rounded-md border border-gray-600 px-4 py-2.5 text-center text-sm font-semibold text-white transition-colors hover:border-gray-500 hover:bg-gray-700/60">{{ $ctaLabel }}</a>
+                    @endauth
+                </div>
+            </div>
         </div>
     </section>
 
     <!-- Footer -->
     <footer class="border-t border-gray-800 py-12">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex flex-col md:flex-row items-center justify-between">
-                <div class="flex items-center space-x-3 mb-4 md:mb-0">
-                    <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-yellow-400 to-yellow-600">
-                        <svg class="w-4 h-4 text-gray-900" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-                        </svg>
-                    </div>
-                    <span class="text-lg font-semibold text-white">FXSignalPro</span>
-                </div>
-                <p class="text-gray-500 text-sm">
-                    &copy; {{ date('Y') }} FXSignalPro. Personal trading bot dashboard.
+        <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div class="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+                <p class="text-lg font-bold tracking-tight text-white">FX<span class="text-yellow-400">Signal</span>Pro</p>
+                <p class="max-w-2xl text-sm leading-relaxed text-gray-500">
+                    Signals are for trading education only and are not financial advice. Trading leveraged
+                    instruments can lose more than the amount deposited.
                 </p>
             </div>
+            <p class="mt-8 text-xs text-gray-600">&copy; {{ date('Y') }} FXSignalPro.</p>
         </div>
     </footer>
 </body>

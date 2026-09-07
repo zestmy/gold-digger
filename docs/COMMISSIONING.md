@@ -105,7 +105,7 @@ own checkbox is separate.
 In order. Each step depends on the one before it, so stop at the first that fails.
 
 **Heartbeat.** The dashboard's Bot Status card should read ONLINE within a few seconds. If it
-says BLOCKED, Algo Trading is off somewhere. If it never changes, check `/logs` — the EA
+says BLOCKED, Algo Trading is off somewhere. If it never changes, check `/settings/activity` — the EA
 reports there before anything else works, so silence means it is not reaching the API at all.
 
 **Symbol truth.** The card shows the resolved symbol (`XAUUSDm`, `XAUUSD.a`, …). That resolved

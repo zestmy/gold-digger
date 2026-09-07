@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Pages;
 
+use App\Livewire\Dashboard\AiAnalysisCard;
 use App\Livewire\Pages\LiveTrades;
 use App\Livewire\Pages\Signals as SignalsPage;
 use App\Models\BotHeartbeat;
@@ -79,6 +80,24 @@ class SignalsAndTradesPageTest extends TestCase
             'was_executed' => false,
             'generated_at' => Carbon::parse('2026-03-10 13:00:00', 'UTC')->addMinutes($bar * 5),
         ], $overrides));
+    }
+
+    /**
+     * Overrides that turn the default gold signal into a major: anything not priced in
+     * XAU is what the "Majors" chip means.
+     *
+     * @return array<string, mixed>
+     */
+    private function major(array $overrides = []): array
+    {
+        return array_merge([
+            'symbol' => 'EURUSD',
+            'entry_price' => 1.1000,
+            'sl_price' => 1.0950,
+            'tp1_price' => 1.1050,
+            'tp2_price' => 1.1100,
+            'tp3_price' => 1.1200,
+        ], $overrides);
     }
 
     private function openTrade(array $overrides = []): Trade
@@ -216,7 +235,11 @@ class SignalsAndTradesPageTest extends TestCase
         $this->get(route('signals'))
             ->assertOk()
             ->assertSee('Signals')
-            ->assertSee('Price feed');
+            ->assertSee('Price feed')
+            // The feed offers the scan, and the tab strip names the page's siblings.
+            ->assertSee('Scan markets')
+            ->assertSee('Market scan')
+            ->assertSee('Why declined signals are recorded');
     }
 
     public function test_the_live_trades_route_renders(): void
@@ -289,6 +312,41 @@ class SignalsAndTradesPageTest extends TestCase
         $this->assertNull($rows->first()->skip_reason);
     }
 
+    public function test_the_feed_can_be_narrowed_to_gold_or_to_everything_else(): void
+    {
+        $this->signal();
+        $this->signal($this->major());
+
+        $page = Livewire::test(SignalsPage::class);
+
+        $gold = $page->set('instrument', 'gold')->viewData('signals');
+        $this->assertCount(1, $gold);
+        $this->assertSame(self::SYMBOL, $gold->first()->symbol);
+
+        $majors = $page->set('instrument', 'majors')->viewData('signals');
+        $this->assertCount(1, $majors);
+        $this->assertSame('EURUSD', $majors->first()->symbol);
+
+        $this->assertCount(2, $page->set('instrument', 'all')->viewData('signals'));
+    }
+
+    /**
+     * The reason chips describe the slice on screen. Counting the whole pile beside a
+     * gold-only list would have the chips and the rows disagree.
+     */
+    public function test_the_reason_counts_follow_the_instrument_chip(): void
+    {
+        $this->signal(['skip_reason' => 'adx_below_threshold']);
+        $this->signal($this->major(['skip_reason' => 'session_closed']));
+
+        $byReason = Livewire::test(SignalsPage::class)
+            ->set('instrument', 'gold')
+            ->viewData('byReason');
+
+        $this->assertArrayHasKey('adx_below_threshold', $byReason);
+        $this->assertArrayNotHasKey('session_closed', $byReason);
+    }
+
     /**
      * An accepted signal with no fill yet is a real state - the command can still expire or
      * be rejected - and must not look like a gap in the record.
@@ -307,7 +365,7 @@ class SignalsAndTradesPageTest extends TestCase
         $this->signal(['was_executed' => true, 'resulting_trade_id' => $trade->id]);
 
         Livewire::test(SignalsPage::class)
-            ->assertSee('Traded')
+            ->assertSee('TRADED')
             ->assertSee((string) $trade->mt5_ticket);
     }
 
@@ -379,6 +437,99 @@ class SignalsAndTradesPageTest extends TestCase
             ->assertSee('Selected signal')
             // The sell is now on the card, with price through its stop.
             ->assertSee('INVALIDATED');
+    }
+
+    /**
+     * The Home page links straight to one row. The selection is in the URL so that works,
+     * and so a card somebody is looking at can be handed to somebody else.
+     */
+    public function test_a_row_can_be_deep_linked_from_the_url(): void
+    {
+        $this->feedAt(2000.00);
+
+        $older = $this->signal(['direction' => 'sell', 'entry_price' => 1990.00, 'sl_price' => 1995.00,
+            'tp1_price' => 1987.00, 'tp2_price' => 1980.00, 'tp3_price' => 1970.00,
+            'generated_at' => now()->subMinutes(3)]);
+        $this->signal(['generated_at' => now()->subMinutes(1)]);
+
+        Livewire::withQueryParams(['selected' => $older->id])
+            ->test(SignalsPage::class)
+            ->assertSet('selected', $older->id)
+            ->assertSee('Selected signal')
+            ->assertSee('INVALIDATED');
+    }
+
+    /**
+     * A link to a signal that is not this user's shows the newest of theirs instead, and
+     * says so - "Selected" over a card nobody selected would be the page lying.
+     */
+    public function test_a_deep_link_to_another_users_signal_falls_back_to_the_newest(): void
+    {
+        $other = User::factory()->create();
+        $otherStrategy = Strategy::acrossTenants()->where('user_id', $other->id)->firstOrFail();
+
+        $theirs = Signal::create([
+            'strategy_id' => $otherStrategy->id,
+            'symbol' => 'GBPUSD',
+            'timeframe' => 'M5',
+            'direction' => 'sell',
+            'entry_price' => 1.3,
+            'sl_price' => 1.31,
+            'generated_at' => now(),
+        ]);
+        $this->signal(['generated_at' => now()->subMinutes(5)]);
+
+        Livewire::withQueryParams(['selected' => $theirs->id])
+            ->test(SignalsPage::class)
+            ->assertSee('Latest signal')
+            ->assertDontSee('Selected signal')
+            ->assertDontSee('GBPUSD');
+    }
+
+    /**
+     * Each row carries the verdict its card would give, computed the same way, so the list
+     * never says "enter now" beside a card that says "too late" for the same signal.
+     */
+    public function test_each_feed_row_reads_the_way_its_card_would(): void
+    {
+        $this->feedAt(2001.00);
+        $trade = $this->openTrade();
+
+        $this->signal(['skip_reason' => 'adx_below_threshold', 'generated_at' => now()->subMinutes(3)]);
+        $this->signal(['was_executed' => true, 'resulting_trade_id' => $trade->id, 'generated_at' => now()->subMinutes(2)]);
+        // Accepted, unfilled, zone below the last close: a limit order is the call.
+        $this->signal([
+            'generated_at' => now()->subMinute(),
+            'features' => [
+                'adx' => 30.5, 'atr' => 3.2, 'sl_pips' => 48, 'trend_direction' => 'buy',
+                'entry_zone_low' => 1999.20, 'entry_zone_high' => 2000.30,
+                'valid_until' => now()->addMinutes(5)->toIso8601String(),
+                'quality' => ['confidence' => 78, 'grade' => 'B', 'risk' => 'MEDIUM', 'entry_status' => 'CAN ENTRY NOW',
+                    'tradeable' => true, 'confluence' => 5.0, 'possible' => 6.5, 'directional' => 3.5, 'why' => '', 'factors' => []],
+            ],
+        ]);
+
+        Livewire::test(SignalsPage::class)
+            ->assertSee('HELD')
+            ->assertSee('Trend too weak')
+            ->assertSee('TRADED')
+            ->assertSee((string) $trade->mt5_ticket)
+            ->assertSee('In flight')
+            ->assertSee('SET LIMIT ORDER')
+            ->assertSee('1,999.20')
+            ->assertSee('78%')
+            ->assertSee('R:R');
+    }
+
+    /**
+     * Prose about the market belongs beside the signals it is about, not on Home.
+     */
+    public function test_the_written_analysis_sits_under_the_feed(): void
+    {
+        $this->signal();
+
+        Livewire::test(SignalsPage::class)
+            ->assertSeeLivewire(AiAnalysisCard::class);
     }
 
     /**

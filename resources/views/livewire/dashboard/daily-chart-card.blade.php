@@ -5,11 +5,11 @@
     No chart library: nothing to load, and it works under the dashboard's CSP.
 --}}
 
-<div class="rounded-lg bg-gray-800 p-6">
+<div class="rounded-lg border border-gray-700 bg-gray-800 p-6">
     <div class="flex items-start justify-between gap-4">
         <div>
-            <h3 class="text-lg font-semibold text-white">Equity Curve</h3>
-            <p class="mt-0.5 text-xs text-gray-500">Cumulative net P&amp;L, last {{ $days }} days</p>
+            <h3 class="text-sm font-medium text-gray-400">Last {{ $days }} days</h3>
+            <p class="mt-0.5 text-xs text-gray-500">Cumulative net P&amp;L on settled trades</p>
         </div>
 
         @if($geometry)
@@ -85,4 +85,30 @@
             <p class="mt-1 text-xs text-gray-600">The curve appears once trades start settling.</p>
         </div>
     @endif
+
+    {{-- The month in three numbers, on the same definitions the Performance tab uses. --}}
+    <dl class="mt-4 grid grid-cols-3 gap-3 border-t border-gray-700 pt-4 text-center">
+        <div>
+            <dt class="text-xs text-gray-500">Trades</dt>
+            <dd class="mt-0.5 text-lg font-semibold tabular-nums text-white">{{ $summary['trades'] }}</dd>
+        </div>
+        <div>
+            <dt class="text-xs text-gray-500">Win rate</dt>
+            <dd class="mt-0.5 text-lg font-semibold tabular-nums text-white">
+                {{ $summary['win_rate'] === null ? '—' : rtrim(rtrim(number_format($summary['win_rate'], 1), '0'), '.').'%' }}
+            </dd>
+        </div>
+        <div>
+            <dt class="text-xs text-gray-500">Profit factor</dt>
+            <dd class="mt-0.5 text-lg font-semibold tabular-nums text-white">
+                @if($summary['profit_factor'] !== null)
+                    {{ number_format($summary['profit_factor'], 2) }}
+                @elseif($summary['trades'] > 0)
+                    <span class="text-sm font-normal text-green-400">no losses</span>
+                @else
+                    —
+                @endif
+            </dd>
+        </div>
+    </dl>
 </div>

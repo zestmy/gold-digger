@@ -1,9 +1,33 @@
 <div>
     <x-slot name="header">
-        Setup
+        Auto-Trade
     </x-slot>
 
+    <x-page-tabs group="auto-trade" />
+
     <div class="mx-auto max-w-3xl space-y-8">
+        <!-- Intro, with the one switch somebody comes back here for -->
+        <div class="flex flex-wrap items-start justify-between gap-4">
+            <div>
+                <h2 class="text-xl font-semibold text-gray-100">How a signal becomes a trade on your MT5</h2>
+                <p class="mt-1 text-sm text-gray-400">
+                    Four things have to be true, in this order. Each is checked live rather than remembered.
+                </p>
+            </div>
+
+            {{-- The same flag the risk tab's master switch flips. Coloured by state so
+                 "is it on?" is answered from across the room. --}}
+            <button type="button" wire:click="toggleAutoTrade"
+                    class="inline-flex shrink-0 items-center gap-x-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-offset-2 focus:ring-offset-gray-900
+                        {{ $autoTrade
+                            ? 'border-green-500/40 bg-green-500/10 text-green-400 hover:bg-green-500/20'
+                            : 'border-gray-600 bg-gray-800 text-gray-400 hover:bg-gray-700' }}"
+                    title="{{ $autoTrade ? 'Switch auto-trade off' : 'Switch auto-trade on' }}">
+                <span class="h-2 w-2 rounded-full {{ $autoTrade ? 'bg-green-400' : 'bg-gray-500' }}"></span>
+                Auto-trade {{ $autoTrade ? 'on' : 'off' }}
+            </button>
+        </div>
+
         <!-- Progress -->
         <div>
             <ol class="flex items-start">
@@ -44,8 +68,13 @@
             <div class="rounded-lg border border-green-500/30 bg-green-900/20 p-6 text-center">
                 <h3 class="text-base font-medium text-green-400">Everything is connected.</h3>
                 <p class="mt-2 text-sm text-gray-300">
-                    Signals are captured, reviewed and executed without anyone present. Every order is
-                    announced on Telegram as it happens.
+                    @if($autoTrade)
+                        Signals are captured, reviewed and executed without anyone present. Every order is
+                        announced on Telegram as it happens.
+                    @else
+                        Switch auto-trade on above and signals will be captured, reviewed and executed
+                        without anyone present. Every order is announced on Telegram as it happens.
+                    @endif
                 </p>
                 <a href="{{ route('signals.channels') }}" class="mt-4 inline-block text-sm text-yellow-500 hover:text-yellow-400">
                     Watch what each channel is worth &rarr;
@@ -57,12 +86,12 @@
         @php($active = $steps[$current] ?? null)
 
         @if($active)
-            <div class="rounded-lg bg-gray-800 p-8">
+            <div class="rounded-lg border border-gray-700 bg-gray-800 p-8">
                 <div class="flex flex-wrap items-start justify-between gap-3">
                     <h2 class="text-xl font-semibold text-gray-100">{{ $active['title'] }}</h2>
 
                     <span class="rounded px-2 py-1 text-xs font-medium {{ $active['done'] ? 'bg-green-400/10 text-green-400' : 'bg-gray-700 text-gray-400' }}">
-                        {{ $active['done'] ? 'Done' : 'Not yet' }}
+                        {{ $active['done'] ? 'Ready' : 'Not yet' }}
                     </span>
                 </div>
 
@@ -70,35 +99,50 @@
 
                 <p class="mt-4 text-sm leading-relaxed text-gray-300">{{ $active['blurb'] }}</p>
 
-                <a href="{{ route($active['route']) }}"
-                   class="mt-6 inline-block rounded-md bg-yellow-500 px-5 py-2.5 text-sm font-medium text-gray-900 hover:bg-yellow-400">
-                    {{ $active['action'] }}
-                </a>
+                <div class="mt-6 flex flex-wrap items-center gap-3">
+                    <a href="{{ route($active['route']) }}"
+                       class="inline-block rounded-md bg-yellow-500 px-5 py-2.5 text-sm font-medium text-gray-900 hover:bg-yellow-400">
+                        {{ $active['action'] }} &rarr;
+                    </a>
+
+                    @foreach($active['links'] as [$label, $route])
+                        <a href="{{ route($route) }}"
+                           class="inline-block rounded-md border border-gray-600 px-4 py-2.5 text-sm text-gray-300 hover:bg-gray-700">
+                            {{ $label }}
+                        </a>
+                    @endforeach
+                </div>
             </div>
         @endif
 
         <!-- Everything, at a glance -->
-        <div class="rounded-lg bg-gray-800/50 p-6">
+        <div class="rounded-lg border border-gray-700 bg-gray-800/50 p-6">
             <h3 class="text-sm font-medium text-gray-400">All four</h3>
 
             <ul class="mt-3 divide-y divide-gray-700 border-t border-gray-700">
                 @foreach($steps as $index => $step)
                     <li class="flex flex-wrap items-center justify-between gap-2 py-3">
                         <div class="min-w-0">
-                            <button type="button" wire:click="$set('step', {{ $index }})"
-                                    class="text-sm {{ $step['done'] ? 'text-gray-300' : 'text-gray-100' }} hover:text-yellow-500">
-                                {{ $step['title'] }}
-                            </button>
+                            <div class="flex items-center gap-x-2">
+                                <button type="button" wire:click="$set('step', {{ $index }})"
+                                        class="text-sm {{ $step['done'] ? 'text-gray-300' : 'text-gray-100' }} hover:text-yellow-500">
+                                    {{ $step['title'] }}
+                                </button>
+                                <span class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide {{ $step['done'] ? 'bg-green-400/10 text-green-400' : 'bg-gray-700 text-gray-400' }}">
+                                    {{ $step['done'] ? 'ready' : 'not yet' }}
+                                </span>
+                            </div>
                             <p class="text-xs text-gray-500">{{ $step['detail'] }}</p>
                         </div>
 
-                        @if($step['done'])
-                            <span class="shrink-0 text-xs text-green-400">ready</span>
-                        @else
-                            <a href="{{ route($step['route']) }}" class="shrink-0 text-xs text-yellow-500 hover:text-yellow-400">
+                        <div class="flex shrink-0 items-center gap-x-3 text-xs">
+                            @foreach($step['links'] as [$label, $route])
+                                <a href="{{ route($route) }}" class="text-gray-400 hover:text-gray-200">{{ $label }}</a>
+                            @endforeach
+                            <a href="{{ route($step['route']) }}" class="text-yellow-500 hover:text-yellow-400">
                                 {{ $step['action'] }} &rarr;
                             </a>
-                        @endif
+                        </div>
                     </li>
                 @endforeach
             </ul>

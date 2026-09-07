@@ -4,6 +4,8 @@ namespace App\Livewire\Pages;
 
 use App\Models\BotHeartbeat;
 use App\Models\BotSettings;
+use App\Models\BotToken;
+use App\Models\BrokerAccount;
 use App\Models\TelegramChannel;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
@@ -12,11 +14,11 @@ use Livewire\Attributes\Url;
 use Livewire\Component;
 
 /**
- * Setup
+ * Connection
  *
- * The four things that have to be true before a copied signal can become a position,
- * in the order they have to become true, with the state of each read from the system
- * rather than from a checkbox somebody ticked.
+ * How a signal becomes a trade on the subscriber's own MT5: the four things that have to
+ * be true first, in the order they have to become true, with the state of each read from
+ * the system rather than from a checkbox somebody ticked.
  *
  * ## Why the steps are derived, not stored
  *
@@ -32,16 +34,43 @@ use Livewire\Component;
  * beside the terminal, and it means a company holds a credential that can trade your
  * account.
  *
- * Step three here asks for nothing of the kind. A token this dashboard issued goes into an
- * Expert Advisor you run, and it can be revoked from the page that issued it. The trade-off
- * is real and runs the other way: you supply the terminal.
+ * The terminal step here asks for nothing of the kind. A token this dashboard issued goes
+ * into an Expert Advisor you run, and it can be revoked from the page that issued it. The
+ * trade-off is real and runs the other way: you supply the terminal.
+ *
+ * ## The switch at the top
+ *
+ * Auto-trade on or off is the one control somebody comes back to this page for after the
+ * four steps are done, so it sits in the header rather than four cards down on the risk
+ * tab. It is the same flag the risk tab's master switch flips - `BotSettings.is_active` -
+ * and flipping it here is no more or less ceremonious than flipping it there.
  */
 #[Layout('layouts.app')]
-#[Title('Setup - FXSignalPro')]
+#[Title('Auto-Trade - FXSignalPro')]
 class Setup extends Component
 {
     #[Url]
     public ?int $step = null;
+
+    /**
+     * Flip auto-trade, exactly as the risk tab's master switch does.
+     *
+     * `firstOrCreate` rather than `botSettings->update`: a user created outside
+     * registration has no row until something writes one, and a switch that cannot be
+     * turned on because it was never turned on is a locked door.
+     */
+    public function toggleAutoTrade(): void
+    {
+        $settings = BotSettings::firstOrCreate(['user_id' => Auth::id()]);
+
+        $settings->update(['is_active' => ! $settings->is_active]);
+
+        $this->dispatch(
+            'notify',
+            message: $settings->is_active ? 'Auto-trade is on.' : 'Auto-trade is off.',
+            type: 'success',
+        );
+    }
 
     /**
      * @return array<int, array<string, mixed>>
@@ -50,11 +79,16 @@ class Setup extends Component
     {
         $userId = (int) Auth::id();
 
+        $account = BrokerAccount::where('user_id', $userId)->where('is_active', true)->first();
+        $accounts = BrokerAccount::where('user_id', $userId)->count();
+
+        $hasToken = BotToken::where('user_id', $userId)->exists();
+        $heartbeat = BotHeartbeat::where('user_id', $userId)->orderByDesc('last_seen_at')->first();
+
         $channels = TelegramChannel::where('user_id', $userId);
         $enabled = (clone $channels)->where('is_enabled', true)->count();
         $known = $channels->count();
 
-        $heartbeat = BotHeartbeat::where('user_id', $userId)->orderByDesc('last_seen_at')->first();
         $settings = BotSettings::where('user_id', $userId)->first();
 
         $capSet = $settings !== null
@@ -64,34 +98,31 @@ class Setup extends Component
 
         return [
             [
-                'title' => 'Signal source',
-                'done' => $known > 0,
-                'detail' => $known > 0
-                    ? "{$known} channels visible to the collector."
-                    : 'No collector has reported in yet.',
-                'blurb' => 'Signals are read by a collector signed in as your own Telegram account, which is what lets it '
-                    .'see provider channels rather than only chats a bot was added to. It runs on a machine you choose and '
-                    .'keeps its session there, because that session can read every chat you have.',
-                'action' => 'Collector setup',
-                'route' => 'terminal',
-            ],
-            [
-                'title' => 'Channels',
-                'done' => $enabled > 0,
-                'detail' => $enabled > 0
-                    ? "{$enabled} enabled of {$known}."
-                    : ($known > 0 ? 'None enabled yet.' : 'Nothing to choose from yet.'),
-                'blurb' => 'Every channel the collector can see is listed, and all of them start switched off. Enable the '
-                    .'ones you want traded; the rest keep being recorded so you can compare them before committing. Each '
-                    .'channel can also carry its own risk, levels and instrument list.',
-                'action' => 'Choose channels',
-                'route' => 'signals.channels',
+                'title' => 'Broker account',
+                'done' => $account !== null,
+                'detail' => match (true) {
+                    $account !== null => sprintf(
+                        '%s on %s, %s.',
+                        $account->label,
+                        $account->server,
+                        $account->is_demo ? 'demo' : 'live',
+                    ),
+                    $accounts > 0 => "{$accounts} added, none marked active.",
+                    default => 'No broker account added yet.',
+                },
+                'blurb' => 'The MT5 account your terminal is logged into. The dashboard needs its number and '
+                    .'server to tell one terminal\'s fills from another\'s, and nothing more - no password is '
+                    .'asked for, because nothing here logs in as you.',
+                'action' => 'Broker accounts',
+                'route' => 'broker-accounts',
+                'links' => [],
             ],
             [
                 'title' => 'Terminal',
                 'done' => $heartbeat !== null && $heartbeat->isOnline(),
                 'detail' => match (true) {
-                    $heartbeat === null => 'No terminal has ever connected.',
+                    $heartbeat === null && ! $hasToken => 'No token issued, no terminal has connected.',
+                    $heartbeat === null => 'Token issued; waiting for the terminal\'s first report.',
                     ! $heartbeat->isOnline() => 'Last seen '.$heartbeat->last_seen_at?->diffForHumans().'.',
                     ! $heartbeat->algo_trading_enabled => 'Online, but Algo Trading is off - every order would be refused.',
                     default => 'Online, carrying '.($heartbeat->resolved_symbol ?? 'an instrument').'.',
@@ -99,28 +130,63 @@ class Setup extends Component
                 'blurb' => 'Orders are placed by an Expert Advisor running in your own MetaTrader terminal. Download it, '
                     .'paste in a token issued here, and leave the terminal running - on a VPS if you want it trading around '
                     .'the clock. No broker password is stored anywhere, and revoking the token stops it immediately.',
-                'action' => 'Connect a terminal',
+                'action' => 'Terminal',
                 'route' => 'terminal',
+                // Offered only once a token exists: the archive is useless without one to
+                // paste into it, and offering the download first sends people the wrong way.
+                'links' => $hasToken ? [['Download EA', 'terminal.download']] : [],
+            ],
+            [
+                'title' => 'Signal sources',
+                'done' => $enabled > 0,
+                'detail' => match (true) {
+                    $enabled > 0 => "{$enabled} enabled of {$known}.",
+                    $known > 0 => "{$known} visible, none enabled yet.",
+                    default => 'No provider channels visible yet.',
+                },
+                'blurb' => 'Every channel the collector can see is listed under Providers, and all of them start '
+                    .'switched off. Enable the ones you want traded; the rest keep being recorded so you can compare '
+                    .'them before committing. Each channel can also carry its own risk, levels and instrument list.',
+                'action' => 'Providers',
+                'route' => 'signals.channels',
+                'links' => [],
             ],
             [
                 'title' => 'Risk',
                 'done' => $capSet,
-                'detail' => $capSet
-                    ? sprintf(
-                        '%s fund at %s%% - %s a trade%s.',
-                        number_format((float) $settings->ai_capital_cap, 2),
-                        rtrim(rtrim((string) $settings->ai_risk_percentage, '0'), '.'),
-                        number_format((float) $settings->ai_capital_cap * (float) $settings->ai_risk_percentage / 100, 2),
-                        $settings->ai_max_trades_per_day ? ", max {$settings->ai_max_trades_per_day} a day" : '',
-                    )
-                    : 'No fund cap set, so nothing can be sized.',
-                'blurb' => 'Positions are sized from a fund you set aside rather than from the account balance, so the cap '
-                    .'is the most that can ever be lost here. The daily limit bounds how quickly it can be spent. An order '
-                    .'too large for what is left is refused rather than rounded up to fit.',
-                'action' => 'Set the fund',
+                'detail' => $settings === null
+                    ? 'No risk settings saved yet.'
+                    : self::riskSummary($settings),
+                'blurb' => 'Positions are sized from a fund you set aside rather than from the account balance, so the '
+                    .'cap is the most that can ever be lost here. The daily stop bounds how quickly it can be spent. An '
+                    .'order too large for what is left is refused rather than rounded up to fit.',
+                'action' => 'Risk & filters',
                 'route' => 'settings',
+                'links' => [],
             ],
         ];
+    }
+
+    /**
+     * "x% per trade · y% daily stop · fund $z", or "· no fund set" while there is none.
+     *
+     * The three numbers somebody checks before switching auto-trade on, in the order
+     * they matter: how much one trade can lose, how much a day can, how much in total.
+     */
+    public static function riskSummary(BotSettings $settings): string
+    {
+        $pct = fn ($v) => rtrim(rtrim(number_format((float) $v, 2, '.', ''), '0'), '.');
+
+        $fund = $settings->ai_capital_cap !== null && (float) $settings->ai_capital_cap > 0
+            ? 'fund $'.number_format((float) $settings->ai_capital_cap, 2)
+            : 'no fund set';
+
+        return sprintf(
+            '%s%% per trade · %s%% daily stop · %s',
+            $pct($settings->risk_percentage ?? 1),
+            $pct($settings->max_daily_loss_percentage ?? 5),
+            $fund,
+        );
     }
 
     public function render()
@@ -142,6 +208,7 @@ class Setup extends Component
             'steps' => $steps,
             'current' => $this->step !== null && isset($steps[$this->step]) ? $this->step : $current,
             'ready' => $current === null,
+            'autoTrade' => (bool) BotSettings::where('user_id', Auth::id())->value('is_active'),
         ]);
     }
 }

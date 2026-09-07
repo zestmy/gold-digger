@@ -3,6 +3,7 @@
 use App\Http\Middleware\AuthenticateBot;
 use App\Http\Middleware\AuthenticateWorker;
 use App\Http\Middleware\BindWorkerAccount;
+use App\Http\Middleware\EnsureUserIsAdmin;
 use App\Services\Monitoring\ErrorReporter;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -34,6 +35,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'bot.auth' => AuthenticateBot::class,
             'worker.auth' => AuthenticateWorker::class,
             'worker.account' => BindWorkerAccount::class,
+            // Operator-only pages inside the dashboard: the strategy editor and improver.
+            'admin' => EnsureUserIsAdmin::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

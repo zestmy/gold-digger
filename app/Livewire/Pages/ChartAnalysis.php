@@ -17,10 +17,11 @@ use Livewire\Attributes\Url;
 use Livewire\Component;
 
 /**
- * Chart Analysis
+ * Market Scan
  *
  * Scans every instrument there are bars for, ranks them, and proposes the ones worth a
- * look. One of them can then be opened for structure, levels and a plan.
+ * look. One of them can then be opened for structure, levels and a plan. The "Market
+ * scan" tab under Signals.
  *
  * ## Two halves, and only one of them costs anything
  *
@@ -41,7 +42,7 @@ use Livewire\Component;
  * separate deliberate act. Nothing on this page places an order.
  */
 #[Layout('layouts.app')]
-#[Title('Chart Analysis - FXSignalPro')]
+#[Title('Market scan - FXSignalPro')]
 class ChartAnalysis extends Component
 {
     /** Past readings shown beneath. Enough to see a change of mind, few enough to scan. */

@@ -62,7 +62,45 @@ class DailyChartCard extends Component
             'points' => $points,
             'geometry' => $this->geometry($points),
             'days' => self::DAYS,
+            'summary' => $this->summary(),
         ]);
+    }
+
+    /**
+     * The three numbers under the curve: how many trades, how many won, and what the
+     * winners made against what the losers cost.
+     *
+     * The same definitions Analytics uses for the same period, so the card and the
+     * Performance tab never show two win rates for one month. Profit factor is on gross
+     * P&L, as it is there; a factor on net would move with commission and say something
+     * about the broker rather than the strategy.
+     *
+     * @return array{trades: int, win_rate: float|null, profit_factor: float|null}
+     */
+    private function summary(): array
+    {
+        $trades = Trade::where('user_id', Auth::id())
+            ->whereIn('status', Analytics::SETTLED_STATUSES)
+            ->whereNotNull('closed_at')
+            ->where('closed_at', '>=', now()->subDays(self::DAYS)->startOfDay())
+            ->get(['net_pnl_money', 'gross_pnl_money']);
+
+        $count = $trades->count();
+
+        if ($count === 0) {
+            return ['trades' => 0, 'win_rate' => null, 'profit_factor' => null];
+        }
+
+        $grossProfit = (float) $trades->where('gross_pnl_money', '>', 0)->sum('gross_pnl_money');
+        $grossLoss = abs((float) $trades->where('gross_pnl_money', '<', 0)->sum('gross_pnl_money'));
+
+        return [
+            'trades' => $count,
+            'win_rate' => round($trades->where('net_pnl_money', '>', 0)->count() / $count * 100, 1),
+            // Null rather than infinity when nothing has lost yet: "no losses" is a fact
+            // worth stating, and 999.99 is not a number anybody would believe.
+            'profit_factor' => $grossLoss > 0.0 ? round($grossProfit / $grossLoss, 2) : null,
+        ];
     }
 
     /**

@@ -29,7 +29,7 @@ use Livewire\Component;
  * working until you revoke it deliberately.
  */
 #[Layout('layouts.app')]
-#[Title('Terminal Setup - FXSignalPro')]
+#[Title('Terminal - FXSignalPro')]
 class TerminalSetup extends Component
 {
     #[Validate('required|string|max:60')]

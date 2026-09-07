@@ -218,5 +218,5 @@ outcome as well as the procedure. What is left:
 - **Symbol names are not `XAUUSD` everywhere.** `.env.example` hardcodes it; real servers
   publish `XAUUSDm`, `XAUUSD.a`, `GOLD`. The EA resolves at runtime and reports the resolved
   name on every heartbeat — that resolved name is what the strategy must be configured with.
-- **`bot_logs` is now written by the EA.** If `/logs` is silent, the EA is not reaching the
+- **`bot_logs` is now written by the EA.** If `/settings/activity` is silent, the EA is not reaching the
   API at all — that is the first thing to check, not the last.

@@ -24,61 +24,73 @@ use Illuminate\Support\Facades\Route;
 | Web Routes
 |--------------------------------------------------------------------------
 |
-| FXSignalPro Trading Bot Dashboard Routes
+| Six destinations, organised around what a subscriber does rather than how the
+| system is built: read signals, choose providers, watch trades, connect a terminal
+| and set risk, manage the account. Each destination is one menu item; the pages
+| inside it are tabs.
 |
-| All dashboard routes are protected by auth middleware.
-| Guest routes (login, register) are in auth.php.
+| Route NAMES are unchanged from the sixteen-page layout so nothing that links by
+| name moved; only the addresses did, and every old address redirects.
 |
 */
 
-// Landing page - redirects to dashboard if authenticated
 Route::view('/', 'welcome');
 
-// Profile page (from Breeze)
-Route::view('profile', 'profile')
-    ->middleware(['auth'])
-    ->name('profile');
-
-/*
-|--------------------------------------------------------------------------
-| Authenticated Dashboard Routes
-|--------------------------------------------------------------------------
-*/
 Route::middleware(['auth'])->group(function () {
-    // Main Dashboard
+    // Home
     Route::get('/dashboard', Dashboard::class)->name('dashboard');
 
-    // Trades
-    Route::get('/trades/live', LiveTrades::class)->name('trades.live');
-    Route::get('/trades/history', TradeHistory::class)->name('trades.history');
-
-    // Every decision the strategy layer made, including the refusals.
+    // Signals: the system's own, the copied ones, and a scan on demand.
     Route::get('/signals', Signals::class)->name('signals');
-    // Every instrument ranked on measured evidence, then a proposal among the best of
-    // them - on request, and it places nothing.
-    Route::get('/analysis', ChartAnalysis::class)->name('analysis');
-    Route::get('/signals/copier', SignalCopier::class)->name('signals.copier');
-    // Which providers are on, and what each has been worth. Same page, because they are
-    // the same decision.
-    Route::get('/signals/channels', SignalChannels::class)->name('signals.channels');
-    // One collector per account, each with its own token and its own session.
-    Route::get('/signals/accounts', TelegramAccounts::class)->name('signals.accounts');
+    Route::get('/signals/copied', SignalCopier::class)->name('signals.copier');
+    Route::get('/signals/scan', ChartAnalysis::class)->name('analysis');
 
-    // Configuration
-    Route::get('/strategies', Strategies::class)->name('strategies');
-    Route::get('/strategies/improve', StrategyImprover::class)->name('strategies.improve');
-    Route::get('/broker-accounts', BrokerAccounts::class)->name('broker-accounts');
-    // The four things that must be true before a copied signal becomes a position, with
-    // each one's state read from the system rather than remembered.
-    Route::get('/setup', Setup::class)->name('setup');
-    Route::get('/terminal', TerminalSetup::class)->name('terminal');
+    // Providers: which Telegram channels are followed, and the accounts that read them.
+    Route::get('/providers', SignalChannels::class)->name('signals.channels');
+    Route::get('/providers/accounts', TelegramAccounts::class)->name('signals.accounts');
+
+    // Trades: what is open, what happened, what it added up to.
+    Route::get('/trades', LiveTrades::class)->name('trades.live');
+    Route::get('/trades/history', TradeHistory::class)->name('trades.history');
+    Route::get('/trades/performance', Analytics::class)->name('analytics');
+
+    // Auto-Trade: how a signal becomes a position on the subscriber's own terminal.
+    Route::get('/auto-trade', Setup::class)->name('setup');
+    Route::get('/auto-trade/terminal', TerminalSetup::class)->name('terminal');
     // Behind auth: the archive is built per request with this dashboard's URL in it.
-    Route::get('/terminal/download', ExpertAdvisorDownloadController::class)->name('terminal.download');
+    Route::get('/auto-trade/terminal/download', ExpertAdvisorDownloadController::class)->name('terminal.download');
+    Route::get('/auto-trade/accounts', BrokerAccounts::class)->name('broker-accounts');
+    Route::get('/auto-trade/risk', Settings::class)->name('settings');
 
-    // Analytics & Monitoring
-    Route::get('/analytics', Analytics::class)->name('analytics');
-    Route::get('/settings', Settings::class)->name('settings');
-    Route::get('/logs', BotLogs::class)->name('logs');
+    // Settings: the account itself, and what it has been told.
+    Route::view('/settings', 'profile')->name('profile');
+    Route::get('/settings/activity', BotLogs::class)->name('logs');
+
+    // Operator tools. The strategy parameters are the product's, not the subscriber's:
+    // a subscriber chooses instruments and risk, and these pages tune what generates
+    // the signals they receive.
+    Route::middleware('admin')->group(function () {
+        Route::get('/strategies', Strategies::class)->name('strategies');
+        Route::get('/strategies/improve', StrategyImprover::class)->name('strategies.improve');
+    });
+
+    // The addresses these pages used to have. Bookmarks and old alert links keep working.
+    foreach ([
+        '/trades/live' => '/trades',
+        '/analytics' => '/trades/performance',
+        '/analysis' => '/signals/scan',
+        '/signals/copier' => '/signals/copied',
+        '/signals/channels' => '/providers',
+        '/signals/accounts' => '/providers/accounts',
+        '/setup' => '/auto-trade',
+        '/terminal' => '/auto-trade/terminal',
+        '/terminal/download' => '/auto-trade/terminal/download',
+        '/broker-accounts' => '/auto-trade/accounts',
+        '/logs' => '/settings/activity',
+        '/profile' => '/settings',
+    ] as $old => $new) {
+        Route::redirect($old, $new, 301);
+    }
 });
 
 require __DIR__.'/auth.php';

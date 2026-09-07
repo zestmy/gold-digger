@@ -1,11 +1,13 @@
 <div>
     <x-slot name="header">
-        Broker Accounts
+        Auto-Trade
     </x-slot>
+
+    <x-page-tabs group="auto-trade" />
 
     <!-- Header with Add Button -->
     <div class="mb-6 flex items-center justify-between">
-        <p class="text-gray-400">Manage your MT5 broker account connections</p>
+        <p class="text-sm text-gray-400">The MT5 accounts your terminals log into. One is active at a time, and that is the one orders go to.</p>
         <button
             wire:click="openModal"
             class="inline-flex items-center rounded-md bg-yellow-500 px-4 py-2 text-sm font-semibold text-gray-900 shadow-sm hover:bg-yellow-400 transition-colors"

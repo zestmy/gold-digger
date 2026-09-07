@@ -167,6 +167,20 @@ class TelegramAccountsTest extends TestCase
             ->assertSee('CONNECTED');
     }
 
+    /**
+     * The page is a tab under Providers now. The layout supplies the one heading, so the
+     * page itself must not repeat it.
+     */
+    public function test_the_route_renders_as_a_tab_under_providers(): void
+    {
+        $this->actingAs($this->user)
+            ->get(route('signals.accounts'))
+            ->assertOk()
+            ->assertSee('Providers')
+            ->assertSee('Telegram accounts')
+            ->assertSee('Add an account');
+    }
+
     // =====================================================================
     // SIGNING IN FROM THE DASHBOARD
     // =====================================================================

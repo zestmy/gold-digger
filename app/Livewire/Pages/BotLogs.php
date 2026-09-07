@@ -10,9 +10,11 @@ use Livewire\Component;
 use Livewire\WithPagination;
 
 /**
- * Bot Logs
+ * Activity
  *
- * Everything the executor, the monitor and the copier had to say, for this account.
+ * Everything the executor, the monitor and the copier had to say, for this account. The
+ * menu calls it Activity because that is what a subscriber is looking for; the table is
+ * still `bot_logs` and the rows are still log entries.
  *
  * ## "For this account" is new, and it is the whole point of this file
  *
@@ -32,7 +34,7 @@ use Livewire\WithPagination;
  * reachable only from the admin panel, which is the correct place for them.
  */
 #[Layout('layouts.app')]
-#[Title('Bot Logs - FXSignalPro')]
+#[Title('Activity - FXSignalPro')]
 class BotLogs extends Component
 {
     use WithPagination;
