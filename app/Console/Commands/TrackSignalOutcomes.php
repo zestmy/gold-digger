@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Models\SignalOutcome;
 use App\Services\Outcomes\OutcomeTracker;
 use Illuminate\Console\Command;
 
@@ -14,13 +15,19 @@ use Illuminate\Console\Command;
 class TrackSignalOutcomes extends Command
 {
     protected $signature = 'signals:track
-                            {--backfill-days= : Look this far back for signals never opened for tracking (default: config outcomes.backfill_days)}';
+                            {--backfill-days= : Look this far back for signals never opened for tracking (default: config outcomes.backfill_days)}
+                            {--rescore : Throw every outcome away and score it again from the bars}';
 
     protected $description = 'Record what became of every signal, from the bars that followed it';
 
     public function handle(OutcomeTracker $tracker): int
     {
         $days = $this->option('backfill-days');
+
+        if ($this->option('rescore')) {
+            // Derived data, all of it; the next line re-opens everything within the window.
+            $this->info('Discarded '.SignalOutcome::query()->delete().' outcome(s).');
+        }
 
         $opened = $tracker->openPending($days === null ? null : (int) $days);
         $advanced = $tracker->advanceAll();

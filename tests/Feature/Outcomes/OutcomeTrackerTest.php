@@ -112,11 +112,15 @@ class OutcomeTrackerTest extends TestCase
     }
 
     /**
-     * A market-order signal names no entry; the reference is where it would have filled.
+     * A market-order signal names no entry; the reference is where an order placed on
+     * reading it would have filled - the open of the first bar after the post, not the
+     * close before it, which is up to a bar stale.
      */
-    public function test_a_copied_signal_without_an_entry_is_measured_from_the_last_close(): void
+    public function test_a_copied_signal_without_an_entry_is_measured_from_the_next_bars_open(): void
     {
-        $this->bars([2000.0, 2002.0]); // 13:05 and 13:10
+        // 13:05 closes 2000, 13:10 closes 2002 and 13:15 opens at 2003.
+        $this->bars([2000.0, 2002.0]);
+        Candle::create($this->candle($this->bar->copy()->addMinutes(15), 2003.0, 2004.0, 2002.0, 2003.5));
 
         $outcome = $this->tracker()->openForCopied($this->copied([
             'symbol' => self::SYMBOL, 'entry_price' => null, 'sl_price' => 1997.00, 'tp_prices' => [2006.0],
@@ -124,7 +128,38 @@ class OutcomeTrackerTest extends TestCase
         ]));
 
         $this->assertNotNull($outcome);
+        $this->assertEqualsWithDelta(2003.0, $outcome->reference_price, 1e-6);
+        $this->assertNotNull($outcome->activated_at, 'At market: scoring starts at once.');
+    }
+
+    public function test_a_post_nothing_has_been_pushed_since_falls_back_to_the_last_close(): void
+    {
+        $this->bars([2000.0, 2002.0]);
+
+        $outcome = $this->tracker()->openForCopied($this->copied([
+            'symbol' => self::SYMBOL, 'entry_price' => null, 'sl_price' => 1997.00, 'tp_prices' => [2006.0],
+            'posted_at' => $this->bar->copy()->addMinutes(11),
+        ]));
+
         $this->assertEqualsWithDelta(2002.0, $outcome->reference_price, 1e-6);
+    }
+
+    /**
+     * A rule change re-derives history on its own: rows scored under an older version are
+     * dropped by the scheduled pass and opened again from the same bars.
+     */
+    public function test_rows_scored_under_an_older_rule_are_scored_again(): void
+    {
+        $signal = $this->signal(['generated_at' => now()->subHour()]);
+        $stale = $this->tracker()->openForSignal($signal);
+        $stale->update(['context' => ['scoring_version' => OutcomeTracker::SCORING_VERSION - 1], 'status' => 'won']);
+
+        $this->assertSame(1, $this->tracker()->openPending());
+
+        $fresh = $signal->fresh()->outcome;
+        $this->assertNotSame($stale->id, $fresh->id);
+        $this->assertSame(OutcomeTracker::SCORING_VERSION, $fresh->context['scoring_version']);
+        $this->assertSame(SignalOutcome::OPEN, $fresh->status);
     }
 
     /**

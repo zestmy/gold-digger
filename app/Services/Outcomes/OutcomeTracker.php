@@ -50,6 +50,18 @@ use Illuminate\Support\Collection;
  */
 final class OutcomeTracker
 {
+    /**
+     * Bumped whenever a scoring rule changes. Every row records the version it was scored
+     * under; the scheduled pass removes rows from an older one and re-opens them from the
+     * same bars, so a rule change re-derives history on its own rather than leaving two
+     * generations of figures in one table.
+     *
+     * 2: a copied market order is referenced to the open of the first bar after the post,
+     *    not the last close before it, which could be five minutes stale in the
+     *    provider's favour.
+     */
+    public const SCORING_VERSION = 2;
+
     public function __construct(
         private readonly SymbolResolver $symbols = new SymbolResolver,
         private readonly TradingSession $sessions = new TradingSession,
@@ -68,6 +80,14 @@ final class OutcomeTracker
     {
         $since = now()->subDays($days ?? (int) config('outcomes.backfill_days', 30));
         $opened = 0;
+
+        // Rows scored under an older rule are derived data: drop them and let the loops
+        // below re-open them from the same bars.
+        SignalOutcome::query()
+            ->where(fn ($q) => $q
+                ->whereNull('context->scoring_version')
+                ->orWhere('context->scoring_version', '<', self::SCORING_VERSION))
+            ->delete();
 
         Signal::query()
             ->where('generated_at', '>=', $since)
@@ -175,11 +195,20 @@ final class OutcomeTracker
         $pending = $entry !== null;
 
         if ($entry === null) {
+            // Where a market order placed on reading the post would have filled: the open
+            // of the first bar after it. The close before the post can be five minutes
+            // stale, and stale in the provider's favour whenever they post mid-move. The
+            // last close is the fallback for a post nothing has been pushed since.
             $entry = Candle::query()
                 ->series($accountId, $symbol, $timeframe)
-                ->where('open_time', '<=', $postedAt)
-                ->orderByDesc('open_time')
-                ->value('close');
+                ->where('open_time', '>=', $postedAt)
+                ->orderBy('open_time')
+                ->value('open')
+                ?? Candle::query()
+                    ->series($accountId, $symbol, $timeframe)
+                    ->where('open_time', '<=', $postedAt)
+                    ->orderByDesc('open_time')
+                    ->value('close');
 
             $entry = $entry === null ? null : (float) $entry;
         }
@@ -461,6 +490,7 @@ final class OutcomeTracker
     private function context(array $extra, Carbon $at, string $symbol): array
     {
         return $extra + [
+            'scoring_version' => self::SCORING_VERSION,
             'hour_utc' => (int) $at->copy()->utc()->format('G'),
             'weekday' => (int) $at->copy()->utc()->dayOfWeekIso,
             'sessions' => $this->sessions->active($at),

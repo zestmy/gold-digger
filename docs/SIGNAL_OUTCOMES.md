@@ -55,8 +55,11 @@ for the strategy's own, `App\Models\TelegramSignal` for a parsed copied one):
   horizon is `expired`.
 - A copied signal names no timeframe, so it is measured on `OUTCOME_COPIED_TIMEFRAME` (M5).
   Its instrument is resolved to the broker's own name, because that is the name the bars
-  are stored under. Where the provider named no entry, the last close stored at the post
-  time is the reference - where a market order would have filled.
+  are stored under. Where the provider named no entry, the reference is the open of the
+  first bar after the post - where a market order placed on reading it would have
+  filled. The close before the post is up to a bar stale, and stale in the provider's
+  favour whenever they post mid-move; it is only the fallback for a post nothing has
+  been pushed since.
 - **A copied signal that names an entry is a pending order.** Nothing is scored until a
   bar's range reaches that entry (or zone); the bars before are counted as `wait_bars`,
   and a signal the market never comes back to within the horizon is `unfilled` - neither
@@ -92,7 +95,13 @@ resolved once.
 ```bash
 php artisan signals:track                      # open pending, advance everything
 php artisan signals:track --backfill-days=90   # reach further back once, for history
+php artisan signals:track --rescore            # throw every row away and score again
 ```
+
+Every row records the scoring rule it was scored under (`OutcomeTracker::SCORING_VERSION`).
+When a rule changes the version is bumped, and the next scheduled pass drops rows from
+the older one and re-opens them from the same bars - history re-derives itself, and one
+table never holds two generations of figures.
 
 The bars have to exist. `data:prune` keeps a fixed number of bars per series, so a signal
 older than that window cannot be scored and stays `open` with no bars seen. That is
