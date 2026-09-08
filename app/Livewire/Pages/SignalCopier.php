@@ -237,14 +237,17 @@ class SignalCopier extends Component
     /**
      * Only a signal that never parsed and was never acted on. A message the ingest
      * refused because its chat is not a source stays refused - that is a channel setting,
-     * not a reading.
+     * not a reading. And a message with no digit in it is chatter: a stop is a number,
+     * and a reading without a stop is refused, so offering the form on "Let's go!" would
+     * be offering something that cannot be accepted.
      */
-    private function correctable(TelegramSignal $signal): bool
+    public static function correctable(TelegramSignal $signal): bool
     {
         return $signal->kind === TelegramSignal::KIND_SIGNAL
             && $signal->parse_status === TelegramSignal::PARSE_FAILED
             && $signal->execution_status === TelegramSignal::EXEC_NONE
-            && $signal->parse_error !== 'Channel is not enabled as a signal source.';
+            && $signal->parse_error !== 'Channel is not enabled as a signal source.'
+            && preg_match('/\d/', (string) $signal->raw_text) === 1;
     }
 
     private function find(int $id): ?TelegramSignal

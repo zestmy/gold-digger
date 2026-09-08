@@ -316,6 +316,20 @@ class SignalCopierPageTest extends TestCase
         $this->assertSame(TelegramSignal::PARSE_FAILED, $signal->fresh()->parse_status);
     }
 
+    /**
+     * A stop is a number. A message with no digit in it cannot carry one, so the offer
+     * would be one that cannot be accepted - and most unparsed messages are chatter.
+     */
+    public function test_chatter_with_no_numbers_is_not_offered_for_correction(): void
+    {
+        $signal = $this->unparsed(['raw_text' => "Let's go! Hit TP, secure some guys", 'parse_error' => 'No instrument found in the message.']);
+
+        Livewire::test(SignalCopier::class)
+            ->assertDontSee('Read it myself')
+            ->call('startCorrection', $signal->id)
+            ->assertSet('correcting', null);
+    }
+
     public function test_a_message_from_a_chat_that_is_not_a_source_cannot_be_corrected(): void
     {
         $signal = $this->unparsed(['parse_error' => 'Channel is not enabled as a signal source.']);

@@ -170,9 +170,7 @@
                     {{-- A person can read what the parser refused to guess at. The fields go
                          through the parser's own coherence check and then into review. --}}
                     @php
-                        $correctable = $signal->kind === \App\Models\TelegramSignal::KIND_SIGNAL
-                            && $signal->execution_status === \App\Models\TelegramSignal::EXEC_NONE
-                            && $signal->parse_error !== 'Channel is not enabled as a signal source.';
+                        $correctable = \App\Livewire\Pages\SignalCopier::correctable($signal);
                     @endphp
                     @if($correctable && $correcting === $signal->id)
                         <form wire:submit="saveCorrection" class="mt-3 rounded-md border border-yellow-500/20 bg-yellow-500/5 p-3">
