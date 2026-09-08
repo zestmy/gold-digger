@@ -70,3 +70,34 @@ worth anything, and its drift gate usually says no.
 | `image` | `ImageSignalReader` transcribed it from a picture |
 | `user` | A person typed the levels in; `corrected_at` says when |
 | null | It never parsed |
+
+---
+
+## Trusting the provider
+
+By default every copied signal that clears the mechanical gates is put to a model that
+declines unless there is a positive case - reward at the exit target, the direction against
+the higher-timeframe trend the account's own strategy reads, the stop against ATR. That is a
+second opinion on the provider's judgement. For a stranger it is the right default. For a
+provider the account subscribed to *for* their judgement it is the wrong one: on this
+account it declined most of what a good provider posted, for reasons the provider never
+claimed to be trading on.
+
+**Auto-Trade → Risk → How copied signals are approved** has two settings:
+
+| `copier_review` | What happens |
+|---|---|
+| `model` (default) | The gates, then the model. Declines unless there is a positive case. |
+| `gates` | The gates only. A signal that is still valid is traded as posted. |
+
+"Still valid" is not a bypass. Under `gates` a signal is still refused when it did not parse
+with a stop, the kill switch is off, the fund has nothing left, the channel does not allow
+the instrument, the daily allowance is reached, no allowed session is open, a news blackout
+is on, it is older than `SignalReviewer::MAX_AGE_MINUTES`, or price has run more than
+`MAX_DRIFT_OF_STOP` stop distances past the entry or through the stop. The reward floor in
+settings still applies at execution. What is dropped is the opinion.
+
+The Copied page shows **Provider trusted** in place of the decline-rate warning, because
+under this setting a low decline rate is the intended shape. Whether the provider is any
+good is measured where it belongs: their record on the Providers page, and the signal
+outcomes on Trades → Performance.

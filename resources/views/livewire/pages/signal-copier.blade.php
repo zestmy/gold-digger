@@ -40,7 +40,21 @@
         {{-- The single most useful number here. A copier approving most of what it sees is
              indistinguishable from having no reviewer, and that failure is invisible in a
              list of individual verdicts that each read perfectly sensibly. --}}
-        @if($declineRate !== null)
+        @if($trusted)
+            <div class="rounded-lg border border-sky-500/20 bg-sky-900/10 p-4">
+                <div class="flex flex-wrap items-baseline gap-x-3">
+                    <span class="text-xs uppercase tracking-wide text-sky-400">Provider trusted</span>
+                    @if($declineRate !== null)
+                        <span class="text-xs text-gray-500">{{ $declineRate }}% of {{ $counts['reviewed'] }} refused for validity</span>
+                    @endif
+                </div>
+                <p class="mt-2 text-xs text-gray-400">
+                    Signals are traded as posted while they are still valid. Nothing judges whether a
+                    trade is good; the provider's record on the Providers page is where that is measured.
+                    Change this under Auto-Trade &rarr; Risk.
+                </p>
+            </div>
+        @elseif($declineRate !== null)
             <div class="rounded-lg p-4 {{ $declineRate < 40 ? 'border border-amber-500/30 bg-amber-900/20' : 'bg-gray-800' }}">
                 <div class="flex flex-wrap items-baseline gap-x-3">
                     <span class="text-xs uppercase tracking-wide text-gray-500">Decline rate</span>

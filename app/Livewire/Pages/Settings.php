@@ -144,6 +144,11 @@ class Settings extends Component
     #[Validate('required|in:provider,strategy')]
     public string $copier_levels = 'provider';
 
+    // How a copied signal is approved: judged by the model, or trusted while still valid.
+    // Defaults to the model, because trusting a stranger's trades is a choice to make.
+    #[Validate('required|in:model,gates')]
+    public string $copier_review = 'model';
+
     public array $availableSessions = [
         'asian' => 'Asian Session (Tokyo)',
         'london' => 'London Session',
@@ -188,6 +193,7 @@ class Settings extends Component
             $this->ai_autonomous_symbols = implode(', ', (array) ($settings->ai_autonomous_symbols ?? [])) ?: null;
             $this->ai_max_concurrent_trades = (int) ($settings->ai_max_concurrent_trades ?? 1);
             $this->copier_levels = (string) ($settings->copier_levels ?? 'provider');
+            $this->copier_review = (string) ($settings->copier_review ?? 'model');
         }
     }
 
@@ -243,6 +249,7 @@ class Settings extends Component
             'ai_autonomous_symbols' => $this->symbolList(),
             'ai_max_concurrent_trades' => $this->ai_max_concurrent_trades,
             'copier_levels' => $this->copier_levels,
+            'copier_review' => $this->copier_review,
         ]);
 
         $this->dispatch('notify', message: 'Settings saved successfully!', type: 'success');

@@ -436,6 +436,66 @@ class SignalReviewerTest extends TestCase
      * AutonomousTrader stores its decision approved. Asking a second model to approve
      * what the first proposed is the same opinion bought twice.
      */
+    // =====================================================================
+    // AN ACCOUNT MAY TRUST ITS PROVIDER
+    // =====================================================================
+
+    /**
+     * Trusting the provider means the gates and no opinion: a valid signal is approved as
+     * posted, and the model is never asked. The reviewer had been declining most of what
+     * a subscribed provider posted, for reasons the provider never claimed to trade on.
+     */
+    public function test_a_trusted_provider_is_approved_on_the_gates_alone(): void
+    {
+        Http::fake();
+        $this->settings->update(['copier_review' => BotSettings::COPIER_REVIEW_GATES]);
+        $this->seedBars();
+
+        $verdict = (new SignalReviewer)->review($this->signal());
+
+        $this->assertSame(TelegramSignal::REVIEW_APPROVED, $verdict['status']);
+        $this->assertStringContainsString('trusts the provider', $verdict['reasoning']);
+        $this->assertNull($verdict['model']);
+        Http::assertNothingSent();
+    }
+
+    /**
+     * Trust is not a bypass. A signal that is no longer valid - too old, or price already
+     * through its stop - is refused whoever posted it, and so is one the kill switch,
+     * the fund, or the filters would have blocked.
+     */
+    public function test_a_trusted_provider_is_still_held_to_every_gate(): void
+    {
+        Http::fake();
+        $this->settings->update(['copier_review' => BotSettings::COPIER_REVIEW_GATES]);
+        $this->seedBars();
+
+        $stale = (new SignalReviewer)->review($this->signal(['posted_at' => now()->subMinutes(SignalReviewer::MAX_AGE_MINUTES + 5)]));
+        $this->assertSame(TelegramSignal::REVIEW_DECLINED, $stale['status']);
+        $this->assertStringContainsString('minutes old', $stale['reasoning']);
+
+        // A buy from 2650 with the stop at 2640, and the market already at 2630.
+        $this->seedBars(2630.0);
+        $through = (new SignalReviewer)->review($this->signal());
+        $this->assertSame(TelegramSignal::REVIEW_DECLINED, $through['status']);
+        $this->assertStringContainsString('stop loss', $through['reasoning']);
+
+        $this->settings->update(['is_active' => false]);
+        $killed = (new SignalReviewer)->review($this->signal());
+        $this->assertSame(TelegramSignal::REVIEW_DECLINED, $killed['status']);
+
+        Http::assertNothingSent();
+    }
+
+    public function test_trust_works_without_an_api_key(): void
+    {
+        config(['ai.key' => null]);
+        $this->settings->update(['copier_review' => BotSettings::COPIER_REVIEW_GATES]);
+        $this->seedBars();
+
+        $this->assertSame(TelegramSignal::REVIEW_APPROVED, (new SignalReviewer)->review($this->signal())['status']);
+    }
+
     public function test_an_autonomous_signal_passes_the_gates_without_a_second_model_call(): void
     {
         Http::fake();

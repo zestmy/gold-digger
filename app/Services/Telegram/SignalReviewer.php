@@ -114,6 +114,20 @@ final class SignalReviewer
             return $this->decline($objection);
         }
 
+        // An account that trusts its provider gets exactly the gates and no opinion. The
+        // signal is still valid - it parsed, it is not stale, price has not run past it,
+        // the fund and the filters allow it - and whether it is a *good* trade was the
+        // provider's call, which is what the account subscribed to them for. The channel's
+        // own record is where that call is judged, not here.
+        if ($settings?->copier_review === BotSettings::COPIER_REVIEW_GATES) {
+            return [
+                'status' => TelegramSignal::REVIEW_APPROVED,
+                'reasoning' => 'Still valid, and this account trusts the provider: traded as posted, without a second opinion.',
+                'confidence' => null,
+                'model' => null,
+            ];
+        }
+
         if (! $this->router->configured()) {
             return $this->decline('No OPENROUTER_API_KEY is configured, so the signal cannot be reviewed. Nothing is executed unreviewed.');
         }

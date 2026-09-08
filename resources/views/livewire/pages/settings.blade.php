@@ -529,6 +529,26 @@
                 </div>
             </div>
 
+            {{-- Whether a copied signal is judged, or trusted while it is still valid. The
+                 model declines unless there is a positive case, which is right for a
+                 stranger and wrong for a provider you subscribed to for their judgement. --}}
+            <div class="mt-6 border-t border-gray-700 pt-4">
+                <label for="copier_review" class="block text-sm font-medium text-gray-300">How copied signals are approved</label>
+                <select id="copier_review" wire:model="copier_review"
+                        class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm">
+                    <option value="model">Reviewed by the model &mdash; declines unless there is a positive case</option>
+                    <option value="gates">Trust the provider &mdash; trade every signal that is still valid</option>
+                </select>
+                <p class="mt-1 text-xs text-gray-500">
+                    Trusting the provider still checks that the signal is valid: it parsed with a stop, it is
+                    under {{ \App\Services\Telegram\SignalReviewer::MAX_AGE_MINUTES }} minutes old, price has not
+                    run past the entry or through the stop, and the kill switch, fund, session and news filters
+                    allow it. Nothing judges whether it is a good trade &mdash; that was the provider's call, and
+                    their record on the Providers page is where it is judged.
+                </p>
+                @error('copier_review') <p class="mt-1 text-xs text-red-400">{{ $message }}</p> @enderror
+            </div>
+
             {{-- Whose levels a copied signal trades with. Both defensible, which is why it
                  is a choice: an ATR stop is measurable and consistent, a provider's stop may
                  sit below a swing low that ATR knows nothing about. --}}

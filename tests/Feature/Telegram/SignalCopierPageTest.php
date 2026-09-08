@@ -101,6 +101,23 @@ class SignalCopierPageTest extends TestCase
         Livewire::test(SignalCopier::class)->assertDontSee('approving most of what it sees');
     }
 
+    /**
+     * Under a trusted provider a low decline rate is the intended shape, not a reviewer
+     * that has gone soft, so the warning gives way to a note saying what is happening.
+     */
+    public function test_a_trusted_provider_replaces_the_decline_rate_warning(): void
+    {
+        BotSettings::where('user_id', $this->user->id)->update(['copier_review' => BotSettings::COPIER_REVIEW_GATES]);
+
+        foreach (range(1, 4) as $ignored) {
+            $this->signal(['review_status' => TelegramSignal::REVIEW_APPROVED]);
+        }
+
+        Livewire::test(SignalCopier::class)
+            ->assertSee('Provider trusted')
+            ->assertDontSee('approving most of what it sees');
+    }
+
     public function test_no_reviews_yet_shows_no_rate_rather_than_zero(): void
     {
         $this->signal();

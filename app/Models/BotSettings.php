@@ -31,6 +31,12 @@ class BotSettings extends Model
      *
      * @var array<int, string>
      */
+    /** Every signal that clears the gates is put to a model that declines unless there is a positive case. */
+    public const COPIER_REVIEW_MODEL = 'model';
+
+    /** The provider is trusted: a signal that is still valid is traded, and nothing judges it. */
+    public const COPIER_REVIEW_GATES = 'gates';
+
     protected $fillable = [
         'user_id',
         'is_active',
@@ -57,6 +63,7 @@ class BotSettings extends Model
         'copier_profit_lock_pct', 'copier_trail_distance_r',
         'copier_close_on_opposite', 'copier_spread_buffer',
         'copier_levels',
+        'copier_review',
         'capture_screenshots',
     ];
 

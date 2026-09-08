@@ -296,6 +296,9 @@ class SignalCopier extends Component
                 ? (int) round((($counts['reviewed'] - $counts['approved']) / $counts['reviewed']) * 100)
                 : null,
             'fund' => app(AiFund::class)->state($settings, (int) Auth::id()),
+            // Under a trusted provider a low decline rate is the intended shape, not a
+            // reviewer that has gone soft.
+            'trusted' => $settings?->copier_review === BotSettings::COPIER_REVIEW_GATES,
         ]);
     }
 
