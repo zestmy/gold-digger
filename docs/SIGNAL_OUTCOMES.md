@@ -132,9 +132,22 @@ In order of what it unlocks:
    that carried it - the score becomes a measurement.
 3. **Judging providers on their signals, not on the trades taken.** A channel's win rate
    today counts only what the copier executed. Outcomes score every parsed post.
-4. **Measuring a change.** Every proposal - a pullback entry, R-based targets, a different
-   ADX floor, a session filter - can be judged on what the signals under the new rule do,
-   before any of them is traded.
+4. **Measuring a change.** Every proposal - a pullback entry, a different ADX floor, a
+   session filter - can be judged on what the signals under the new rule do, before any
+   of them is traded.
+
+### The first change it asked for
+
+The first month of numbers: AI signals reached their first target 50% of the time and
+still ran at -0.28R expectancy, because the target sat about 0.6R from entry (30 pips
+against a ~50-pip ATR stop) while a loss cost a full 1R. The ladder was moved to
+multiples of the stop - 1R / 2R / 3R - on 2026-09-08 (`tp1_r` on `strategies`; see
+[`SIGNAL_GENERATION.md`](SIGNAL_GENERATION.md), "The ladder is in R").
+
+What to read next: the `AI` row on Trades → Performance, once it has thirty decided
+signals dated after the change. `win_rate` will fall - a 1R target is further away than
+a 0.6R one - and the question is whether `expectancy_r` rises above zero. If it does not,
+the entry, not the ladder, is the problem.
 
 ---
 

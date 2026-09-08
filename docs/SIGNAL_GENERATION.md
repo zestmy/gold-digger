@@ -204,10 +204,31 @@ the stop relative to the tick it fills at.
 The price levels are still stored on the signal, because that is what the analytics pages
 chart. The terminal's numbers remain authoritative.
 
-**The order's target is the final ladder step**, `tp3_pips` (or `tp2_pips` when TP3 is
-unset) — *not* TP1. Putting TP1 on the order would close the whole position at a level meant
-to take only half of it, and TP2/TP3 would never be reached. The earlier rungs are taken by
+**The order's target is the final ladder step** — TP3, or TP2 when TP3 is unset — *not*
+TP1. Putting TP1 on the order would close the whole position at a level meant to take only
+half of it, and TP2/TP3 would never be reached. The earlier rungs are taken by
 [`TRADE_MANAGEMENT.md`](TRADE_MANAGEMENT.md), which watches bars and closes them at market.
+
+### The ladder is in R
+
+The stop is `sl_atr_multiplier × ATR`: a volatility-aware distance. The targets used to be
+fixed pips against it, which meant the reward each rung offered swung with volatility and
+nobody had chosen it. The first month of outcome tracking put a number on the consequence:
+the strategy's first target was reached half the time, but it sat about 0.6R from entry —
+30 pips against a ~50-pip stop — and 50% at 0.6R loses money.
+
+So each rung is now a multiple of the stop distance: `tp1_r`, `tp2_r`, `tp3_r`, defaulting
+to 1R / 2R / 3R. A first rung at 1R pays at least what a stop costs, and the same ladder is
+the same trade in a quiet market and a wild one. `TargetLadder` does the arithmetic for the
+generator and the backtester alike, so they cannot disagree about where a rung sits.
+
+Two consequences worth knowing:
+
+- **R levels exist before the pip size does.** They are price arithmetic on a price-denominated
+  stop. Only `tp_pips` — the wire figure for the order's own target — still waits for the
+  terminal to report what a pip is.
+- **Pips remain as a fallback.** A strategy that clears `tp1_r` is back on `tp1_pips` and
+  friends, exactly as before. `features.target_unit` on the signal says which applied.
 
 ---
 

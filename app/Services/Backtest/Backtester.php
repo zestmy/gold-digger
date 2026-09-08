@@ -7,6 +7,7 @@ use App\Models\Candle;
 use App\Models\Strategy;
 use App\Services\Strategy\PositionSizer;
 use App\Services\Strategy\StrategyEvaluator;
+use App\Services\Strategy\TargetLadder;
 use App\Services\Strategy\TradingSession;
 
 /**
@@ -212,9 +213,9 @@ final class Backtester
             ? $mid + $market->pipsToPrice($spread + $market->slippagePips)
             : $mid - $market->pipsToPrice($market->slippagePips);
 
-        $target = fn (?float $pips): ?float => $pips === null
-            ? null
-            : $entry + ($sign * $market->pipsToPrice($pips));
+        // The same ladder the live generator places - in R off the same stop, or in pips -
+        // measured from the simulated fill rather than the bar close.
+        $targets = (new TargetLadder)->prices($strategy, $entry, $sign, $stopDistance, $market->pipSize);
 
         $report->countEntry();
 
@@ -223,9 +224,9 @@ final class Backtester
             entryPrice: $entry,
             lots: $lots,
             stopPrice: $entry - ($sign * $stopDistance),
-            tp1: $target((float) $strategy->tp1_pips),
-            tp2: $target((float) $strategy->tp2_pips),
-            tp3: $target($strategy->tp3_pips !== null ? (float) $strategy->tp3_pips : null),
+            tp1: $targets['tp1_price'],
+            tp2: $targets['tp2_price'],
+            tp3: $targets['tp3_price'],
             stopPips: round($stopPips, 2),
             openedAt: $fillBar->open_time,
             features: $setup->features,

@@ -58,6 +58,7 @@ final class SignalGenerator
         private readonly NewsBlackout $news = new NewsBlackout,
         private readonly RewardFloor $reward = new RewardFloor,
         private readonly SignalQuality $quality = new SignalQuality,
+        private readonly TargetLadder $ladder = new TargetLadder,
     ) {}
 
     /**
@@ -177,6 +178,7 @@ final class SignalGenerator
                         'pip_size' => $levels['pip_size'],
                         'entry_zone_low' => $zone['low'],
                         'entry_zone_high' => $zone['high'],
+                        'target_unit' => $levels['target_unit'],
                         // The same window the open command gets. After it the setup is a
                         // different bar's story, whoever is reading it.
                         'valid_until' => now()->addSeconds($this->timeframeSeconds($strategy->timeframe_entry))->toIso8601String(),
@@ -227,55 +229,40 @@ final class SignalGenerator
     /**
      * Stop and target levels for a setup.
      *
-     * The stop is ATR-derived (a volatility-aware distance); the targets are the fixed pip
-     * distances the strategy configures. `pip_size` is null until the terminal reports it,
-     * and every derived value goes null with it rather than being computed from a guess.
+     * The stop is ATR-derived (a volatility-aware distance). The targets come from
+     * TargetLadder - in R, as multiples of that stop, for every strategy that sets `tp1_r`,
+     * and in fixed pips otherwise - so the generator and the backtester place the same
+     * ladder. `pip_size` is null until the terminal reports it, and every pip figure goes
+     * null with it rather than being computed from a guess; the R levels are in price and
+     * survive.
      *
-     * @return array{pip_size: float|null, sl_pips: float, sl_price: float, tp1_price: float|null, tp2_price: float|null, tp3_price: float|null, order_tp_pips: float|null}
+     * The order the EA submits carries the *final* rung as its take profit: TP1 and TP2
+     * are closed at market by TradeManager, and a first rung on the order would close the
+     * whole position at a level meant to take only half of it.
+     *
+     * @return array{pip_size: float|null, sl_pips: float, sl_price: float, tp1_price: float|null, tp2_price: float|null, tp3_price: float|null, order_tp_pips: float|null, target_unit: string}
      */
     private function levels(Strategy $strategy, Setup $setup, ?float $pipSize): array
     {
         $stopDistance = (float) $strategy->sl_atr_multiplier * $setup->atr;
         $sign = $setup->sign();
 
-        // The order the EA actually submits carries the *final* target, not the first.
-        // Partial closes at TP1 and TP2 need a trade-management loop that watches price,
-        // and none exists yet - so putting TP1 on the order would close the whole position
-        // at a level meant to take only half of it, and tp2/tp3 would never be reached.
-        $finalTargetPips = $strategy->tp3_pips !== null
-            ? (float) $strategy->tp3_pips
-            : (float) $strategy->tp2_pips;
-
-        // The stop survives an unknown pip size; the targets do not. ATR is already in
-        // price units, so 1.5 ATR below entry is computable from the series alone. The
-        // targets are configured in pips, and turning pips into a price without the
-        // terminal's pip size is precisely the guess the pip trap punishes.
+        // The stop survives an unknown pip size: ATR is already in price units, so 1.5 ATR
+        // below entry is computable from the series alone.
         $slPrice = round($setup->entryPrice - ($sign * $stopDistance), 5);
+        $usable = $pipSize !== null && $pipSize > 0.0;
 
-        if ($pipSize === null || $pipSize <= 0.0) {
-            return [
-                'pip_size' => null,
-                'sl_pips' => 0.0,
-                'sl_price' => $slPrice,
-                'tp1_price' => null,
-                'tp2_price' => null,
-                'tp3_price' => null,
-                'order_tp_pips' => null,
-            ];
-        }
-
-        $target = static fn (?float $pips): ?float => $pips === null
-            ? null
-            : round($setup->entryPrice + ($sign * $pips * $pipSize), 5);
+        $targets = $this->ladder->prices($strategy, $setup->entryPrice, $sign, $stopDistance, $usable ? $pipSize : null);
 
         return [
-            'pip_size' => $pipSize,
-            'sl_pips' => round($stopDistance / $pipSize, 2),
+            'pip_size' => $usable ? $pipSize : null,
+            'sl_pips' => $usable ? round($stopDistance / $pipSize, 2) : 0.0,
             'sl_price' => $slPrice,
-            'tp1_price' => $target((float) $strategy->tp1_pips),
-            'tp2_price' => $target((float) $strategy->tp2_pips),
-            'tp3_price' => $target($strategy->tp3_pips !== null ? (float) $strategy->tp3_pips : null),
-            'order_tp_pips' => $finalTargetPips,
+            'tp1_price' => $targets['tp1_price'],
+            'tp2_price' => $targets['tp2_price'],
+            'tp3_price' => $targets['tp3_price'],
+            'order_tp_pips' => $targets['order_tp_pips'],
+            'target_unit' => $targets['unit'],
         ];
     }
 

@@ -73,21 +73,22 @@
 
                     <!-- Take Profits -->
                     <div class="mt-4 rounded bg-gray-900 p-3">
-                        <span class="text-xs text-gray-500">Take Profit Levels</span>
+                        @php($inR = $strategy->tp1_r !== null)
+                        <span class="text-xs text-gray-500">Take Profit Levels {{ $inR ? '· multiples of the stop' : '· fixed pips' }}</span>
                         <div class="mt-2 flex justify-between text-xs">
                             <div class="text-center">
                                 <p class="text-yellow-400">TP1</p>
-                                <p class="text-white">{{ $strategy->tp1_pips }} pips</p>
+                                <p class="text-white">{{ $inR ? number_format($strategy->tp1_r, 1).'R' : $strategy->tp1_pips.' pips' }}</p>
                                 <p class="text-gray-500">{{ $strategy->tp1_close_pct }}%</p>
                             </div>
                             <div class="text-center">
                                 <p class="text-yellow-400">TP2</p>
-                                <p class="text-white">{{ $strategy->tp2_pips }} pips</p>
+                                <p class="text-white">{{ $inR ? number_format($strategy->tp2_r, 1).'R' : $strategy->tp2_pips.' pips' }}</p>
                                 <p class="text-gray-500">{{ $strategy->tp2_close_pct }}%</p>
                             </div>
                             <div class="text-center">
                                 <p class="text-yellow-400">TP3</p>
-                                <p class="text-white">{{ $strategy->tp3_pips }} pips</p>
+                                <p class="text-white">{{ $inR ? ($strategy->tp3_r !== null ? number_format($strategy->tp3_r, 1).'R' : '—') : $strategy->tp3_pips.' pips' }}</p>
                                 <p class="text-gray-500">{{ $strategy->tp3_close_pct }}%</p>
                             </div>
                         </div>
@@ -184,28 +185,36 @@
 
                         <!-- Take Profits -->
                         <div>
-                            <label class="block text-sm font-medium text-gray-300 mb-2">Take Profit Levels</label>
+                            <label class="block text-sm font-medium text-gray-300 mb-1">Take Profit Levels</label>
+                            <p class="mb-2 text-xs text-gray-500">
+                                In R, as multiples of the stop distance: TP1 at 1R pays what a stop costs. Clear the R fields to use fixed pips instead.
+                            </p>
                             <div class="grid gap-4 md:grid-cols-3">
                                 <div class="rounded bg-gray-900 p-3">
                                     <p class="text-xs text-yellow-400 mb-2">TP1</p>
                                     <div class="space-y-2">
-                                        <input type="number" step="0.01" wire:model="tp1_pips" placeholder="Pips" class="block w-full rounded-md border-gray-600 bg-gray-700 text-white text-sm focus:border-yellow-500 focus:ring-yellow-500">
+                                        <input type="number" step="0.1" wire:model="tp1_r" placeholder="R (e.g. 1.0)" class="block w-full rounded-md border-gray-600 bg-gray-700 text-white text-sm focus:border-yellow-500 focus:ring-yellow-500">
+                                        <input type="number" step="0.01" wire:model="tp1_pips" placeholder="Pips (if no R)" class="block w-full rounded-md border-gray-600 bg-gray-700 text-white text-sm focus:border-yellow-500 focus:ring-yellow-500">
                                         <input type="number" step="1" wire:model="tp1_close_pct" placeholder="Close %" class="block w-full rounded-md border-gray-600 bg-gray-700 text-white text-sm focus:border-yellow-500 focus:ring-yellow-500">
                                     </div>
                                 </div>
                                 <div class="rounded bg-gray-900 p-3">
                                     <p class="text-xs text-yellow-400 mb-2">TP2</p>
                                     <div class="space-y-2">
-                                        <input type="number" step="0.01" wire:model="tp2_pips" placeholder="Pips" class="block w-full rounded-md border-gray-600 bg-gray-700 text-white text-sm focus:border-yellow-500 focus:ring-yellow-500">
+                                        <input type="number" step="0.1" wire:model="tp2_r" placeholder="R (e.g. 2.0)" class="block w-full rounded-md border-gray-600 bg-gray-700 text-white text-sm focus:border-yellow-500 focus:ring-yellow-500">
+                                        <input type="number" step="0.01" wire:model="tp2_pips" placeholder="Pips (if no R)" class="block w-full rounded-md border-gray-600 bg-gray-700 text-white text-sm focus:border-yellow-500 focus:ring-yellow-500">
                                         <input type="number" step="1" wire:model="tp2_close_pct" placeholder="Close %" class="block w-full rounded-md border-gray-600 bg-gray-700 text-white text-sm focus:border-yellow-500 focus:ring-yellow-500">
                                     </div>
+                                    @error('tp2_r') <p class="mt-1 text-xs text-red-400">{{ $message }}</p> @enderror
                                 </div>
                                 <div class="rounded bg-gray-900 p-3">
                                     <p class="text-xs text-yellow-400 mb-2">TP3</p>
                                     <div class="space-y-2">
-                                        <input type="number" step="0.01" wire:model="tp3_pips" placeholder="Pips" class="block w-full rounded-md border-gray-600 bg-gray-700 text-white text-sm focus:border-yellow-500 focus:ring-yellow-500">
+                                        <input type="number" step="0.1" wire:model="tp3_r" placeholder="R (e.g. 3.0)" class="block w-full rounded-md border-gray-600 bg-gray-700 text-white text-sm focus:border-yellow-500 focus:ring-yellow-500">
+                                        <input type="number" step="0.01" wire:model="tp3_pips" placeholder="Pips (if no R)" class="block w-full rounded-md border-gray-600 bg-gray-700 text-white text-sm focus:border-yellow-500 focus:ring-yellow-500">
                                         <input type="number" step="1" wire:model="tp3_close_pct" placeholder="Close %" class="block w-full rounded-md border-gray-600 bg-gray-700 text-white text-sm focus:border-yellow-500 focus:ring-yellow-500">
                                     </div>
+                                    @error('tp3_r') <p class="mt-1 text-xs text-red-400">{{ $message }}</p> @enderror
                                 </div>
                             </div>
                         </div>

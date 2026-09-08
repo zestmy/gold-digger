@@ -123,8 +123,9 @@ name is what the strategy must be configured with, not the generic one.
 > | Filling mode | bitmask `1` → FOK, with RETURN as fallback |
 > | Volume | min `0.01`, step `0.01` |
 >
-> With TP1 at 30 pips the ladder clears the stops level by a wide margin. On a broker with a
-> wider stops level, or a strategy with tighter targets, that is the first thing to check —
+> With TP1 at 1R of a 1.5 × ATR stop, the ladder clears the stops level by a wide margin
+> whenever the stop does. On a broker with a wider stops level, or a strategy with a tighter
+> stop or a fractional first rung, that is the first thing to check —
 > it is the `10016` class of failure, and it is a configuration error, not a bug.
 
 **Bars.** The Signals page has a price-feed panel. Both timeframes should appear; the entry

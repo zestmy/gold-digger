@@ -145,7 +145,7 @@ than one per bar — keyed on the trade alone, only the first move would ever ha
 
 Moving the stop to exactly the entry leaves the trade losing what it paid to get there: the
 spread crossed on entry, commission both sides, any slippage. On a gold scalp that is a real
-share of a 30-pip first target. `breakeven_offset_pips` moves the stop that much further into
+share of a first target one stop away. `breakeven_offset_pips` moves the stop that much further into
 profit, so the phrase means what it says. Zero — the default — preserves the old behaviour.
 
 ### Measure it before believing it

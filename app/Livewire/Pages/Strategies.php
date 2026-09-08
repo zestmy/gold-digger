@@ -59,6 +59,18 @@ class Strategies extends Component
     #[Validate('required|numeric|min:0|max:100')]
     public string $tp3_close_pct = '20.00';
 
+    // Targets as multiples of the stop distance. Set, they are the ladder and the pip
+    // fields are ignored; blank, the pip fields apply. TP1 in R is what makes "does the
+    // first rung pay for the stop" a setting rather than an accident of volatility.
+    #[Validate('nullable|numeric|min:0.1|max:20')]
+    public ?string $tp1_r = '1.00';
+
+    #[Validate('nullable|numeric|min:0.1|max:50')]
+    public ?string $tp2_r = '2.00';
+
+    #[Validate('nullable|numeric|min:0.1|max:100')]
+    public ?string $tp3_r = '3.00';
+
     #[Validate('required|numeric|min:0.1|max:10')]
     public string $sl_atr_multiplier = '1.50';
 
@@ -113,6 +125,9 @@ class Strategies extends Component
             $this->tp2_close_pct = $strategy->tp2_close_pct;
             $this->tp3_pips = $strategy->tp3_pips;
             $this->tp3_close_pct = $strategy->tp3_close_pct;
+            $this->tp1_r = $strategy->tp1_r;
+            $this->tp2_r = $strategy->tp2_r;
+            $this->tp3_r = $strategy->tp3_r;
             $this->sl_atr_multiplier = $strategy->sl_atr_multiplier;
             $this->trail_trigger_pips = $strategy->trail_trigger_pips;
             $this->trail_distance_pips = $strategy->trail_distance_pips;
@@ -148,6 +163,9 @@ class Strategies extends Component
         $this->tp2_close_pct = '30.00';
         $this->tp3_pips = '30.00';
         $this->tp3_close_pct = '20.00';
+        $this->tp1_r = '1.00';
+        $this->tp2_r = '2.00';
+        $this->tp3_r = '3.00';
         $this->sl_atr_multiplier = '1.50';
         $this->trail_trigger_pips = null;
         $this->trail_distance_pips = null;
@@ -161,6 +179,25 @@ class Strategies extends Component
     public function save(): void
     {
         $this->validate();
+
+        // Rungs in R have to climb, and TP2 has to exist whenever TP1 does: the order
+        // carries the final rung, and a ladder with one rung would put TP1 on the order
+        // and close the whole position at a level meant to take half of it.
+        $r = fn (?string $v): ?float => ($v === null || $v === '') ? null : (float) $v;
+
+        if ($r($this->tp1_r) !== null) {
+            if ($r($this->tp2_r) === null || $r($this->tp2_r) <= $r($this->tp1_r)) {
+                $this->addError('tp2_r', 'TP2 must be set, and above TP1, when targets are in R.');
+
+                return;
+            }
+
+            if ($r($this->tp3_r) !== null && $r($this->tp3_r) <= $r($this->tp2_r)) {
+                $this->addError('tp3_r', 'TP3 must be above TP2.');
+
+                return;
+            }
+        }
 
         $data = [
             'user_id' => Auth::id(),
@@ -178,6 +215,9 @@ class Strategies extends Component
             'tp2_close_pct' => $this->tp2_close_pct,
             'tp3_pips' => $this->tp3_pips,
             'tp3_close_pct' => $this->tp3_close_pct,
+            'tp1_r' => $r($this->tp1_r),
+            'tp2_r' => $r($this->tp1_r) === null ? null : $r($this->tp2_r),
+            'tp3_r' => $r($this->tp1_r) === null ? null : $r($this->tp3_r),
             'sl_atr_multiplier' => $this->sl_atr_multiplier,
             // Blank means off, not zero. A zero trail distance would put the stop on top of
             // price and close the position on the next tick.

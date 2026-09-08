@@ -523,7 +523,7 @@ class TrailingStopTest extends TestCase
         $this->strategy->update([
             'trail_trigger_pips' => 40,
             'trail_distance_pips' => 25,
-            'tp3_pips' => 900,   // far enough away that the trail is what ends the trade
+            'tp3_r' => 30,   // far enough away that the trail is what ends the trade
         ]);
 
         // A crossover, a strong run, then a collapse that takes out the trailed stop.
@@ -588,7 +588,7 @@ class TrailingStopTest extends TestCase
         $market = new MarketAssumptions(0.10, 10.0, 0.01, 0.0, 0.0, 0.0, 10000.0);
         $settings = BotSettings::where('user_id', $this->user->id)->first();
 
-        $this->strategy->update(['tp3_pips' => 900, 'trail_trigger_pips' => null, 'trail_distance_pips' => null]);
+        $this->strategy->update(['tp3_r' => 30, 'trail_trigger_pips' => null, 'trail_distance_pips' => null]);
         $without = app(Backtester::class)->run($this->strategy->fresh(), $entry, $trend, $market, $settings);
 
         $this->strategy->update(['trail_trigger_pips' => 40, 'trail_distance_pips' => 25]);

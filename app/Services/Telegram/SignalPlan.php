@@ -9,6 +9,7 @@ use App\Models\Strategy;
 use App\Models\SymbolSpec;
 use App\Models\TelegramSignal;
 use App\Services\Indicators\Indicators;
+use App\Services\Strategy\TargetLadder;
 
 /**
  * Signal Plan
@@ -40,6 +41,7 @@ final class SignalPlan
 
     public function __construct(
         private readonly SignalSeries $series = new SignalSeries,
+        private readonly TargetLadder $ladder = new TargetLadder,
     ) {}
 
     /**
@@ -171,7 +173,9 @@ final class SignalPlan
 
         $pipSize = $this->pipSize($signal);
 
-        if ($pipSize === null || $pipSize <= 0.0) {
+        // A ladder in R is price arithmetic on a price-denominated stop and needs no pip
+        // size; a ladder in pips does, and without one the level would be a guess.
+        if (! $this->ladder->inR($strategy) && ($pipSize === null || $pipSize <= 0.0)) {
             return array_merge($provider, [
                 'why' => "No pip size known for {$signal->symbol}, so the ladder cannot be placed in price. Provider's levels stand.",
             ]);
@@ -181,15 +185,14 @@ final class SignalPlan
         $entry = $signal->entry_price;
         $stopDistance = $atr * (float) $strategy->sl_atr_multiplier;
 
-        $tps = [];
+        // The same ladder the strategy's own signals get - TargetLadder is the one place
+        // that knows whether a rung is a multiple of the stop or a fixed distance.
+        $levels = $this->ladder->prices($strategy, $entry, $sign, $stopDistance, $pipSize);
 
-        foreach (['tp1_pips', 'tp2_pips', 'tp3_pips'] as $rung) {
-            $pips = $strategy->{$rung};
-
-            if ($pips !== null && (float) $pips > 0.0) {
-                $tps[] = round($entry + ($sign * (float) $pips * $pipSize), 6);
-            }
-        }
+        $tps = array_values(array_map(
+            static fn (float $price): float => round($price, 6),
+            array_filter([$levels['tp1_price'], $levels['tp2_price'], $levels['tp3_price']], static fn (?float $p) => $p !== null),
+        ));
 
         $sl = round($entry - ($sign * $stopDistance), 6);
 

@@ -36,6 +36,9 @@ final class ParameterGrid
         'tp1_pips',
         'tp2_pips',
         'tp3_pips',
+        'tp1_r',
+        'tp2_r',
+        'tp3_r',
         'tp1_close_pct',
         'tp2_close_pct',
         'max_holding_bars',
@@ -133,16 +136,19 @@ final class ParameterGrid
             return false;
         }
 
-        $tp1 = $get('tp1_pips', null);
-        $tp2 = $get('tp2_pips', null);
-        $tp3 = $get('tp3_pips', null);
+        // Rungs have to climb, whichever unit they are in.
+        foreach ([['tp1_pips', 'tp2_pips', 'tp3_pips'], ['tp1_r', 'tp2_r', 'tp3_r']] as [$one, $two, $three]) {
+            $tp1 = $get($one, null);
+            $tp2 = $get($two, null);
+            $tp3 = $get($three, null);
 
-        if ($tp1 !== null && $tp2 !== null && $tp1 >= $tp2) {
-            return false;
-        }
+            if ($tp1 !== null && $tp2 !== null && $tp1 >= $tp2) {
+                return false;
+            }
 
-        if ($tp2 !== null && $tp3 !== null && $tp2 >= $tp3) {
-            return false;
+            if ($tp2 !== null && $tp3 !== null && $tp2 >= $tp3) {
+                return false;
+            }
         }
 
         return true;

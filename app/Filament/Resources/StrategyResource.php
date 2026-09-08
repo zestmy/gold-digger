@@ -83,7 +83,26 @@ class StrategyResource extends Resource
                     ])->columns(2),
 
                 Forms\Components\Section::make('Take Profit Settings')
+                    ->description('In R, as multiples of the stop distance, when TP1 R is set; the pip fields apply only when it is blank.')
                     ->schema([
+                        Forms\Components\TextInput::make('tp1_r')
+                            ->label('TP1 R')
+                            ->numeric()
+                            ->step(0.1)
+                            ->suffix('R'),
+                        Forms\Components\TextInput::make('tp2_r')
+                            ->label('TP2 R')
+                            ->numeric()
+                            ->step(0.1)
+                            ->suffix('R')
+                            ->requiredWith('tp1_r')
+                            ->gt('tp1_r'),
+                        Forms\Components\TextInput::make('tp3_r')
+                            ->label('TP3 R')
+                            ->numeric()
+                            ->step(0.1)
+                            ->suffix('R')
+                            ->gt('tp2_r'),
                         Forms\Components\TextInput::make('tp1_pips')
                             ->label('TP1 Pips')
                             ->numeric()

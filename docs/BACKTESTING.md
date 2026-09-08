@@ -20,7 +20,9 @@ That matters because a backtester with its own copy of the logic drifts from the
 trades, usually without anyone noticing, and then its results describe a strategy nobody is
 running. The exit side mirrors `TradeManager` for the same reason: rungs detected on bar close
 and filled at market, the final target sitting on the order as a broker-side limit, break-even
-once the first rung actually fills.
+once the first rung actually fills. The ladder itself comes from the same `TargetLadder` the
+generator uses — rungs in R off the simulated stop, or in pips — so a sweep over `tp1_r` is
+a sweep over the ladder the live strategy would place.
 
 A test asserts the two agree on the same fixture. If they ever diverge, it fails.
 
@@ -164,7 +166,7 @@ floor is not a statistical threshold so much as a floor on embarrassment.
 | Minimum trade count | A combination that took four trades found four coincidences, not an edge. Below the floor it is not ranked at all. |
 | Return measured against drawdown | Doubling an account through a 60% drawdown is not better than half the return through 5%, and net profit cannot see the difference. |
 | Rank agreement reported | When metrics disagree about the winner, that disagreement *is* the finding — the ranking is being driven by noise. |
-| Incoherent combinations dropped | A fast EMA at or above the slow one inverts every signal; a ladder out of order takes its rungs backwards. |
+| Incoherent combinations dropped | A fast EMA at or above the slow one inverts every signal; a ladder out of order takes its rungs backwards — in pips or in R. |
 
 ## It never writes anything
 

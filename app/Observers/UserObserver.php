@@ -67,10 +67,14 @@ class UserObserver
             'adx_threshold' => 25.00,
             'atr_period' => 14,
 
-            // Take profit levels with partial closes
-            // TP1: 30 pips, close 50%
-            // TP2: 100 pips, close 30%
-            // TP3: 200 pips, close remaining 20%
+            // Take profit levels with partial closes, as multiples of the stop distance:
+            // TP1 at 1R closes 50%, TP2 at 2R closes 30%, TP3 at 3R closes the rest. The
+            // first rung pays at least what a stop costs, which fixed pips against an
+            // ATR stop did not guarantee - see the tp_r migration. The pip columns are
+            // kept as the fallback for a strategy that clears its R values.
+            'tp1_r' => 1.00,
+            'tp2_r' => 2.00,
+            'tp3_r' => 3.00,
             'tp1_pips' => 30.00,
             'tp1_close_pct' => 50.00,
             'tp2_pips' => 100.00,

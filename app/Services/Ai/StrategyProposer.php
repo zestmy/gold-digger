@@ -159,16 +159,19 @@ final class StrategyProposer
             return false;
         }
 
-        $tp1 = $get('tp1_pips');
-        $tp2 = $get('tp2_pips');
-        $tp3 = $get('tp3_pips');
+        // Rungs have to climb, whichever unit they are in.
+        foreach ([['tp1_pips', 'tp2_pips', 'tp3_pips'], ['tp1_r', 'tp2_r', 'tp3_r']] as [$one, $two, $three]) {
+            $tp1 = $get($one);
+            $tp2 = $get($two);
+            $tp3 = $get($three);
 
-        if ($tp1 !== null && $tp2 !== null && $tp1 >= $tp2) {
-            return false;
-        }
+            if ($tp1 !== null && $tp2 !== null && $tp1 >= $tp2) {
+                return false;
+            }
 
-        if ($tp2 !== null && $tp3 !== null && $tp2 >= $tp3) {
-            return false;
+            if ($tp2 !== null && $tp3 !== null && $tp2 >= $tp3) {
+                return false;
+            }
         }
 
         // A stop at zero is not a stop, and a negative period is not a period.
@@ -201,13 +204,15 @@ final class StrategyProposer
 
         The strategy: an EMA cross on the entry timeframe, taken only when the higher
         timeframe's EMAs agree, filtered by ADX, with the stop at a multiple of ATR and a
-        three-rung take-profit ladder closing fixed percentages.
+        three-rung take-profit ladder closing fixed percentages. The rungs are expressed
+        as multiples of the stop distance (tp1_r, tp2_r, tp3_r - "R") when tp1_r is set,
+        and as fixed pips otherwise; propose in whichever unit the current strategy uses.
 
         You may propose only these columns: {$sweepable}
 
         Constraints that make a proposal invalid - it will be discarded before testing:
         - ema_fast must be below ema_slow
-        - tp1_pips < tp2_pips < tp3_pips
+        - tp1_pips < tp2_pips < tp3_pips, and tp1_r < tp2_r < tp3_r
         - no negative values; periods at least 2; sl_atr_multiplier above 0
 
         How to be useful:

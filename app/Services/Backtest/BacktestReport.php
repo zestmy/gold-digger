@@ -208,6 +208,12 @@ final class BacktestReport
                 'ema_slow' => $this->strategy->ema_slow,
                 'adx_threshold' => (float) $this->strategy->adx_threshold,
                 'sl_atr_multiplier' => (float) $this->strategy->sl_atr_multiplier,
+                'target_unit' => $this->strategy->tp1_r !== null ? 'r' : 'pips',
+                'tp_r' => [
+                    $this->strategy->tp1_r !== null ? (float) $this->strategy->tp1_r : null,
+                    $this->strategy->tp2_r !== null ? (float) $this->strategy->tp2_r : null,
+                    $this->strategy->tp3_r !== null ? (float) $this->strategy->tp3_r : null,
+                ],
                 'tp_pips' => [
                     (float) $this->strategy->tp1_pips,
                     (float) $this->strategy->tp2_pips,

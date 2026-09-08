@@ -112,10 +112,46 @@ class SignalPlanTest extends TestCase
         // ATR on a steady 4-wide range is 4. Stop is 1.5 x that, above entry on a sell.
         $this->assertEqualsWithDelta(4637.96 + 6.0, $plan['sl'], 0.01);
 
-        // Ladder from the configured pips, below entry on a sell, at 0.10 a pip.
+        // The default ladder is 1R / 2R / 3R of that stop, below entry on a sell.
+        $this->assertEqualsWithDelta(4637.96 - 6.0, $plan['tps'][0], 0.01);
+        $this->assertEqualsWithDelta(4637.96 - 12.0, $plan['tps'][1], 0.01);
+        $this->assertEqualsWithDelta(4637.96 - 18.0, $plan['tps'][2], 0.01);
+    }
+
+    /**
+     * A strategy without R values places its pip ladder, as it always did.
+     */
+    public function test_strategy_levels_in_pips_when_no_r_is_set(): void
+    {
+        $this->settings->update(['copier_levels' => SignalPlan::SOURCE_STRATEGY]);
+        $this->strategy->update(['tp1_r' => null, 'tp2_r' => null, 'tp3_r' => null]);
+
+        $plan = $this->plan($this->signal());
+
+        // 30 / 100 / 200 pips at 0.10 a pip, below entry on a sell.
         $this->assertEqualsWithDelta(4637.96 - 3.0, $plan['tps'][0], 0.01);
         $this->assertEqualsWithDelta(4637.96 - 10.0, $plan['tps'][1], 0.01);
         $this->assertEqualsWithDelta(4637.96 - 20.0, $plan['tps'][2], 0.01);
+    }
+
+    /**
+     * R rungs are price arithmetic on a price stop, so they can be placed before the
+     * terminal has said what a pip is. Pip rungs cannot, and the provider's stand.
+     */
+    public function test_an_unknown_pip_size_stops_a_pip_ladder_but_not_an_r_ladder(): void
+    {
+        $this->settings->update(['copier_levels' => SignalPlan::SOURCE_STRATEGY]);
+        SymbolSpec::where('symbol', 'XAUUSD')->update(['pip_size' => null]);
+
+        $inR = $this->plan($this->signal());
+        $this->assertSame(SignalPlan::SOURCE_STRATEGY, $inR['source']);
+        $this->assertEqualsWithDelta(4637.96 - 6.0, $inR['tps'][0], 0.01);
+
+        $this->strategy->update(['tp1_r' => null, 'tp2_r' => null, 'tp3_r' => null]);
+
+        $inPips = $this->plan($this->signal()->fresh());
+        $this->assertSame(SignalPlan::SOURCE_PROVIDER, $inPips['source']);
+        $this->assertStringContainsString('pip size', $inPips['why']);
     }
 
     public function test_strategy_levels_run_the_right_way_for_a_buy(): void
@@ -269,8 +305,8 @@ class SignalPlanTest extends TestCase
         $plan = $this->plan($signal);
         $summary = (new SignalPlan)->summary($plan);
 
-        // 20.00 to the last rung against a 6.00 stop.
-        $this->assertStringContainsString('3.33 : 1', $summary);
+        // 18.00 to the last rung (3R) against a 6.00 stop.
+        $this->assertStringContainsString('3.00 : 1', $summary);
         $this->assertStringContainsString('M5', $summary);
     }
 }

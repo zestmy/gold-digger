@@ -177,20 +177,64 @@ class SignalGenerationTest extends TestCase
     }
 
     /**
-     * The order carries the *final* target, not TP1. Partial closes at TP1/TP2 need a
-     * trade-management loop that does not exist yet, so an order stopped out at TP1 would
-     * close the whole position at a level meant to take half of it.
+     * The order carries the *final* target, not TP1. TP1 and TP2 are closed at market by
+     * the trade manager, so an order carrying TP1 would close the whole position at a
+     * level meant to take half of it.
+     *
+     * The default ladder is in R - 1R / 2R / 3R of the stop distance - so the order's
+     * target is three stops away, whatever the ATR happens to be.
      */
     public function test_the_order_target_is_the_final_ladder_step_not_the_first(): void
     {
         $this->seedBullishSetup();
 
-        $this->generate();
+        $signal = $this->generate();
 
         $command = TradeCommand::where('type', 'open')->firstOrFail();
 
-        // Defaults are TP1 30, TP2 100, TP3 200.
+        $this->assertEqualsWithDelta(3.0 * $signal->features['sl_pips'], (float) $command->payload['tp_pips'], 0.01);
+        $this->assertSame('r', $signal->features['target_unit']);
+    }
+
+    /**
+     * Every rung sits at its multiple of the stop distance, in price, on the signal.
+     * This is the change the first month of outcome tracking asked for: a first target
+     * that pays at least what the stop costs, instead of a fixed 30 pips that worked
+     * out to 0.6R against a 50-pip ATR stop.
+     */
+    public function test_targets_in_r_sit_at_multiples_of_the_stop_distance(): void
+    {
+        $this->seedBullishSetup();
+
+        $signal = $this->generate();
+
+        $entry = (float) $signal->entry_price;
+        $stop = $entry - (float) $signal->sl_price;
+
+        $this->assertGreaterThan(0, $stop);
+        $this->assertEqualsWithDelta($entry + $stop, (float) $signal->tp1_price, 0.001);
+        $this->assertEqualsWithDelta($entry + (2 * $stop), (float) $signal->tp2_price, 0.001);
+        $this->assertEqualsWithDelta($entry + (3 * $stop), (float) $signal->tp3_price, 0.001);
+    }
+
+    /**
+     * A strategy that clears its R values is back on fixed pips, exactly as before.
+     */
+    public function test_a_strategy_without_r_targets_still_uses_its_pip_ladder(): void
+    {
+        $this->seedBullishSetup();
+        $this->strategy->update([
+            'tp1_r' => null, 'tp2_r' => null, 'tp3_r' => null,
+            'tp1_pips' => 30, 'tp2_pips' => 100, 'tp3_pips' => 200,
+        ]);
+
+        $signal = $this->generate();
+        $command = TradeCommand::where('type', 'open')->firstOrFail();
+
         $this->assertEqualsWithDelta(200.0, (float) $command->payload['tp_pips'], 1e-9);
+        $this->assertSame('pips', $signal->features['target_unit']);
+        // pip_size 0.10: 30 pips is 3.0 in price.
+        $this->assertEqualsWithDelta((float) $signal->entry_price + 3.0, (float) $signal->tp1_price, 0.001);
     }
 
     /**
@@ -606,7 +650,7 @@ class SignalGenerationTest extends TestCase
 
         // A ladder worth far less than the stop it sits behind - taken, because nobody
         // asked for it not to be.
-        $this->strategy->update(['tp1_pips' => 1.0, 'tp2_pips' => 1.0, 'tp3_pips' => null]);
+        $this->strategy->update(['tp1_r' => null, 'tp2_r' => null, 'tp3_r' => null, 'tp1_pips' => 1.0, 'tp2_pips' => 1.0, 'tp3_pips' => null]);
 
         $signal = $this->generate();
 
@@ -618,7 +662,7 @@ class SignalGenerationTest extends TestCase
     {
         $this->seedBullishSetup();
         $this->settings->update(['min_reward_ratio' => 2.0]);
-        $this->strategy->update(['tp1_pips' => 1.0, 'tp2_pips' => 1.0, 'tp3_pips' => null]);
+        $this->strategy->update(['tp1_r' => null, 'tp2_r' => null, 'tp3_r' => null, 'tp1_pips' => 1.0, 'tp2_pips' => 1.0, 'tp3_pips' => null]);
 
         $signal = $this->generate();
 
