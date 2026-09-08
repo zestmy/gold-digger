@@ -3,6 +3,7 @@
 namespace App\Livewire\Pages;
 
 use App\Models\Trade;
+use App\Services\Outcomes\OutcomeStats;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -170,6 +171,10 @@ class Analytics extends Component
             'strategyStats' => $strategyStats,
             'dailyPnl' => $cumulativePnl,
             'costBreakdown' => $costBreakdown,
+            // Every signal, traded or not, scored against the bars that followed it. The
+            // trade metrics above are what the account made; this is what the signals
+            // were worth as published, which is the question the strategy is judged on.
+            'outcomes' => app(OutcomeStats::class)->forUser($userId, $dateConstraint),
         ]);
     }
 }

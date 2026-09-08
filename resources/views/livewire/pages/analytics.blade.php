@@ -268,6 +268,78 @@
         </div>
     </div>
 
+    {{--
+        Signal outcomes: every signal in the period, traded or not, scored from the bars
+        that followed it. Win rate here is "first target before stop", expectancy is in R
+        on the first target, and every breakdown carries its sample size because a rate
+        over ten signals is not a finding.
+    --}}
+    @php
+        $rate = fn (?float $v) => $v === null ? '—' : number_format($v, 1).'%';
+        $r = fn (?float $v) => $v === null ? '—' : (($v >= 0 ? '+' : '').number_format($v, 2).'R');
+        $tone = fn (?float $v) => $v === null ? 'text-gray-500' : ($v > 0 ? 'text-green-400' : ($v < 0 ? 'text-red-400' : 'text-gray-300'));
+    @endphp
+    <div class="rounded-lg bg-gray-800 p-6" data-signal-outcomes>
+        <div class="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 class="text-lg font-semibold text-white">Signal outcomes</h3>
+            <p class="text-xs text-gray-500">
+                Every signal scored against the bars after it, traded or not. Won means the first target came before the stop.
+            </p>
+        </div>
+
+        @if($outcomes['tracked'] === 0)
+            <p class="mt-4 text-sm text-gray-400">
+                No signals tracked in this period yet. Tracking opens on every new signal and scores it as bars arrive.
+            </p>
+        @else
+            <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                <div class="rounded-lg bg-gray-900 p-3"><p class="text-xs text-gray-500">Tracked</p><p class="mt-1 text-xl font-bold text-white">{{ $outcomes['tracked'] }}</p><p class="text-[11px] text-gray-500">{{ $outcomes['open'] }} still open</p></div>
+                <div class="rounded-lg bg-gray-900 p-3"><p class="text-xs text-gray-500">Win rate</p><p class="mt-1 text-xl font-bold {{ $outcomes['win_rate'] === null ? 'text-gray-500' : ($outcomes['win_rate'] >= 50 ? 'text-green-400' : 'text-red-400') }}">{{ $rate($outcomes['win_rate']) }}</p><p class="text-[11px] text-gray-500">{{ $outcomes['won'] }} won · {{ $outcomes['lost'] }} lost · {{ $outcomes['expired'] }} expired</p></div>
+                <div class="rounded-lg bg-gray-900 p-3"><p class="text-xs text-gray-500">Expectancy</p><p class="mt-1 text-xl font-bold {{ $tone($outcomes['expectancy_r']) }}">{{ $r($outcomes['expectancy_r']) }}</p><p class="text-[11px] text-gray-500">per signal, on TP1</p></div>
+                <div class="rounded-lg bg-gray-900 p-3"><p class="text-xs text-gray-500">Avg best excursion</p><p class="mt-1 text-xl font-bold text-green-400">{{ $r($outcomes['avg_mfe_r']) }}</p></div>
+                <div class="rounded-lg bg-gray-900 p-3"><p class="text-xs text-gray-500">Avg worst excursion</p><p class="mt-1 text-xl font-bold text-red-400">{{ $r($outcomes['avg_mae_r']) }}</p></div>
+                <div class="rounded-lg bg-gray-900 p-3"><p class="text-xs text-gray-500">Bars to TP1 / stop</p><p class="mt-1 text-xl font-bold text-white">{{ $outcomes['avg_tp1_bars'] ?? '—' }} / {{ $outcomes['avg_sl_bars'] ?? '—' }}</p></div>
+            </div>
+
+            @if($outcomes['thin'])
+                <p class="mt-3 text-xs text-yellow-400">
+                    Fewer than {{ \App\Services\Outcomes\OutcomeStats::THIN_SAMPLE }} decided signals. Read these as a direction, not a result.
+                </p>
+            @endif
+
+            <div class="mt-5 grid gap-4 md:grid-cols-2">
+                @foreach([
+                    'By source' => $outcomes['by_source'],
+                    'By confidence' => $outcomes['by_confidence'],
+                    'By session' => $outcomes['by_session'],
+                    'By instrument' => $outcomes['by_instrument'],
+                ] as $title => $groups)
+                    <div class="rounded-lg bg-gray-900 p-4">
+                        <p class="text-sm font-semibold text-gray-200">{{ $title }}</p>
+                        @if($groups === [])
+                            <p class="mt-2 text-xs text-gray-500">Nothing decided yet.</p>
+                        @else
+                            <table class="mt-2 w-full text-xs">
+                                <thead class="text-gray-500"><tr><th class="py-1 text-left font-medium">Group</th><th class="py-1 text-right font-medium">n</th><th class="py-1 text-right font-medium">Win</th><th class="py-1 text-right font-medium">Exp.</th><th class="py-1 text-right font-medium">MFE</th></tr></thead>
+                                <tbody>
+                                    @foreach($groups as $name => $g)
+                                        <tr class="border-t border-gray-800">
+                                            <td class="py-1.5 text-gray-300">{{ $name }}</td>
+                                            <td class="py-1.5 text-right text-gray-400">{{ $g['won'] + $g['lost'] }}</td>
+                                            <td class="py-1.5 text-right text-gray-200">{{ $rate($g['win_rate']) }}</td>
+                                            <td class="py-1.5 text-right {{ $tone($g['expectancy_r']) }}">{{ $r($g['expectancy_r']) }}</td>
+                                            <td class="py-1.5 text-right text-green-400">{{ $r($g['avg_mfe_r']) }}</td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        @endif
+                    </div>
+                @endforeach
+            </div>
+        @endif
+    </div>
+
     <!-- Info Box -->
     @if($metrics['total_trades'] === 0)
         <div class="rounded-lg bg-gray-800/50 border border-gray-700 p-6 text-center">

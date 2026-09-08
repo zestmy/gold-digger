@@ -171,6 +171,15 @@
                                     &middot; stop <span class="text-red-400">{{ $price($reading['stop']) }}</span>
                                 </p>
 
+                                {{-- What the bars did afterwards, traded or not. --}}
+                                @if($signal->outcome?->summary())
+                                    @php($outcome = $signal->outcome)
+                                    <p class="mt-1 text-xs {{ match ($outcome->status) { 'won' => 'text-green-400', 'lost' => 'text-red-400', 'expired' => 'text-gray-500', default => 'text-gray-500' } }}"
+                                       title="Best {{ $outcome->mfe_r === null ? '—' : number_format($outcome->mfe_r, 2) }}R, worst {{ $outcome->mae_r === null ? '—' : number_format($outcome->mae_r, 2) }}R over {{ $outcome->bars_seen }} bars">
+                                        {{ $outcome->summary() }}
+                                    </p>
+                                @endif
+
                                 <div class="mt-2 flex items-center justify-between gap-2">
                                     <div class="flex min-w-0 flex-wrap items-center gap-1.5">
                                         @if($traded)

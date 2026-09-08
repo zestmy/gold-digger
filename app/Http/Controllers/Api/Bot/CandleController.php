@@ -9,6 +9,7 @@ use App\Models\Candle;
 use App\Models\Signal;
 use App\Models\Strategy;
 use App\Models\SymbolSpec;
+use App\Services\Outcomes\OutcomeTracker;
 use App\Services\Strategy\SignalGenerator;
 use App\Services\Strategy\TradeManager;
 use Illuminate\Http\JsonResponse;
@@ -158,6 +159,14 @@ class CandleController extends Controller
         $signals = [];
         $managed = [];
         $queued = false;
+
+        if ($newBars !== []) {
+            // Score every signal waiting on this series against the bars that just
+            // arrived. Inline even when evaluation is queued: it is a handful of reads
+            // and writes against rows already keyed to this account, symbol and
+            // timeframe, and it must never depend on a worker being up.
+            app(OutcomeTracker::class)->advance($accountId, $symbol, $timeframe);
+        }
 
         if ($newBars !== []) {
             if (config('trading.queue_evaluation')) {

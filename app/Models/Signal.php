@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
 
 /**
  * Signal Model
@@ -92,5 +93,14 @@ class Signal extends Model
     public function resultingTrade(): BelongsTo
     {
         return $this->belongsTo(Trade::class, 'resulting_trade_id');
+    }
+
+    /**
+     * What became of this signal, measured from the bars that followed it - whether or
+     * not it was traded. See App\Services\Outcomes\OutcomeTracker.
+     */
+    public function outcome(): MorphOne
+    {
+        return $this->morphOne(SignalOutcome::class, 'subject');
     }
 }

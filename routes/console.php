@@ -140,3 +140,12 @@ Schedule::command('cot:fetch')->weeklyOn(6, '03:00')->withoutOverlapping();
 //
 // Off unless ai_autonomous is set, and bounded by the same fund the copier spends.
 Schedule::command('ai:decide')->everyFifteenMinutes()->withoutOverlapping();
+
+// What became of every signal, traded or not, measured from the bars that followed it.
+//
+// The candle push advances the series that just grew, so outcomes normally move with
+// the feed. This is the correction: it opens tracking for any signal that has none and
+// walks every unresolved row, so a signal written while nothing was pushing - a copied
+// one at the weekend, say - is still scored once bars arrive. Idempotent by design: a bar
+// already folded in is never counted twice. See docs/SIGNAL_OUTCOMES.md.
+Schedule::command('signals:track')->everyFiveMinutes()->withoutOverlapping();

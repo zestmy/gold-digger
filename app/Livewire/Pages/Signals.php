@@ -130,7 +130,7 @@ class Signals extends Component
         $scoped = $this->forInstrument(clone $base);
 
         $signals = (clone $scoped)
-            ->with(['strategy', 'resultingTrade'])
+            ->with(['strategy', 'resultingTrade', 'outcome'])
             ->when($this->filter === 'taken', fn ($q) => $q->whereNull('skip_reason'))
             ->when($this->filter !== '' && $this->filter !== 'taken', fn ($q) => $q->where('skip_reason', $this->filter))
             ->orderByDesc('generated_at')

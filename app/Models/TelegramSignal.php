@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
 
 /**
  * A message captured from Telegram, and what became of it.
@@ -132,6 +133,15 @@ class TelegramSignal extends Model
     public function channel(): BelongsTo
     {
         return $this->belongsTo(TelegramChannel::class, 'telegram_channel_id');
+    }
+
+    /**
+     * What became of this signal, measured from the bars that followed it - whether or
+     * not it was reviewed, approved or traded. See App\Services\Outcomes\OutcomeTracker.
+     */
+    public function outcome(): MorphOne
+    {
+        return $this->morphOne(SignalOutcome::class, 'subject');
     }
 
     /** The signal this message is a reply to, if it was captured. */
