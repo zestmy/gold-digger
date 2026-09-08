@@ -275,6 +275,83 @@ class BacktestTest extends TestCase
         $this->assertEqualsWithDelta(0.5, $b - $a, 0.001);
     }
 
+    /**
+     * A sell enters at bid and pays the spread on the way *out*, buying back at ask. Before
+     * this test existed a sell paid no spread at all - the exit was filled at bid - and
+     * every short in every backtest was one spread better than the trade it modelled.
+     */
+    public function test_a_sell_pays_the_spread_on_the_way_out(): void
+    {
+        // A short held for a fixed number of bars, then closed at market: the one exit
+        // whose price is the bar close by construction, so the spread is the only thing
+        // that can separate the two runs.
+        $this->strategy->update([
+            'exit_on_reversal' => false,
+            'max_holding_bars' => 3,
+            'tp3_r' => 50,
+            'sl_atr_multiplier' => 50,
+        ]);
+
+        $closes = $this->crossCloses('sell');
+        $last = end($closes);
+
+        for ($i = 1; $i <= 8; $i++) {
+            $closes[] = $last - ($i * 0.4);
+        }
+
+        $this->seedBars($closes, 'M5');
+        $this->seedBars($this->trendCloses(80, rising: false), 'H1');
+
+        $free = $this->backtest($this->market());
+        $costly = $this->backtest($this->market(['spreadPips' => 4.0]));
+
+        $a = $free->trades[0];
+        $b = $costly->trades[0];
+
+        $this->assertSame('sell', $a->direction);
+        $this->assertSame('time_exit', $b->closureReason);
+
+        // Entered at bid either way: a sell does not cross the spread going in.
+        $this->assertEqualsWithDelta($a->entryPrice, $b->entryPrice, 0.001);
+
+        // Bought back at ask: 4 pips at 0.10 a pip is 0.4 higher, and 4 pips worse.
+        $this->assertEqualsWithDelta(0.4, $b->closes[0]['price'] - $a->closes[0]['price'], 0.001);
+        $this->assertEqualsWithDelta(-4.0, $b->closes[0]['pips'] - $a->closes[0]['pips'], 0.01);
+    }
+
+    /**
+     * A sell's stop is a buy at ask, so the ask reaching it is what fires it - a bar whose
+     * bid high stays under the stop can still stop the trade out once the spread is added.
+     */
+    public function test_a_sell_stop_is_triggered_by_the_ask_not_the_bid(): void
+    {
+        $this->strategy->update(['exit_on_reversal' => false, 'max_holding_bars' => 50, 'tp3_r' => 50]);
+
+        $closes = $this->crossCloses('sell');
+        $last = end($closes);
+
+        // Drift up gently; the fixture's bars carry a high a little above each close.
+        for ($i = 1; $i <= 12; $i++) {
+            $closes[] = $last + ($i * 0.3);
+        }
+
+        $this->seedBars($closes, 'M5');
+        $this->seedBars($this->trendCloses(80, rising: false), 'H1');
+
+        $free = $this->backtest($this->market());
+        $entry = $free->trades[0] ?? $free->unclosed[0];
+        $stopDistance = $entry->stopPrice - $entry->entryPrice;
+
+        $this->assertGreaterThan(0, $stopDistance);
+
+        // A spread wide enough that bid never reaches the stop but ask does.
+        $wide = $this->backtest($this->market(['spreadPips' => ($stopDistance / 0.10) * 0.9]));
+        $trade = $wide->trades[0] ?? null;
+
+        $this->assertNotNull($trade, 'the ask crossing the stop must close the trade');
+        $this->assertSame('sl', $trade->closureReason);
+    }
+
     public function test_commission_reduces_net_profit_below_gross(): void
     {
         $this->seedBars($this->winningSeries(), 'M5');

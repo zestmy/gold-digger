@@ -253,6 +253,19 @@ final class Backtester
         $low = (float) $bar->low;
         $close = (float) $bar->close;
 
+        // Candle prices are bid. A buy is closed by selling at bid, so the bar is already
+        // the price it trades against. A sell is closed by buying at ask - its stop and
+        // every target are triggered by ask, and its exits fill there - so the bar is
+        // lifted by the spread before anything below reads it. Until this, a sell paid
+        // no spread at all, and every short backtest was flattered by one spread per
+        // round trip.
+        if (! $trade->isBuy()) {
+            $ask = $market->pipsToPrice($market->spreadPipsFor($bar->spread_points));
+            $high += $ask;
+            $low += $ask;
+            $close += $ask;
+        }
+
         $stopHit = $trade->isBuy() ? $low <= $trade->stopPrice : $high >= $trade->stopPrice;
         $final = $trade->finalTarget();
         $targetHit = $final !== null && ($trade->isBuy() ? $high >= $final : $low <= $final);
@@ -431,13 +444,14 @@ final class Backtester
     }
 
     /**
-     * Exit price for a market order, crossing the spread where the direction requires it.
+     * Exit price for a market order. `$mid` is already the side the position closes
+     * against - bid for a buy, ask for a sell (see manage()) - so only slippage is added
+     * here, adverse in both directions.
      */
     private function exitPrice(SimulatedTrade $trade, float $mid, MarketAssumptions $market, bool $slip): float
     {
         $slippage = $slip ? $market->pipsToPrice($market->slippagePips) : 0.0;
 
-        // A buy is closed by selling at bid; a sell is closed by buying at ask.
         return $trade->isBuy()
             ? $mid - $slippage
             : $mid + $slippage;

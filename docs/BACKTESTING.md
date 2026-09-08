@@ -42,8 +42,10 @@ A backtest is only worth running if it can say no. The ways one quietly says yes
 | Slippage | Adverse on every market order | Entries, stops, rungs and exits — never in your favour. |
 
 Candle prices are treated as **bid**, which is what MT5 charts show. A buy enters at bid+spread
-and exits at bid; a sell the other way. The spread is paid once per round trip, on the side that
-really crosses it.
+and exits at bid. A sell enters at bid and is managed entirely against **ask**: its stop and
+targets trigger on bid+spread and its exits fill there. The spread is paid once per round trip,
+on the side that really crosses it. (Until September 2026 a sell paid no spread at all, so every
+short result before then was flattered by one spread per trade.)
 
 ---
 
