@@ -7,6 +7,7 @@ use App\Models\TelegramSignal;
 use App\Services\Ai\AiFund;
 use App\Services\Telegram\SignalExecutor;
 use App\Services\Telegram\SignalIngest;
+use App\Services\Telegram\SignalParser;
 use App\Services\Telegram\SignalPlan;
 use App\Services\Telegram\SignalReviewer;
 use Illuminate\Support\Facades\Auth;
@@ -39,6 +40,15 @@ use Livewire\WithPagination;
  * It places a real order against a live account. It appears only on signals that are
  * approved and unacted-on, it states what it will risk before you press it, and every
  * gate is re-checked when you do - an approval from twenty minutes ago is not permission.
+ *
+ * ## An unparsed message can be read by a person
+ *
+ * The parser refuses more than it guesses, which is the right rule for a machine acting
+ * unattended and the wrong one for a message a reader understands at a glance. So an
+ * unparsed signal offers a form: the reader types the fields, the same coherence check
+ * the parser applies runs on them, and the signal joins the pipeline at review as if it
+ * had parsed - marked as read by a person, so the channel's parse rate stays a fact
+ * about the parser and a later reparse never overwrites what was typed.
  */
 #[Layout('layouts.app')]
 #[Title('Copied signals - FXSignalPro')]
@@ -50,6 +60,21 @@ class SignalCopier extends Component
     public string $filter = 'all';
 
     public ?int $busy = null;
+
+    /** The unparsed signal a reader is correcting, if any, and what they have typed. */
+    public ?int $correcting = null;
+
+    public string $c_symbol = '';
+
+    public string $c_direction = 'buy';
+
+    public string $c_entry = '';
+
+    public string $c_zone_high = '';
+
+    public string $c_sl = '';
+
+    public string $c_tps = '';
 
     public function updatingFilter(): void
     {
@@ -113,6 +138,113 @@ class SignalCopier extends Component
 
         $this->busy = null;
         $this->dispatch('notify', message: $result['note'], type: $result['ok'] ? 'success' : 'error');
+    }
+
+    public function startCorrection(int $id): void
+    {
+        $signal = $this->find($id);
+
+        if ($signal === null || ! $this->correctable($signal)) {
+            return;
+        }
+
+        $this->resetValidation();
+        $this->correcting = $id;
+        $this->c_symbol = (string) ($signal->symbol ?? '');
+        $this->c_direction = $signal->direction ?? 'buy';
+        $this->c_entry = '';
+        $this->c_zone_high = '';
+        $this->c_sl = '';
+        $this->c_tps = '';
+    }
+
+    public function cancelCorrection(): void
+    {
+        $this->correcting = null;
+        $this->resetValidation();
+    }
+
+    /**
+     * Take the reader's fields as the parse. Reviewed like any other signal from here.
+     */
+    public function saveCorrection(): void
+    {
+        $signal = $this->correcting === null ? null : $this->find($this->correcting);
+
+        if ($signal === null || ! $this->correctable($signal)) {
+            $this->cancelCorrection();
+
+            return;
+        }
+
+        $this->validate([
+            'c_symbol' => 'required|string|max:32|regex:/^[A-Za-z0-9._#-]+$/',
+            'c_direction' => 'required|in:buy,sell',
+            'c_entry' => 'nullable|numeric|gt:0',
+            'c_zone_high' => 'nullable|numeric|gt:0',
+            // The rule the parser exists to enforce holds for a person too.
+            'c_sl' => 'required|numeric|gt:0',
+            'c_tps' => ['nullable', 'regex:/^\s*\d+(\.\d+)?(\s*[,\/ ]\s*\d+(\.\d+)?)*\s*$/'],
+        ], [
+            'c_sl.required' => 'A stop is required. A signal without one is never traded.',
+            'c_tps.regex' => 'Targets are numbers separated by commas.',
+        ]);
+
+        $entry = $this->c_entry === '' ? null : (float) $this->c_entry;
+        $zoneHigh = $this->c_zone_high === '' ? null : (float) $this->c_zone_high;
+        $sl = (float) $this->c_sl;
+        $tps = array_values(array_map('floatval', preg_split('/[,\/\s]+/', trim($this->c_tps), -1, PREG_SPLIT_NO_EMPTY)));
+
+        if ($zoneHigh !== null && $entry === null) {
+            $this->addError('c_entry', 'A zone needs an entry for its near side.');
+
+            return;
+        }
+
+        $incoherent = app(SignalParser::class)->coherenceError($this->c_direction, $entry, $sl, $tps);
+
+        if ($incoherent !== null) {
+            $this->addError('c_sl', 'That is '.$incoherent.'.');
+
+            return;
+        }
+
+        // Targets nearest first, the order everything downstream assumes.
+        usort($tps, fn (float $a, float $b) => $this->c_direction === 'buy' ? $a <=> $b : $b <=> $a);
+
+        $signal->update([
+            'parse_status' => TelegramSignal::PARSE_OK,
+            'parse_error' => null,
+            'parsed_by' => TelegramSignal::PARSED_BY_USER,
+            'corrected_at' => now(),
+            'symbol' => strtoupper($this->c_symbol),
+            'direction' => $this->c_direction,
+            'entry_price' => $entry,
+            'entry_zone_high' => $zoneHigh,
+            'sl_price' => $sl,
+            'tp_prices' => $tps ?: null,
+            // Into the pipeline at review, exactly where a parsed message enters it.
+            'review_status' => TelegramSignal::REVIEW_PENDING,
+            'review_reasoning' => null,
+            'review_confidence' => null,
+            'reviewed_at' => null,
+        ]);
+
+        $this->cancelCorrection();
+        $this->dispatch('notify', message: 'Read as '.strtoupper($this->c_direction).' '.strtoupper($this->c_symbol).'. Awaiting review.', type: 'success');
+    }
+
+    /**
+     * Only a signal that never parsed and was never acted on. A message the ingest
+     * refused because its chat is not a source stays refused - that is a channel setting,
+     * not a reading.
+     */
+    private function correctable(TelegramSignal $signal): bool
+    {
+        return $signal->kind === TelegramSignal::KIND_SIGNAL
+            && $signal->parse_status === TelegramSignal::PARSE_FAILED
+            && $signal->execution_status === TelegramSignal::EXEC_NONE
+            && $signal->parse_error !== 'Channel is not enabled as a signal source.';
     }
 
     private function find(int $id): ?TelegramSignal

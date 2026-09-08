@@ -115,6 +115,9 @@
                             <span class="text-sm text-gray-500">Not a signal</span>
                         @endif
                         <span class="text-xs text-gray-600">{{ $signal->chat_title ?? $signal->chat_id }}</span>
+                        @if($signal->parsed_by === \App\Models\TelegramSignal::PARSED_BY_USER)
+                            <span class="rounded bg-sky-400/10 px-1.5 py-0.5 text-[11px] text-sky-400" title="A person typed these levels in; the parser could not read the message.">read by you</span>
+                        @endif
                     </div>
                     <span class="text-xs text-gray-500">{{ ($signal->posted_at ?? $signal->created_at)->diffForHumans() }}</span>
                 </div>
@@ -163,6 +166,72 @@
                         <span class="rounded bg-gray-700 px-1.5 py-0.5 text-gray-400">not parsed</span>
                         <span class="ml-2">{{ $signal->parse_error }}</span>
                     </p>
+
+                    {{-- A person can read what the parser refused to guess at. The fields go
+                         through the parser's own coherence check and then into review. --}}
+                    @php
+                        $correctable = $signal->kind === \App\Models\TelegramSignal::KIND_SIGNAL
+                            && $signal->execution_status === \App\Models\TelegramSignal::EXEC_NONE
+                            && $signal->parse_error !== 'Channel is not enabled as a signal source.';
+                    @endphp
+                    @if($correctable && $correcting === $signal->id)
+                        <form wire:submit="saveCorrection" class="mt-3 rounded-md border border-yellow-500/20 bg-yellow-500/5 p-3">
+                            <p class="text-xs text-yellow-600/90">Read it yourself. Levels are checked for coherence, then the signal is reviewed like any other.</p>
+                            <div class="mt-2 grid grid-cols-2 gap-2 md:grid-cols-6">
+                                <label class="text-xs text-gray-500">Symbol
+                                    <input type="text" wire:model="c_symbol" placeholder="XAUUSD" class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-xs text-white focus:border-yellow-500 focus:ring-yellow-500">
+                                </label>
+                                <label class="text-xs text-gray-500">Direction
+                                    <select wire:model="c_direction" class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-xs text-white focus:border-yellow-500 focus:ring-yellow-500">
+                                        <option value="buy">Buy</option>
+                                        <option value="sell">Sell</option>
+                                    </select>
+                                </label>
+                                <label class="text-xs text-gray-500">Entry <span class="text-gray-600">(blank = market)</span>
+                                    <input type="text" inputmode="decimal" wire:model="c_entry" class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-xs text-white focus:border-yellow-500 focus:ring-yellow-500">
+                                </label>
+                                <label class="text-xs text-gray-500">Zone far side
+                                    <input type="text" inputmode="decimal" wire:model="c_zone_high" class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-xs text-white focus:border-yellow-500 focus:ring-yellow-500">
+                                </label>
+                                <label class="text-xs text-gray-500">Stop <span class="text-red-400">*</span>
+                                    <input type="text" inputmode="decimal" wire:model="c_sl" class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-xs text-white focus:border-yellow-500 focus:ring-yellow-500">
+                                </label>
+                                <label class="text-xs text-gray-500">Targets <span class="text-gray-600">(comma-separated)</span>
+                                    <input type="text" wire:model="c_tps" placeholder="2640, 2630" class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-xs text-white focus:border-yellow-500 focus:ring-yellow-500">
+                                </label>
+                            </div>
+                            @error('c_symbol')
+                                <p class="mt-2 text-xs text-red-400">{{ $message }}</p>
+                            @enderror
+                            @error('c_direction')
+                                <p class="mt-2 text-xs text-red-400">{{ $message }}</p>
+                            @enderror
+                            @error('c_entry')
+                                <p class="mt-2 text-xs text-red-400">{{ $message }}</p>
+                            @enderror
+                            @error('c_zone_high')
+                                <p class="mt-2 text-xs text-red-400">{{ $message }}</p>
+                            @enderror
+                            @error('c_sl')
+                                <p class="mt-2 text-xs text-red-400">{{ $message }}</p>
+                            @enderror
+                            @error('c_tps')
+                                <p class="mt-2 text-xs text-red-400">{{ $message }}</p>
+                            @enderror
+                            <div class="mt-3 flex items-center gap-2">
+                                <button type="submit" class="rounded-md bg-yellow-500 px-3 py-1.5 text-xs font-medium text-gray-900 hover:bg-yellow-400">Save and send to review</button>
+                                <button type="button" wire:click="cancelCorrection" class="rounded-md bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-gray-600">Cancel</button>
+                            </div>
+                        </form>
+                    @elseif($correctable)
+                        <div class="mt-3 border-t border-gray-700 pt-3">
+                            <button type="button" wire:click="startCorrection({{ $signal->id }})"
+                                    class="rounded-md bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-gray-600">
+                                Read it myself
+                            </button>
+                            <span class="ml-2 text-xs text-gray-600">Type the levels; the signal is then reviewed like any other.</span>
+                        </div>
+                    @endif
                 @endif
 
                 <!-- Stage 3: the verdict -->

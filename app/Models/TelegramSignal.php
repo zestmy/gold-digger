@@ -25,6 +25,13 @@ class TelegramSignal extends Model
 
     public const PARSE_FAILED = 'unparsed';
 
+    /** Who read the fields out of the message: the text parser, the image reader, or a person. */
+    public const PARSED_BY_PARSER = 'parser';
+
+    public const PARSED_BY_IMAGE = 'image';
+
+    public const PARSED_BY_USER = 'user';
+
     public const REVIEW_PENDING = 'pending';
 
     public const REVIEW_APPROVED = 'approved';
@@ -96,7 +103,7 @@ class TelegramSignal extends Model
         'chat_title', 'chat_id', 'telegram_channel_id', 'raw_text', 'original_text', 'transcribed_text', 'from_image',
         'posted_at', 'edited_at', 'edit_count',
         'edit_action', 'edit_risk', 'edit_confidence', 'edit_reasoning',
-        'parse_status', 'parse_error', 'symbol', 'direction', 'entry_price', 'entry_zone_high',
+        'parse_status', 'parse_error', 'parsed_by', 'corrected_at', 'symbol', 'direction', 'entry_price', 'entry_zone_high',
         'sl_price', 'tp_prices',
         'follow_up_action', 'follow_up_fraction', 'follow_up_price',
         'review_status', 'review_reasoning', 'review_confidence', 'review_model', 'reviewed_at',
@@ -109,6 +116,7 @@ class TelegramSignal extends Model
             'posted_at' => 'datetime',
             'edited_at' => 'datetime',
             'from_image' => 'boolean',
+            'corrected_at' => 'datetime',
             'reviewed_at' => 'datetime',
             'tp_prices' => 'array',
             'entry_price' => 'float',

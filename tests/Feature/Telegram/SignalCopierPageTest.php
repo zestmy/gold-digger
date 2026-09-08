@@ -208,6 +208,136 @@ class SignalCopierPageTest extends TestCase
         $this->assertSame(0, TradeCommand::count());
     }
 
+    // =====================================================================
+    // A PERSON CAN READ WHAT THE PARSER COULD NOT
+    // =====================================================================
+
+    /**
+     * @param  array<string, mixed>  $overrides
+     */
+    private function unparsed(array $overrides = []): TelegramSignal
+    {
+        return $this->signal($overrides + [
+            'parse_status' => TelegramSignal::PARSE_FAILED,
+            'parse_error' => 'No stop loss found.',
+            'raw_text' => "Gold sell zone 2650-2653\nstop 2660\ntargets 2640 2630",
+            'symbol' => null,
+            'direction' => null,
+            'entry_price' => null,
+            'sl_price' => null,
+            'tp_prices' => null,
+            'review_status' => TelegramSignal::REVIEW_SKIPPED,
+        ]);
+    }
+
+    public function test_an_unparsed_signal_offers_to_be_read_by_a_person(): void
+    {
+        $this->unparsed();
+
+        Livewire::test(SignalCopier::class)->assertSee('Read it myself');
+    }
+
+    /**
+     * The reader's fields become the parse, and the signal enters the pipeline at review
+     * - exactly where a message the parser read enters it. Marked as read by a person so
+     * the parse rate stays about the parser and a reparse never overwrites it.
+     */
+    public function test_a_corrected_signal_joins_the_pipeline_at_review(): void
+    {
+        $signal = $this->unparsed();
+
+        Livewire::test(SignalCopier::class)
+            ->call('startCorrection', $signal->id)
+            ->assertSet('correcting', $signal->id)
+            ->set('c_symbol', 'xauusd')
+            ->set('c_direction', 'sell')
+            ->set('c_entry', '2650')
+            ->set('c_zone_high', '2653')
+            ->set('c_sl', '2660')
+            // Posted furthest first; stored nearest first, the order everything assumes.
+            ->set('c_tps', '2630, 2640')
+            ->call('saveCorrection')
+            ->assertHasNoErrors()
+            ->assertSet('correcting', null);
+
+        $signal->refresh();
+
+        $this->assertSame(TelegramSignal::PARSE_OK, $signal->parse_status);
+        $this->assertNull($signal->parse_error);
+        $this->assertSame(TelegramSignal::PARSED_BY_USER, $signal->parsed_by);
+        $this->assertNotNull($signal->corrected_at);
+        $this->assertSame('XAUUSD', $signal->symbol);
+        $this->assertSame('sell', $signal->direction);
+        $this->assertSame(2650.0, (float) $signal->entry_price);
+        $this->assertSame(2653.0, (float) $signal->entry_zone_high);
+        $this->assertSame(2660.0, (float) $signal->sl_price);
+        $this->assertSame([2640.0, 2630.0], array_map('floatval', $signal->tp_prices));
+        $this->assertSame(TelegramSignal::REVIEW_PENDING, $signal->review_status);
+
+        Livewire::test(SignalCopier::class)->assertSee('read by you');
+    }
+
+    /**
+     * The rule the parser exists to enforce holds for a person too: no stop, no trade.
+     */
+    public function test_a_correction_without_a_stop_is_refused(): void
+    {
+        $signal = $this->unparsed();
+
+        Livewire::test(SignalCopier::class)
+            ->call('startCorrection', $signal->id)
+            ->set('c_symbol', 'XAUUSD')
+            ->set('c_direction', 'sell')
+            ->set('c_sl', '')
+            ->call('saveCorrection')
+            ->assertHasErrors(['c_sl']);
+
+        $this->assertSame(TelegramSignal::PARSE_FAILED, $signal->fresh()->parse_status);
+    }
+
+    /**
+     * The same coherence check the parser applies. A person can mistype a level as easily
+     * as a regex can misread one, and the result would be the same inverted trade.
+     */
+    public function test_a_correction_with_the_stop_on_the_wrong_side_is_refused(): void
+    {
+        $signal = $this->unparsed();
+
+        Livewire::test(SignalCopier::class)
+            ->call('startCorrection', $signal->id)
+            ->set('c_symbol', 'XAUUSD')
+            ->set('c_direction', 'sell')
+            ->set('c_entry', '2650')
+            ->set('c_sl', '2640')
+            ->call('saveCorrection')
+            ->assertHasErrors(['c_sl'])
+            ->assertSee('a sell whose stop sits below entry');
+
+        $this->assertSame(TelegramSignal::PARSE_FAILED, $signal->fresh()->parse_status);
+    }
+
+    public function test_a_message_from_a_chat_that_is_not_a_source_cannot_be_corrected(): void
+    {
+        $signal = $this->unparsed(['parse_error' => 'Channel is not enabled as a signal source.']);
+
+        Livewire::test(SignalCopier::class)
+            ->assertDontSee('Read it myself')
+            ->call('startCorrection', $signal->id)
+            ->assertSet('correcting', null);
+    }
+
+    public function test_it_will_not_correct_another_users_signal(): void
+    {
+        $other = User::factory()->create();
+        $theirs = $this->unparsed(['user_id' => $other->id]);
+
+        Livewire::test(SignalCopier::class)
+            ->call('startCorrection', $theirs->id)
+            ->assertSet('correcting', null);
+
+        $this->assertSame(TelegramSignal::PARSE_FAILED, $theirs->fresh()->parse_status);
+    }
+
     public function test_the_page_renders_as_the_copied_tab_under_signals(): void
     {
         $this->signal();

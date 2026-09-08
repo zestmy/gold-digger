@@ -180,7 +180,7 @@ Either way, creating a user also creates:
 | `/login` | Sign in |
 | `/register` | Sign up — only defined when `REGISTRATION_ENABLED=true` |
 | `/dashboard` | **Home** — today's signals, open positions, the 30-day curve, terminal status and the auto-trade controls |
-| `/signals` | **Signals** — the AI signals with the entry card; `/signals/copied` is the Telegram copier pipeline; `/signals/scan` ranks every instrument on measured evidence |
+| `/signals` | **Signals** — the AI signals with the entry card; `/signals/copied` is the Telegram copier pipeline (unparsed messages can be read by a person there, see [`docs/TELEGRAM_COPIER.md`](docs/TELEGRAM_COPIER.md)); `/signals/scan` ranks every instrument on measured evidence |
 | `/providers` | **Providers** — which Telegram channels are followed and what each has been worth; `/providers/accounts` manages the accounts that read them |
 | `/trades` | **Trades** — open positions; `/trades/history` closed trades; `/trades/performance` the analytics computed from `trades` |
 | `/auto-trade` | **Auto-Trade** — the four things that must be true before a signal becomes a position; `/auto-trade/terminal` issues the EA token (`/auto-trade/terminal/download` ships the EA configured for this dashboard); `/auto-trade/accounts` MT5 accounts; `/auto-trade/risk` risk, sessions, filters and the AI fund |

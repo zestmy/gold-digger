@@ -275,6 +275,9 @@ final class SignalIngest
                 'transcribed_text' => $reading['transcription'],
                 'parse_status' => $parsed['ok'] ? TelegramSignal::PARSE_OK : TelegramSignal::PARSE_FAILED,
                 'parse_error' => $parsed['error'],
+                'parsed_by' => $parsed['ok']
+                    ? ($reading['from_image'] ? TelegramSignal::PARSED_BY_IMAGE : TelegramSignal::PARSED_BY_PARSER)
+                    : null,
                 'symbol' => $parsed['symbol'],
                 'direction' => $parsed['direction'],
                 'entry_price' => $parsed['entry_price'],
@@ -454,6 +457,8 @@ final class SignalIngest
         $signal->update($attributes + [
             'parse_status' => $parsed['ok'] ? TelegramSignal::PARSE_OK : TelegramSignal::PARSE_FAILED,
             'parse_error' => $parsed['error'],
+            'parsed_by' => $parsed['ok'] ? TelegramSignal::PARSED_BY_PARSER : null,
+            'corrected_at' => null,
             'symbol' => $parsed['symbol'],
             'direction' => $parsed['direction'],
             'entry_price' => $parsed['entry_price'],

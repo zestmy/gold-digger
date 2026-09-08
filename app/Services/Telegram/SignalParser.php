@@ -74,18 +74,12 @@ final class SignalParser
         $tps = $this->takeProfits($text);
         [$entry, $zoneHigh] = $this->entry($text, $direction);
 
-        // A stop on the wrong side of entry means the message was misread, not that the
-        // provider meant it. Executing this would place the stop as a target.
-        if ($entry !== null) {
-            $stopIsBelow = $sl < $entry;
+        // Levels on the wrong side of each other mean the message was misread, not that
+        // the provider meant it. Executing this would place the stop as a target.
+        $incoherent = $this->coherenceError($direction, $entry, $sl, $tps);
 
-            if ($direction === 'buy' && ! $stopIsBelow) {
-                return $this->fail('Parsed a buy whose stop sits above entry; the message was misread.');
-            }
-
-            if ($direction === 'sell' && $stopIsBelow) {
-                return $this->fail('Parsed a sell whose stop sits below entry; the message was misread.');
-            }
+        if ($incoherent !== null) {
+            return $this->fail('Parsed '.$incoherent.'; the message was misread.');
         }
 
         return [
@@ -277,6 +271,44 @@ final class SignalParser
 
             if (preg_match($pattern, $text, $m) === 1) {
                 return (float) $m[1];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Why a set of levels cannot be a trade, or null when they can.
+     *
+     * The same test for every reader of a message - the text parser, the image reader,
+     * and a person typing the fields in. A stop on the wrong side of entry, or a target
+     * on the stop's side of it, is a misreading whoever made it.
+     *
+     * @param  array<int, float>  $tps
+     */
+    public function coherenceError(string $direction, ?float $entry, float $sl, array $tps): ?string
+    {
+        $buy = $direction === 'buy';
+
+        if ($entry !== null) {
+            if ($buy && $sl >= $entry) {
+                return 'a buy whose stop sits above entry';
+            }
+
+            if (! $buy && $sl <= $entry) {
+                return 'a sell whose stop sits below entry';
+            }
+        }
+
+        // Without an entry the stop is the only anchor: a target has to be on the far
+        // side of it, or the trade has no room to be right.
+        foreach ($tps as $tp) {
+            if ($buy && $tp <= $sl) {
+                return 'a buy whose target sits below its stop';
+            }
+
+            if (! $buy && $tp >= $sl) {
+                return 'a sell whose target sits above its stop';
             }
         }
 
