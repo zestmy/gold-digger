@@ -5,13 +5,14 @@ namespace App\Observers;
 use App\Models\BotSettings;
 use App\Models\Strategy;
 use App\Models\User;
+use App\Support\StarterStrategies;
 use App\Support\TradingMode;
 
 /**
  * User Observer
  *
  * Handles automatic setup when a new user registers.
- * Creates default BotSettings and a starter Strategy so users
+ * Creates default BotSettings and the starter Strategies so users
  * don't have to configure everything from scratch.
  *
  * WHY use an observer instead of event listener?
@@ -24,7 +25,7 @@ class UserObserver
     /**
      * Handle the User "created" event.
      *
-     * Creates default bot settings and a starter strategy for new users.
+     * Creates default bot settings and the starter strategies for new users.
      * This ensures users can immediately see the dashboard without
      * manual configuration.
      */
@@ -52,51 +53,14 @@ class UserObserver
             // offers the flag any more, and the column's own default covers it.
         ]);
 
-        // Create default strategy based on "Fira-Style" gold scalping
-        // This is a trend-following strategy with partial profit taking
-        Strategy::create([
-            'user_id' => $user->id,
-            'name' => 'Fira-Style Gold Trend Scalp',
-            'symbol' => 'XAUUSD',
-
-            // Multi-timeframe: H1 for trend, M5 for entries
-            'timeframe_entry' => 'M5',
-            'timeframe_trend' => 'H1',
-
-            // EMA crossover settings
-            'ema_fast' => 20,
-            'ema_slow' => 50,
-
-            // ADX filter - only trade strong trends
-            'adx_threshold' => 25.00,
-            'atr_period' => 14,
-
-            // Take profit levels with partial closes, as multiples of the stop distance:
-            // TP1 at 1R closes 50%, TP2 at 2R closes 30%, TP3 at 3R closes the rest. The
-            // first rung pays at least what a stop costs, which fixed pips against an
-            // ATR stop did not guarantee - see the tp_r migration. The pip columns are
-            // kept as the fallback for a strategy that clears its R values.
-            'tp1_r' => 1.00,
-            'tp2_r' => 2.00,
-            'tp3_r' => 3.00,
-            'tp1_pips' => 30.00,
-            'tp1_close_pct' => 50.00,
-            'tp2_pips' => 100.00,
-            'tp2_close_pct' => 30.00,
-            'tp3_pips' => 200.00,
-            'tp3_close_pct' => 20.00,
-
-            // Stop loss based on ATR
-            'sl_atr_multiplier' => 1.50,
-
-            // Exit on reversal signal
-            'exit_on_reversal' => true,
-
-            // Max 24 bars (2 hours on M5) before forced exit
-            'max_holding_bars' => 24,
-
-            // Start inactive - user activates after review
-            'is_active' => false,
-        ]);
+        // Create the starter strategies: the "Fira-Style" gold scalp and the same
+        // trend-following trade on EURUSD and GBPUSD. All of them start inactive.
+        //
+        // The definitions live in StarterStrategies because this observer only fires on
+        // registration, so it cannot be the only place that knows what a starter is -
+        // `strategies:add-starters` reaches the accounts that already exist.
+        foreach (StarterStrategies::definitions() as $definition) {
+            Strategy::create(['user_id' => $user->id] + $definition);
+        }
     }
 }

@@ -14,6 +14,7 @@ use App\Models\Trade;
 use App\Models\User;
 use App\Notifications\TradingAlert;
 use App\Services\Monitoring\AlertNotifier;
+use App\Support\StarterStrategies;
 use App\Support\Tenancy\Tenant;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -90,20 +91,31 @@ class TenantIsolationTest extends TestCase
     }
 
     /**
-     * The two rows `UserObserver` creates on registration are covered separately, because
-     * they exist for both tenants already and so cannot be counted the same way.
+     * The rows `UserObserver` creates on registration are covered separately, because they
+     * exist for both tenants already and so cannot be counted the same way.
+     *
+     * The strategies are asserted as a set rather than with `sole()`: an account starts with
+     * one per starter symbol, and the property under test is that a tenant sees its own
+     * starters and none of anybody else's - not that there happens to be exactly one.
      */
     public function test_the_rows_created_at_registration_belong_only_to_their_owner(): void
     {
-        Tenant::for($this->alice, function () {
-            $this->assertSame($this->alice->id, BotSettings::query()->sole()->user_id);
-            $this->assertSame($this->alice->id, Strategy::query()->sole()->user_id);
-        });
+        $starters = count(StarterStrategies::definitions());
 
-        Tenant::for($this->bob, function () {
-            $this->assertSame($this->bob->id, BotSettings::query()->sole()->user_id);
-            $this->assertSame($this->bob->id, Strategy::query()->sole()->user_id);
-        });
+        foreach ([$this->alice, $this->bob] as $owner) {
+            Tenant::for($owner, function () use ($owner, $starters) {
+                $this->assertSame($owner->id, BotSettings::query()->sole()->user_id);
+
+                $strategies = Strategy::query()->get();
+
+                $this->assertCount($starters, $strategies);
+                $this->assertSame(
+                    [$owner->id],
+                    $strategies->pluck('user_id')->unique()->values()->all(),
+                    'A tenant can see a strategy it does not own.'
+                );
+            });
+        }
     }
 
     public function test_a_created_row_is_stamped_with_the_current_tenant(): void
