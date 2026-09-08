@@ -136,6 +136,26 @@ In order of what it unlocks:
    session filter - can be judged on what the signals under the new rule do, before any
    of them is traded.
 
+### Is it the stop or the entry?
+
+The summary numbers cannot say: an average worst excursion of -1.1R means many signals
+went a little past the stop and then somewhere, but not which came first. **Trades →
+Performance → "If the stop had been wider"** re-walks every decided AI signal's bars with
+the stop at 0.75× to 3× the one it had, the 1R / 2R / 3R ladder moving with it, and shows
+the win rate and expectancy at each width. Size follows the stop, so R is the same money
+on every row and the expectancies compare directly.
+
+```bash
+php artisan signals:stop-width                       # every user, AI signals, default widths
+php artisan signals:stop-width --user=you@example.com --since=2026-09-08 --multiples=1,1.5,2
+php artisan signals:stop-width --source=copied
+```
+
+How to read it: if a wider stop turns losers into winners, the stop is too tight for the
+entry. If it only turns them into slower losers or "neither", the entry is too early and
+no stop fixes it. Signals whose bars have since been pruned are counted as unscorable,
+never guessed at.
+
 ### The first change it asked for
 
 The first month of numbers: AI signals reached their first target 50% of the time and

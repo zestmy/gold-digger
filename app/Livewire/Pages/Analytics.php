@@ -4,6 +4,7 @@ namespace App\Livewire\Pages;
 
 use App\Models\Trade;
 use App\Services\Outcomes\OutcomeStats;
+use App\Services\Outcomes\StopWidthReport;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -175,6 +176,10 @@ class Analytics extends Component
             // trade metrics above are what the account made; this is what the signals
             // were worth as published, which is the question the strategy is judged on.
             'outcomes' => app(OutcomeStats::class)->forUser($userId, $dateConstraint),
+            // The same AI signals re-walked under wider and narrower stops. Whether the
+            // stop or the entry is the problem is the first question the outcomes raise,
+            // and this is the table that answers it.
+            'stopWidths' => app(StopWidthReport::class)->forUser($userId, $dateConstraint),
         ]);
     }
 }

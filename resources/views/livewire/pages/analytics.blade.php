@@ -340,6 +340,59 @@
         @endif
     </div>
 
+    {{--
+        The same AI signals, re-walked with the stop at other widths and the ladder moving
+        with it. The question it answers: is the stop too tight, or the entry too early?
+        A wider stop that turns losers into winners says the stop; one that only makes
+        them slower losers says the entry.
+    --}}
+    @if($stopWidths['scorable'] > 0)
+        <div class="mt-6 rounded-lg bg-gray-800 p-6">
+            <div class="flex flex-wrap items-baseline justify-between gap-2">
+                <h3 class="text-lg font-semibold text-white">If the stop had been wider</h3>
+                <p class="text-xs text-gray-500">
+                    {{ $stopWidths['scorable'] }} AI signals re-walked
+                    @if($stopWidths['unscorable'] > 0)
+                        &middot; {{ $stopWidths['unscorable'] }} too old to re-walk
+                    @endif
+                </p>
+            </div>
+            <p class="mt-1 text-xs text-gray-500">
+                Each row is the same signals with the stop at that multiple of the one they had, and the 1R / 2R / 3R ladder moved with it. Size follows the stop, so R is the same money on every row.
+            </p>
+            <div class="mt-4 overflow-x-auto">
+                <table class="w-full text-xs">
+                    <thead>
+                        <tr class="text-left text-gray-500">
+                            <th class="py-1.5 font-medium">Stop</th>
+                            <th class="py-1.5 text-right font-medium">Won</th>
+                            <th class="py-1.5 text-right font-medium">Lost</th>
+                            <th class="py-1.5 text-right font-medium">Neither</th>
+                            <th class="py-1.5 text-right font-medium">Win rate</th>
+                            <th class="py-1.5 text-right font-medium">Expectancy</th>
+                            <th class="py-1.5 text-right font-medium">Bars to TP1</th>
+                            <th class="py-1.5 text-right font-medium">TP3 reached</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach($stopWidths['rows'] as $row)
+                            <tr class="border-t border-gray-800 {{ $row['multiple'] === 1.0 ? 'bg-gray-900/60' : '' }}">
+                                <td class="py-1.5 text-gray-300">{{ rtrim(rtrim(number_format($row['multiple'], 2), '0'), '.') }}&times;{{ $row['multiple'] === 1.0 ? ' (as traded)' : '' }}</td>
+                                <td class="py-1.5 text-right text-gray-400">{{ $row['won'] }}</td>
+                                <td class="py-1.5 text-right text-gray-400">{{ $row['lost'] }}</td>
+                                <td class="py-1.5 text-right text-gray-500">{{ $row['expired'] }}</td>
+                                <td class="py-1.5 text-right text-gray-200">{{ $rate($row['win_rate']) }}</td>
+                                <td class="py-1.5 text-right {{ $tone($row['expectancy_r']) }}">{{ $r($row['expectancy_r']) }}</td>
+                                <td class="py-1.5 text-right text-gray-400">{{ $row['avg_tp1_bars'] ?? '—' }}</td>
+                                <td class="py-1.5 text-right text-gray-400">{{ $rate($row['tp3_rate']) }}</td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    @endif
+
     <!-- Info Box -->
     @if($metrics['total_trades'] === 0)
         <div class="rounded-lg bg-gray-800/50 border border-gray-700 p-6 text-center">
