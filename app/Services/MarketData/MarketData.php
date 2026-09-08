@@ -20,10 +20,11 @@ use App\Models\Candle;
  *
  * ## forAnalysis() prefers the vendor, and says which it used
  *
- * These are the surfaces that describe rather than decide - the chart page, the timeframe
- * ladder, the market scan, the dashboard chart. Nothing they produce becomes an order
- * without a person or a separate gate acting on it, which is what makes a vendor's series
- * acceptable there.
+ * The door for surfaces that describe rather than decide. Nothing they produce becomes an
+ * order without a person or a separate gate acting on it, which is what makes a vendor's
+ * series acceptable there. The market scan and its chart reading were the surfaces that
+ * used it; they have been removed, and the door stays for the next one so that it cannot
+ * be built onto forTrading() by accident.
  *
  * It falls back to stored bars when no vendor is configured, so a deployment that buys no
  * subscription behaves exactly as it did before this existed.

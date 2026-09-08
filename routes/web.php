@@ -4,7 +4,6 @@ use App\Http\Controllers\ExpertAdvisorDownloadController;
 use App\Livewire\Pages\Analytics;
 use App\Livewire\Pages\BotLogs;
 use App\Livewire\Pages\BrokerAccounts;
-use App\Livewire\Pages\ChartAnalysis;
 use App\Livewire\Pages\Dashboard;
 use App\Livewire\Pages\LiveTrades;
 use App\Livewire\Pages\Settings;
@@ -40,10 +39,9 @@ Route::middleware(['auth'])->group(function () {
     // Home
     Route::get('/dashboard', Dashboard::class)->name('dashboard');
 
-    // Signals: the system's own, the copied ones, and a scan on demand.
+    // Signals: the system's own, and the copied ones.
     Route::get('/signals', Signals::class)->name('signals');
     Route::get('/signals/copied', SignalCopier::class)->name('signals.copier');
-    Route::get('/signals/scan', ChartAnalysis::class)->name('analysis');
 
     // Providers: which Telegram channels are followed, and the accounts that read them.
     Route::get('/providers', SignalChannels::class)->name('signals.channels');
@@ -78,7 +76,9 @@ Route::middleware(['auth'])->group(function () {
     foreach ([
         '/trades/live' => '/trades',
         '/analytics' => '/trades/performance',
-        '/analysis' => '/signals/scan',
+        // The market scan was removed; its addresses land on the signals it ranked.
+        '/analysis' => '/signals',
+        '/signals/scan' => '/signals',
         '/signals/copier' => '/signals/copied',
         '/signals/channels' => '/providers',
         '/signals/accounts' => '/providers/accounts',

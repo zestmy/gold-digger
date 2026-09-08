@@ -22,10 +22,6 @@ computes the indicators and queues the order. See
 reversal and time exits, and the break-even stop. Positions the dashboard did not open
 are picked up by [`docs/RECONCILIATION.md`](docs/RECONCILIATION.md).
 
-> **Looking for something to trade?** [`docs/MARKET_SCAN.md`](docs/MARKET_SCAN.md) — `/signals/scan`
-> ranks every instrument there are bars for on measured evidence, then asks one question of a
-> model: of this shortlist, which. The ranking is arithmetic and works with no API key.
-
 > **Changing a strategy setting?** [`docs/BACKTESTING.md`](docs/BACKTESTING.md) — `php artisan
 > backtest` replays it over the stored bars using the same evaluator that trades, so a change can
 > be measured instead of argued about.
@@ -39,17 +35,13 @@ are picked up by [`docs/RECONCILIATION.md`](docs/RECONCILIATION.md).
 > stale rather than trading through one unseen.
 
 > **Wondering what the AI is allowed to do?** [`docs/AI_INTEGRATION.md`](docs/AI_INTEGRATION.md)
-> — nine call sites behind one key, bounded by a fund cap and a daily request allowance,
+> — seven call sites behind one key, bounded by a fund cap and a daily request allowance,
 > and a single rule: the model never produces a number that becomes a price.
 
 > **Where do the bars come from?** [`docs/MARKET_DATA.md`](docs/MARKET_DATA.md) - deep
 > history for a replay is fetched on demand and never stored, because one consumer wanted
 > 20,000 bars where the next deepest wanted 300. What decides a price still reads the
 > terminal's own series, and there is no setting that changes that.
-
-> **Building a client against this?** [`docs/ANALYSIS_API.md`](docs/ANALYSIS_API.md) - six
-> endpoints on the token the EA already uses, split so that reading structure costs
-> nothing and only asking a model does.
 
 > **More than one person using this?** [`docs/TENANCY.md`](docs/TENANCY.md) — isolation is
 > a property of the model now rather than 93 remembered `where` clauses, because the one
@@ -180,7 +172,7 @@ Either way, creating a user also creates:
 | `/login` | Sign in |
 | `/register` | Sign up — only defined when `REGISTRATION_ENABLED=true` |
 | `/dashboard` | **Home** — today's signals, open positions, the 30-day curve, terminal status and the auto-trade controls |
-| `/signals` | **Signals** — the AI signals with the entry card; `/signals/copied` is the Telegram copier pipeline (unparsed messages can be read by a person there, see [`docs/TELEGRAM_COPIER.md`](docs/TELEGRAM_COPIER.md)); `/signals/scan` ranks every instrument on measured evidence |
+| `/signals` | **Signals** — the AI signals with the entry card; `/signals/copied` is the Telegram copier pipeline (unparsed messages can be read by a person there, see [`docs/TELEGRAM_COPIER.md`](docs/TELEGRAM_COPIER.md)) |
 | `/providers` | **Providers** — which Telegram channels are followed and what each has been worth; `/providers/accounts` manages the accounts that read them |
 | `/trades` | **Trades** — open positions; `/trades/history` closed trades; `/trades/performance` the analytics computed from `trades` |
 | `/auto-trade` | **Auto-Trade** — the four things that must be true before a signal becomes a position; `/auto-trade/terminal` issues the EA token (`/auto-trade/terminal/download` ships the EA configured for this dashboard); `/auto-trade/accounts` MT5 accounts; `/auto-trade/risk` risk, sessions, filters and the AI fund |
@@ -189,7 +181,7 @@ Either way, creating a user also creates:
 | `/admin` | Filament support console, for `users.is_admin` only |
 
 The older addresses (`/setup`, `/terminal`, `/broker-accounts`, `/trades/live`, `/analytics`,
-`/analysis`, `/signals/copier`, `/signals/channels`, `/signals/accounts`, `/logs`,
+`/analysis`, `/signals/scan`, `/signals/copier`, `/signals/channels`, `/signals/accounts`, `/logs`,
 `/profile`) redirect to where the page went.
 
 ## Bot API
@@ -213,8 +205,7 @@ php artisan bot:token you@example.com --name="Windows VPS" --account=1
 
 Protocol details: [`docs/MT5_EA_BRIDGE.md`](docs/MT5_EA_BRIDGE.md).
 
-The same token also authenticates `/api/v1/analysis/*` ([`docs/ANALYSIS_API.md`](docs/ANALYSIS_API.md))
-and `/api/v1/telegram/*` for a self-hosted collector ([`tools/telegram-collector/`](tools/telegram-collector/)).
+The same token also authenticates `/api/v1/telegram/*` for a self-hosted collector ([`tools/telegram-collector/`](tools/telegram-collector/)).
 The hosted session worker under `/api/v1/telegram/worker/*` uses `TELEGRAM_WORKER_TOKEN`
 instead — an infrastructure credential, not an issued one ([`tools/telegram-worker/`](tools/telegram-worker/)).
 
@@ -314,7 +305,7 @@ gold-digger/
 ├── mql5/                      # MetaTrader 5 Expert Advisor (the executor)
 ├── tools/                     # Telegram collector and hosted session worker (Python)
 ├── routes/
-│   ├── api.php                # /api/v1/bot, /api/v1/analysis, /api/v1/telegram
+│   ├── api.php                # /api/v1/bot, /api/v1/telegram
 │   ├── console.php            # The schedule
 │   └── web.php                # Dashboard routes
 ├── resources/views/

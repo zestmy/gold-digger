@@ -28,7 +28,8 @@ class NavigationTest extends TestCase
         return [
             'live trades' => ['/trades/live', '/trades'],
             'analytics' => ['/analytics', '/trades/performance'],
-            'chart analysis' => ['/analysis', '/signals/scan'],
+            'chart analysis' => ['/analysis', '/signals'],
+            'market scan' => ['/signals/scan', '/signals'],
             'signal copier' => ['/signals/copier', '/signals/copied'],
             'channels' => ['/signals/channels', '/providers'],
             'telegram accounts' => ['/signals/accounts', '/providers/accounts'],

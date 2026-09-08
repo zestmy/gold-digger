@@ -35,8 +35,6 @@ enforces it by construction rather than by asking nicely:
 | Surface | What the model decides | How a wrong number is made impossible |
 |---|---|---|
 | `AutonomousTrader` | Whether there is a trade, and its direction | Stop comes from ATR; targets are multiples of that stop |
-| `ChartAnalyst` | Which levels matter, and a plan | Picks levels **by index** from pivots `Structure` measured |
-| `ScanAnalyst` | Which of a ranked shortlist to prefer | Names candidates **by number**; prices substituted back here |
 | `StrategyProposer` | Candidate parameter sets | Filtered against `ParameterGrid::SWEEPABLE`; `WalkForward` judges |
 | `FollowUpInterpreter` | Which of six actions a reply means | Closed enum; anything unmappable returns `none` |
 | `ImageSignalReader` | What the screenshot says | Transcribe not interpret; refuses unclear reads; coherence-checked |
@@ -128,17 +126,11 @@ the open internet to read it.
 Analyses are cached against the newest bar, so a dashboard left open all day costs one call
 per bar at most rather than one per poll. Refresh bypasses it.
 
-`ScanAnalyst` makes **one call for the whole shortlist**. Twenty instruments asked about
-individually would be twenty calls answering a question that is comparative — "which of
-these" cannot be answered by twenty opinions that never saw each other. The cheap shape and
-the correct shape agree here.
-
 ### Who pays, and how much they may spend
 
-All nine call sites run on **one platform API key**. For a single operator that is simply
+All seven call sites run on **one platform API key**. For a single operator that is simply
 their own OpenRouter bill. As a product it is unbounded, unattributed cost of goods: a
-tenant who never places a trade can run chart analyses, market scans and the strategy
-improver without limit, and until recently nothing recorded that they had.
+tenant who never places a trade can run the strategy improver without limit, and until recently nothing recorded that they had.
 
 So every call is metered. `AiSpend` gates on a per-tenant daily request count and
 `ai_usage` records what each one cost.
@@ -180,7 +172,7 @@ everywhere at once.
 
 | Key | Env | Used by | The job |
 |---|---|---|---|
-| `ai.model` | `OPENROUTER_MODEL` | `AutonomousTrader`, `ChartAnalyst`, `ScanAnalyst`, `PairAnalyst` | Reading numbers this system computed |
+| `ai.model` | `OPENROUTER_MODEL` | `AutonomousTrader`, `PairAnalyst` | Reading numbers this system computed |
 | `ai.reviewer_model` | `OPENROUTER_REVIEWER_MODEL` | `SignalReviewer`, `FollowUpInterpreter`, `EditInterpreter` | Judging a stranger's words, with a position on the line |
 | `ai.proposer_model` | `OPENROUTER_PROPOSER_MODEL` | `StrategyProposer` | Reasoning about indicator behaviour |
 | `ai.vision_model` | `OPENROUTER_VISION_MODEL` | `ImageSignalReader` | Transcribing a screenshot |

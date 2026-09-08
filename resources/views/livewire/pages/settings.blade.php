@@ -262,7 +262,7 @@
             <h3 class="text-lg font-semibold text-white">AI Requests Today</h3>
 
             <p class="mt-1 text-sm text-gray-400">
-                Chart analysis, market scans, signal review and the strategy improver all ask a
+                The dashboard's written analysis, signal review and the strategy improver all ask a
                 model something. This is how many of those you have left today.
             </p>
 
@@ -286,7 +286,7 @@
                          half of every analysis surface is arithmetic and costs nothing. --}}
                     <p class="mt-3 border-t border-gray-800 pt-3 text-xs text-red-400">
                         Today's requests are used up; they reset at midnight UTC. Measured readings
-                        &mdash; levels, structure, confluence and the market scan ranking &mdash; are
+                        &mdash; the trend card, confluence and the signal card &mdash; are
                         arithmetic and keep working. Only the written analysis is paused.
                     </p>
                 @else

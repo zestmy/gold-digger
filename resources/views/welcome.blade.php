@@ -240,7 +240,7 @@
                         <li class="flex gap-x-3"><span class="text-yellow-400">&#10003;</span> Real-time AI signals, Gold and the majors</li>
                         <li class="flex gap-x-3"><span class="text-yellow-400">&#10003;</span> Telegram alerts</li>
                         <li class="flex gap-x-3"><span class="text-yellow-400">&#10003;</span> Unlimited providers, each scored</li>
-                        <li class="flex gap-x-3"><span class="text-yellow-400">&#10003;</span> Market scan on demand</li>
+                        <li class="flex gap-x-3"><span class="text-yellow-400">&#10003;</span> Every signal scored against what followed</li>
                     </ul>
                     @auth
                         <a href="{{ route('dashboard') }}" class="mt-8 block rounded-md bg-yellow-500 px-4 py-2.5 text-center text-sm font-semibold text-gray-900 transition-colors hover:bg-yellow-400">Go to Dashboard</a>

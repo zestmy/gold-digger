@@ -8,7 +8,6 @@ use App\Models\BotLog;
 use App\Models\BotSettings;
 use App\Models\BotToken;
 use App\Models\BrokerAccount;
-use App\Models\ChartAnalysis;
 use App\Models\DailySummary;
 use App\Models\Signal;
 use App\Models\Strategy;
@@ -77,7 +76,6 @@ class AppServiceProvider extends ServiceProvider
             BotSettings::class,
             BotToken::class,
             BrokerAccount::class,
-            ChartAnalysis::class,
             DailySummary::class,
             Signal::class,
             Strategy::class,
@@ -128,20 +126,6 @@ class AppServiceProvider extends ServiceProvider
         // A collector forwards messages as they arrive in channels a person subscribes to.
         // Even a busy signal channel is a few messages a minute.
         RateLimiter::for('collector', fn (Request $request) => Limit::perMinute(120)
-            ->by($this->credentialKey($request))
-        );
-
-        // Reading a chart is cheap and pollable - levels, structure, the ladder, the setup
-        // candidates are all arithmetic. A client refreshing a chart every few seconds is
-        // doing nothing this box should mind.
-        RateLimiter::for('analysis', fn (Request $request) => Limit::perMinute(120)
-            ->by($this->credentialKey($request))
-        );
-
-        // Asking a model is neither. This is the coarse guard; the real bound is the
-        // tenant's daily AI allowance, which this sits in front of so a hot loop meets a
-        // 429 rather than silently spending a day's calls in a minute.
-        RateLimiter::for('analysis-ai', fn (Request $request) => Limit::perMinute(10)
             ->by($this->credentialKey($request))
         );
 

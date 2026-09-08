@@ -161,8 +161,8 @@ return [
     | ## Never pruned, at any setting
     |
     | `trades`, `trade_partials`, `trade_screenshots` and `daily_summaries` are the
-    | financial record. `signals`, `telegram_signals` and `chart_analyses` are the evidence
-    | for "was any of this any good" - which is the entire reason those three tables store
+    | financial record. `signals` and `telegram_signals` are the evidence
+    | for "was any of this any good" - which is the entire reason those two tables store
     | refusals as carefully as they store decisions. Deleting them to save disk would undo
     | the argument for having them.
     |

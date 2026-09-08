@@ -6,7 +6,6 @@ use App\Models\Alert;
 use App\Models\BotLog;
 use App\Models\BrokerAccount;
 use App\Models\Candle;
-use App\Models\ChartAnalysis;
 use App\Models\Signal;
 use App\Models\Strategy;
 use App\Models\Trade;
@@ -77,9 +76,9 @@ class PruneOldDataTest extends TestCase
     }
 
     /**
-     * `signals` and `chart_analyses` store refusals as carefully as decisions, precisely so
-     * "was the filter too strict" and "was the analyst any good" stay answerable. Pruning
-     * them to save disk would undo the reason they exist.
+     * `signals` stores refusals as carefully as decisions, precisely so "was the filter
+     * too strict" stays answerable. Pruning them to save disk would undo the reason they
+     * exist.
      */
     public function test_the_decision_history_is_never_pruned(): void
     {
@@ -92,19 +91,9 @@ class PruneOldDataTest extends TestCase
             'created_at' => now()->subYears(3),
         ]);
 
-        $analysis = ChartAnalysis::query()->forceCreate([
-            'user_id' => $this->user->id,
-            'symbol' => 'XAUUSD', 'timeframe' => 'M5',
-            'bar_open_time' => now()->subYears(3),
-            'bias' => 'neutral', 'plan' => 'wait',
-            'headline' => 'Nothing here.', 'structure' => 's', 'reasoning' => 'r', 'invalidation' => 'i',
-            'created_at' => now()->subYears(3),
-        ]);
-
         $this->artisan('data:prune')->assertSuccessful();
 
         $this->assertDatabaseHas('signals', ['id' => $signal->id]);
-        $this->assertDatabaseHas('chart_analyses', ['id' => $analysis->id]);
     }
 
     /**

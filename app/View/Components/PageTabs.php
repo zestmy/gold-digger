@@ -25,7 +25,6 @@ class PageTabs extends Component
         'signals' => [
             ['signals', 'AI signals'],
             ['signals.copier', 'Copied'],
-            ['analysis', 'Market scan'],
         ],
         'providers' => [
             ['signals.channels', 'Channels'],

@@ -12,8 +12,6 @@ for, and DEPLOYMENT.md's *Retention* section for what is kept.
 |---|---|
 | `StrategyEvaluator` — trading | 300 |
 | `PriceChartCard` — dashboard chart | 300 |
-| `TimeframeSummary` — the ladder | 260 per rung |
-| `ChartAnalyst` — chart reading | 120 |
 | **`StrategyImprovement` — walk-forward** | **20,000** |
 
 One consumer wanted two orders of magnitude more history than everything else combined.
@@ -45,8 +43,8 @@ A switch that could point the stop calculation at a third party is a switch some
 eventually flips at three in the morning. So there isn't one.
 
 **Everything that decides a price still reads the terminal's own bars**: `MarketContext`,
-`SignalGenerator`, `TradeManager`, `SignalQuality`, `SignalSeries`, `AutonomousTrader`,
-`MarketScanner`. None of them changed.
+`SignalGenerator`, `TradeManager`, `SignalQuality`, `SignalSeries`, `AutonomousTrader`.
+None of them changed.
 
 ---
 

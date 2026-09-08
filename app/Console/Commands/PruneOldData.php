@@ -24,7 +24,7 @@ use Illuminate\Support\Facades\DB;
  * ## What it will not touch
  *
  * `trades`, `trade_partials`, `trade_screenshots` and `daily_summaries` are the financial
- * record. `signals`, `telegram_signals` and `chart_analyses` are the evidence for whether
+ * record. `signals` and `telegram_signals` are the evidence for whether
  * any of this works - all three store refusals as carefully as decisions, precisely so that
  * "was the filter too strict" and "was the analyst any good" stay answerable. Deleting them
  * to save disk would undo the reason they exist.

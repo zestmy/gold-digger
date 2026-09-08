@@ -11,9 +11,9 @@ use App\Models\BotSettings;
  *
  * ## Why this exists at all
  *
- * The ratio was already computed in three places - `MarketScanner`, `SignalPlan` and
- * `ChartAnalyst` - displayed on two pages, stored on two tables, and put in front of the
- * reviewer model. What none of them did was refuse anything. A copied signal offering to
+ * The ratio was already computed in several places - `SignalPlan`, the signal card, the
+ * since-removed market scan - displayed on two pages, stored on two tables, and put in
+ * front of the reviewer model. What none of them did was refuse anything. A copied signal offering to
  * risk three to make one cleared every gate this system has, because no gate looked.
  *
  * ## Measured to the exit the order actually carries

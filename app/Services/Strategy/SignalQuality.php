@@ -233,9 +233,8 @@ final class SignalQuality
         ?float $entryHigh = null,
         ?array $market = null,
     ): array {
-        // Recomputed unless the caller already has it. `MarketScanner` does, for every
-        // instrument it sweeps, and computing it twice per symbol is two more series reads
-        // per row for an answer that cannot have changed in between.
+        // Recomputed unless the caller already has it: computing it twice per symbol is
+        // two more series reads for an answer that cannot have changed in between.
         $market ??= $this->context->for($strategy, $brokerAccountId, $symbol);
 
         $settings = BotSettings::where('user_id', $strategy->user_id)->first();

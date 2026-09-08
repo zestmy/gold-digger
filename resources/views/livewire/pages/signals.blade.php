@@ -71,15 +71,9 @@
     <div class="grid gap-6 lg:grid-cols-5">
         <!-- The feed -->
         <div class="lg:col-span-2">
-            <div class="mb-3 flex items-center justify-between gap-2">
-                <div>
-                    <h2 class="text-sm font-semibold text-white">Feed</h2>
-                    <p class="text-xs text-gray-500">{{ number_format($total) }} recorded</p>
-                </div>
-                <a href="{{ route('analysis') }}"
-                   class="shrink-0 rounded-md bg-gray-800 px-3 py-1.5 text-xs font-medium text-yellow-400 ring-1 ring-inset ring-gray-700 hover:bg-gray-700">
-                    Scan markets &rarr;
-                </a>
+            <div class="mb-3">
+                <h2 class="text-sm font-semibold text-white">Feed</h2>
+                <p class="text-xs text-gray-500">{{ number_format($total) }} recorded</p>
             </div>
 
             <!-- Instrument -->

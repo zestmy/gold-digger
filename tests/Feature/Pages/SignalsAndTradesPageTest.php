@@ -236,9 +236,9 @@ class SignalsAndTradesPageTest extends TestCase
             ->assertOk()
             ->assertSee('Signals')
             ->assertSee('Price feed')
-            // The feed offers the scan, and the tab strip names the page's siblings.
-            ->assertSee('Scan markets')
-            ->assertSee('Market scan')
+            // The tab strip names the page's sibling.
+            ->assertSee('Copied')
+            ->assertDontSee('Market scan')
             ->assertSee('Why declined signals are recorded');
     }
 
