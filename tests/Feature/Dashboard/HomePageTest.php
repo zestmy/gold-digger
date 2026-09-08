@@ -333,6 +333,43 @@ class HomePageTest extends TestCase
             ->assertSee('AWAITING REVIEW');
     }
 
+    /**
+     * DECLINED answers "did it trade"; the reader's question is "why not". The reviewer's
+     * reasoning and the executor's note were on the Copied page only, so from here a
+     * declined signal looked like a bug.
+     */
+    public function test_a_refused_copied_signal_says_why_on_the_dashboard(): void
+    {
+        $this->copiedSignal([
+            'review_status' => TelegramSignal::REVIEW_DECLINED,
+            'execution_status' => TelegramSignal::EXEC_NONE,
+            'review_reasoning' => 'The stop sits inside the zone. A resting order would be stopped before it fills.',
+        ]);
+        $this->copiedSignal([
+            'review_status' => TelegramSignal::REVIEW_APPROVED,
+            'execution_status' => TelegramSignal::EXEC_BLOCKED,
+            'review_reasoning' => 'Approved on the levels as posted.',
+            'execution_note' => 'No executor is online to place the order.',
+        ]);
+
+        Livewire::test(TodaySignalsCard::class)
+            ->assertSee('DECLINED')
+            ->assertSee('The stop sits inside the zone.')
+            ->assertSee('BLOCKED')
+            ->assertSee('No executor is online to place the order.')
+            // A blocked signal's note is the executor's, not the stale approval.
+            ->assertDontSee('Approved on the levels as posted.');
+    }
+
+    public function test_an_executed_copied_signal_carries_no_refusal_note(): void
+    {
+        $this->copiedSignal(['review_reasoning' => 'Clean levels, taken.']);
+
+        $rows = Livewire::test(TodaySignalsCard::class)->get('rows');
+
+        $this->assertNull($rows[0]['note']);
+    }
+
     public function test_the_list_merges_both_sources_newest_first_and_stops_at_eight(): void
     {
         for ($i = 0; $i < 6; $i++) {

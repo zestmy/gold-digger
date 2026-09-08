@@ -37,6 +37,15 @@ use Livewire\Component;
  * TRADED, or HELD with the reason it was held. For a copied signal the chip is where it
  * got to in the copier's pipeline, execution first because that is the later stage.
  *
+ * ## A refusal carries its reason
+ *
+ * A chip that says DECLINED or BLOCKED answers "did it trade" and not "why not", and
+ * "why not" is the question a reader has. The reviewer wrote its reasoning and the
+ * executor wrote its note; both were on the Copied page and nowhere else, so from the
+ * dashboard a declined signal looked like a bug. Each row now carries the first sentence
+ * of that reason under its chip, with the whole of it on hover. The AI rows had this
+ * already, folded into the chip; the copied rows get the same courtesy.
+ *
  * Nothing here is computed that the row does not already carry or arithmetic on it cannot
  * reproduce; see SignalCard for why that matters.
  */
@@ -144,10 +153,23 @@ class TodaySignalsCard extends Component
             'grade' => $reading['grade'],
             'chip' => $chip,
             'tone' => $tone,
+            'note' => $this->aiNote($signal),
             // Straight onto the card for this row: the Signals page reads the selected
             // id from its address, so a row here opens the same signal there.
             'href' => route('signals', ['selected' => $signal->id]),
         ];
+    }
+
+    /**
+     * The help text for a held signal's reason - the same sentence the Signals page shows.
+     */
+    private function aiNote(Signal $signal): ?string
+    {
+        if ($signal->was_executed || $signal->skip_reason === null) {
+            return null;
+        }
+
+        return Signals::REASONS[$signal->skip_reason]['help'] ?? null;
     }
 
     /**
@@ -202,8 +224,32 @@ class TodaySignalsCard extends Component
             'grade' => null,
             'chip' => $chip,
             'tone' => $tone,
+            'note' => $this->copiedNote($signal),
             'href' => route('signals.copier'),
         ];
+    }
+
+    /**
+     * Why a copied signal did not trade, from whichever stage stopped it. Execution first,
+     * as with the chip: a signal blocked at execution was approved, and the executor's
+     * note is the later and more specific of the two.
+     */
+    private function copiedNote(TelegramSignal $signal): ?string
+    {
+        if ($signal->parse_status === TelegramSignal::PARSE_FAILED) {
+            return 'The message could not be read as a signal.';
+        }
+
+        if (in_array($signal->execution_status, [TelegramSignal::EXEC_BLOCKED, TelegramSignal::EXEC_FAILED], true)) {
+            return $signal->execution_note ?: null;
+        }
+
+        if ($signal->execution_status === TelegramSignal::EXEC_NONE
+            && $signal->review_status === TelegramSignal::REVIEW_DECLINED) {
+            return $signal->review_reasoning ?: null;
+        }
+
+        return null;
     }
 
     /**

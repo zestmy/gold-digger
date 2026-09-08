@@ -111,11 +111,19 @@
                             @endif
                         </div>
 
-                        {{-- The chip --}}
-                        <div class="shrink-0 sm:w-40 sm:text-right">
+                        {{-- The chip, and the reason when the chip is a refusal --}}
+                        <div class="shrink-0 sm:w-48 sm:text-right">
                             <span class="inline-block whitespace-nowrap rounded px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ring-1 ring-inset {{ $chipClasses[$row['tone']] ?? $chipClasses['muted'] }}">
                                 {{ $row['chip'] }}
                             </span>
+                            @if(! empty($row['note']))
+                                @php
+                                    // The first sentence is the verdict; the rest is the argument, kept on hover.
+                                    $first = preg_split('/(?<=[.!?])\s+/', trim($row['note']), 2)[0];
+                                    $short = mb_strlen($first) > 110 ? mb_substr($first, 0, 107).'…' : $first;
+                                @endphp
+                                <p class="mt-1 text-[11px] leading-snug text-gray-500 sm:line-clamp-2" title="{{ $row['note'] }}">{{ $short }}</p>
+                            @endif
                         </div>
                     </a>
                 </li>
