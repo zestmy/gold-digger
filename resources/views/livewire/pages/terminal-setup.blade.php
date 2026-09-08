@@ -22,13 +22,13 @@
                         Expert Advisor
                     </h3>
                     <p class="mt-2 text-sm text-gray-300">
-                        Already pointed at <code class="text-gray-100">{{ $whitelistUrl }}</code>, so there is
-                        nothing to edit before compiling.
+                        Built and ready to attach: the archive carries the compiled EA and a preset that
+                        points it at <code class="text-gray-100">{{ $whitelistUrl }}</code>. Nothing to compile.
                     </p>
                     <p class="mt-1 text-xs text-gray-500">
-                        Source, not a compiled binary &mdash; MetaEditor builds it in a keystroke, and that
-                        compile is what proves the terminal can. Speaks wire protocol {{ $wireVersion }};
-                        an older copy refuses commands and says so rather than misreading them.
+                        The source is included for anyone who wants to read it or build it themselves.
+                        Speaks wire protocol {{ $wireVersion }}; an older copy refuses commands and says so
+                        rather than misreading them.
                     </p>
                 </div>
 
@@ -161,12 +161,12 @@
         <div class="rounded-lg bg-gray-800 p-6">
             <h3 class="text-sm font-medium text-gray-400">
                 <span class="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-gray-700 text-xs text-gray-300">4</span>
-                Compile and attach
+                Attach
             </h3>
             <ol class="mt-3 space-y-2 text-sm text-gray-300">
                 <li>Extract the archive over <em>File &rarr; Open Data Folder</em>, merging the MQL5 directory.</li>
-                <li>Open <code class="text-gray-400">Experts/FXSignalPro/FXSignalPro.mq5</code> in MetaEditor and press F7.</li>
-                <li>Drag it onto any chart of a <strong>demo</strong> account, paste the token into <code class="text-gray-400">ApiToken</code>.</li>
+                <li>Restart MetaTrader, or refresh the Navigator's Expert Advisors. FXSignalPro appears there; nothing to compile.</li>
+                <li>Drag it onto any chart of a <strong>demo</strong> account. In the Inputs tab press <em>Load</em>, choose <code class="text-gray-400">FXSignalPro.set</code>, then paste the token into <code class="text-gray-400">ApiToken</code>.</li>
                 <li>Tick <strong>Allow Algo Trading</strong> in the Common tab, and check the toolbar button too.</li>
             </ol>
 

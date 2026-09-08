@@ -35,14 +35,25 @@ synchronous call.
 
 ### 1. Install the files
 
-Copy into your terminal's data folder (MetaTrader → File → Open Data Folder):
+The dashboard's **Auto-Trade → Terminal** page has a download: an archive laid out as the
+terminal's data folder, carrying the compiled `FXSignalPro.ex5`, the source, and a preset
+(`MQL5/Presets/FXSignalPro.set`) that points the EA at the dashboard that served it. Extract
+it over the data folder (MetaTrader → File → Open Data Folder), restart or refresh the
+Navigator, and the EA is there. No compiling.
+
+The binary is committed at `mql5/Experts/FXSignalPro/FXSignalPro.ex5` beside a manifest
+naming the sources it was built from. `php artisan ea:build` rebuilds it on a machine with
+MetaEditor; `ExpertAdvisorBuildTest` fails on every machine when the sources have changed
+and the binary has not, so the two cannot drift silently.
+
+Working from the repository instead, copy into the data folder:
 
 | Repo path | Terminal path |
 |---|---|
 | `mql5/Include/FXSignalPro/` | `MQL5/Include/FXSignalPro/` |
 | `mql5/Experts/FXSignalPro/` | `MQL5/Experts/FXSignalPro/` |
 
-Open `FXSignalPro.mq5` in MetaEditor and compile (F7).
+and either use the `.ex5` as is or open `FXSignalPro.mq5` in MetaEditor and compile (F7).
 
 ### 2. Whitelist the dashboard URL
 
@@ -362,7 +373,10 @@ The Experts tab in the terminal carries the same messages with more detail.
   that has a terminal installed, `ExpertAdvisorCompilesTest` finds MetaEditor and the
   terminal's standard library on its own and compiles the repository's copy in a scratch
   folder — it never writes to the terminal's own MQL5 tree — and is skipped anywhere
-  else. Everything past compiling has to be verified on a demo account.
+  else. What CI *can* check is that the committed binary matches the committed source:
+  `ExpertAdvisorBuildTest` compares the build manifest's fingerprint to the sources, so an
+  MQL5 edit without `php artisan ea:build` fails the suite. Everything past compiling has
+  to be verified on a demo account.
 - **A `modify` clamps only the level it names.** Passing zero for the take profit leaves
   the position's target exactly where it is. Re-clamping the existing target against the
   current price looked harmless and was not: every trailing move that landed within the

@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\Bot;
 
+use App\Console\Commands\BuildExpertAdvisor;
+use App\Http\Controllers\ExpertAdvisorDownloadController;
 use App\Livewire\Pages\TerminalSetup;
 use App\Models\BotToken;
 use App\Models\BrokerAccount;
@@ -100,6 +102,36 @@ class TerminalSetupTest extends TestCase
 
         $this->assertStringContainsString(TradeCommand::WIRE_VERSION, $zip['README.txt']);
         $this->assertStringContainsString('https://fx.example.com', $zip['README.txt']);
+    }
+
+    /**
+     * Setup is extract, whitelist, drag onto a chart. The compiled binary is what makes
+     * "compile it yourself" no longer a step, and the preset is what points it here
+     * without baking one deployment's hostname into a binary.
+     */
+    public function test_the_archive_carries_the_built_binary_and_a_preset_for_this_dashboard(): void
+    {
+        config(['app.url' => 'https://fx.example.com']);
+
+        $zip = $this->extract($this->get(route('terminal.download')));
+
+        $this->assertArrayHasKey(ExpertAdvisorDownloadController::BINARY_IN_ARCHIVE, $zip);
+        $this->assertSame(
+            file_get_contents(base_path(BuildExpertAdvisor::BINARY)),
+            $zip[ExpertAdvisorDownloadController::BINARY_IN_ARCHIVE],
+            'The archive must carry the committed binary byte for byte.',
+        );
+
+        $preset = $zip[ExpertAdvisorDownloadController::PRESET_IN_ARCHIVE];
+
+        // MT5 writes and reads its presets as UTF-16LE with a byte-order mark.
+        $this->assertStringStartsWith("\xFF\xFE", $preset);
+        $text = mb_convert_encoding(substr($preset, 2), 'UTF-8', 'UTF-16LE');
+        $this->assertStringContainsString("ApiBaseUrl=https://fx.example.com\r\n", $text);
+        $this->assertStringNotContainsString('ApiToken', $text);
+
+        $this->assertStringContainsString('No compiling is needed', $zip['README.txt']);
+        $this->assertStringContainsString('FXSignalPro.set', $zip['README.txt']);
     }
 
     public function test_the_download_requires_a_login(): void

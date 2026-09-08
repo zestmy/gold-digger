@@ -2,24 +2,32 @@
 
 namespace App\Http\Controllers;
 
+use App\Console\Commands\BuildExpertAdvisor;
 use App\Models\TradeCommand;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use ZipArchive;
 
 /**
- * Ships the Expert Advisor, configured for this dashboard.
+ * Ships the Expert Advisor, built and configured for this dashboard.
  *
- * ## The URL is substituted, not hardcoded
+ * ## A binary, ready to attach
  *
- * `ApiBaseUrl` in the committed source names the canonical dashboard, https://fxsignal.pro.
- * Pinning any one deployment's hostname there would be wrong for anyone else running it,
- * and telling people to edit MQL5 by hand before their first compile is a step that gets
- * skipped.
+ * The archive carries the compiled `FXSignalPro.ex5` that `ea:build` produced from the
+ * committed source, so setup is extract, whitelist, drag onto a chart. Compiling was the
+ * step first-time users got wrong most often, and every way of getting it wrong looked
+ * from the dashboard like a terminal that never connected. The source travels too, for
+ * anyone who wants to read it or build it themselves.
  *
- * So the archive is built per request with `config('app.url')` written into the default.
- * The EA arrives already pointing at the dashboard that served it, and remains overridable
- * on the chart like every other input.
+ * ## The URL is a preset, not a hardcoded default
+ *
+ * `ApiBaseUrl` in the committed source names the canonical dashboard, and the binary
+ * was compiled with that default. Pinning any one deployment's hostname into a binary
+ * would be wrong for anyone else running it, so this dashboard's URL is written into a
+ * preset file - `MQL5/Presets/FXSignalPro.set`, which the Inputs tab loads with one
+ * click - and, for anyone who compiles the source instead, substituted into the source's
+ * default as well. Either way the EA arrives pointing at the dashboard that served it,
+ * and remains overridable on the chart like every other input.
  *
  * ## The token is not included
  *
@@ -27,31 +35,37 @@ use ZipArchive;
  * - into a shared folder, a support thread, a backup. The token is shown once on the setup
  * page with a copy button, which costs one paste and keeps the secret out of a file that
  * exists to be moved around.
- *
- * ## Source, not the compiled binary
- *
- * `.ex5` is machine-specific enough that shipping one built here is a worse answer than
- * shipping the source and having MetaEditor build it - and compiling is the step that
- * proves the terminal can, which is exactly what a first-time setup needs to establish.
  */
 class ExpertAdvisorDownloadController extends Controller
 {
-    /** Files that make up the EA, and where they belong in the terminal's data folder. */
-    private const FILES = [
+    /** Source files, and where they belong in the terminal's data folder. */
+    private const SOURCES = [
         'mql5/Experts/FXSignalPro/FXSignalPro.mq5' => 'MQL5/Experts/FXSignalPro/FXSignalPro.mq5',
         'mql5/Include/FXSignalPro/Executor.mqh' => 'MQL5/Include/FXSignalPro/Executor.mqh',
     ];
+
+    public const BINARY_IN_ARCHIVE = 'MQL5/Experts/FXSignalPro/FXSignalPro.ex5';
+
+    public const PRESET_IN_ARCHIVE = 'MQL5/Presets/FXSignalPro.set';
 
     public function __invoke(Request $request): StreamedResponse
     {
         $url = rtrim((string) config('app.url'), '/');
         $version = TradeCommand::WIRE_VERSION;
+        $binary = base_path(BuildExpertAdvisor::BINARY);
+        $built = is_file($binary);
 
         $archive = tempnam(sys_get_temp_dir(), 'gd-ea-');
         $zip = new ZipArchive;
         $zip->open($archive, ZipArchive::OVERWRITE | ZipArchive::CREATE);
 
-        foreach (self::FILES as $source => $destination) {
+        if ($built) {
+            $zip->addFile($binary, self::BINARY_IN_ARCHIVE);
+        }
+
+        $zip->addFromString(self::PRESET_IN_ARCHIVE, $this->preset($url));
+
+        foreach (self::SOURCES as $source => $destination) {
             $contents = (string) file_get_contents(base_path($source));
 
             if (str_ends_with($source, '.mq5')) {
@@ -61,7 +75,7 @@ class ExpertAdvisorDownloadController extends Controller
             $zip->addFromString($destination, $contents);
         }
 
-        $zip->addFromString('README.txt', $this->readme($url, $version));
+        $zip->addFromString('README.txt', $this->readme($url, $version, $built));
         $zip->close();
 
         return response()->streamDownload(function () use ($archive) {
@@ -73,7 +87,26 @@ class ExpertAdvisorDownloadController extends Controller
     }
 
     /**
-     * Write this dashboard's URL into the EA's default input.
+     * The preset the Inputs tab loads: this dashboard's URL, and nothing else, so every
+     * other input keeps the default compiled into the binary.
+     *
+     * MT5 writes its own presets as UTF-16LE with a byte-order mark and reads nothing
+     * else reliably, so that is what this writes.
+     */
+    private function preset(string $url): string
+    {
+        $lines = [
+            '; FXSignalPro - preset for '.$url,
+            '; Load from the Inputs tab when attaching the EA, then paste the token from the dashboard.',
+            'ApiBaseUrl='.$url,
+        ];
+
+        return "\xFF\xFE".mb_convert_encoding(implode("\r\n", $lines)."\r\n", 'UTF-16LE', 'UTF-8');
+    }
+
+    /**
+     * Write this dashboard's URL into the EA's default input, for anyone who compiles
+     * the source rather than attaching the binary.
      *
      * Matched on the input declaration rather than the URL itself, so the
      * substitution keeps working if that default is ever changed.
@@ -88,8 +121,19 @@ class ExpertAdvisorDownloadController extends Controller
         ) ?? $source;
     }
 
-    private function readme(string $url, string $version): string
+    private function readme(string $url, string $version, bool $built): string
     {
+        $attach = $built
+            ? <<<'TXT'
+            4. Restart MetaTrader, or right-click the Navigator's Expert Advisors and Refresh.
+               FXSignalPro appears under Expert Advisors. No compiling is needed: the
+               archive carries the built FXSignalPro.ex5.
+            TXT
+            : <<<'TXT'
+            4. In MetaEditor, open Experts/FXSignalPro/FXSignalPro.mq5 and press F7.
+               Expect 0 errors.
+            TXT;
+
         return <<<TXT
         FXSignalPro Expert Advisor ({$version})
         =========================================
@@ -107,12 +151,12 @@ class ExpertAdvisorDownloadController extends Controller
                {$url}
 
            Scheme and host only. A trailing path is the usual cause of error 4014.
-        4. In MetaEditor, open Experts/FXSignalPro/FXSignalPro.mq5 and press F7.
-           Expect 0 errors.
+        {$attach}
         5. Drag FXSignalPro onto any chart of a DEMO account.
              - Common tab: tick "Allow Algo Trading". This is separate from the toolbar
                button, and both must be on.
-             - Inputs tab: paste your ApiToken. Everything else has a working default.
+             - Inputs tab: press Load and choose FXSignalPro.set - it points the EA at
+               {$url}. Then paste your ApiToken. Everything else has a working default.
         6. The toolbar Algo Trading button must also be on. MetaTrader switches it off by
            itself whenever the account changes.
 
@@ -123,7 +167,10 @@ class ExpertAdvisorDownloadController extends Controller
 
         This EA speaks wire protocol {$version}. If the dashboard is upgraded and this
         copy is not, it will refuse every command and say so in the log rather than
-        misreading one - download it again and recompile.
+        misreading one - download it again and reattach.
+
+        The source is included under MQL5/Experts and MQL5/Include for anyone who wants
+        to read it or build it themselves.
         TXT;
     }
 }
