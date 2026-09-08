@@ -26,6 +26,10 @@ are picked up by [`docs/RECONCILIATION.md`](docs/RECONCILIATION.md).
 > backtest` replays it over the stored bars using the same evaluator that trades, so a change can
 > be measured instead of argued about.
 
+> **How much do you want to trade?** [`docs/TRADING_MODES.md`](docs/TRADING_MODES.md) — Passive,
+> Moderate or Aggressive on the risk page. One word that sets the floors, the risk and the
+> copier's trust; every signal and order follows it, and a hand-edited value reads as Custom.
+
 > **Is the signal actually any good?** [`docs/SIGNAL_OUTCOMES.md`](docs/SIGNAL_OUTCOMES.md) —
 > every signal, traded or not, is scored against the bars that followed it, so the win rate
 > has a sample size and the confidence score has something to be measured against.

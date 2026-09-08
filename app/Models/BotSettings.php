@@ -40,6 +40,7 @@ class BotSettings extends Model
     protected $fillable = [
         'user_id',
         'is_active',
+        'trading_mode',
         'risk_percentage',
         'max_daily_loss_percentage',
         'max_concurrent_trades',

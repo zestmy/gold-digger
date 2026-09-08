@@ -41,6 +41,39 @@
             @endif
         </div>
 
+        {{-- The stance, said once. Choosing a card writes its values into every field below
+             and saves; editing a field by hand makes the account Custom on save, because the
+             word has to describe the numbers. See docs/TRADING_MODES.md. --}}
+        <div class="rounded-lg bg-gray-800 p-6">
+            <div class="flex flex-wrap items-baseline justify-between gap-2">
+                <h3 class="text-lg font-semibold text-white">Trading mode</h3>
+                <span class="text-xs text-gray-500">
+                    Currently <span class="font-semibold {{ $trading_mode === 'custom' ? 'text-gray-300' : 'text-yellow-400' }}">{{ \App\Support\TradingMode::label($trading_mode) }}</span>
+                </span>
+            </div>
+            <p class="mt-1 text-sm text-gray-400">
+                One word for how much you want to trade and how much each signal has to prove. It sets the numbers below; every signal and every order follows them.
+            </p>
+            <div class="mt-4 grid gap-3 md:grid-cols-3">
+                @foreach(\App\Support\TradingMode::MODES as $mode)
+                    @php($current = $trading_mode === $mode)
+                    <button type="button" wire:click="chooseMode('{{ $mode }}')" wire:loading.attr="disabled"
+                            class="rounded-lg border p-4 text-left transition-colors {{ $current ? 'border-yellow-500 bg-yellow-500/10' : 'border-gray-700 hover:border-yellow-500/50' }}">
+                        <span class="flex items-center justify-between">
+                            <span class="text-sm font-semibold text-white">{{ \App\Support\TradingMode::label($mode) }}</span>
+                            @if($current)
+                                <span class="rounded bg-yellow-500 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-900">Current</span>
+                            @endif
+                        </span>
+                        <span class="mt-2 block text-xs leading-relaxed text-gray-400">{{ \App\Support\TradingMode::describe($mode) }}</span>
+                    </button>
+                @endforeach
+            </div>
+            @if($trading_mode === 'custom')
+                <p class="mt-3 text-xs text-gray-500">{{ \App\Support\TradingMode::describe('custom') }}</p>
+            @endif
+        </div>
+
         <!-- Risk Management -->
         <div class="rounded-lg bg-gray-800 p-6">
             <h3 class="mb-4 text-lg font-semibold text-white">Risk Management</h3>

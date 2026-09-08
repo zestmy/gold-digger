@@ -3,10 +3,12 @@
 namespace App\Livewire\Pages;
 
 use App\Models\BotHeartbeat;
+use App\Models\BotSettings;
 use App\Models\Candle;
 use App\Models\Signal;
 use App\Models\Strategy;
 use App\Services\Strategy\SignalCard;
+use App\Support\TradingMode;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
@@ -165,6 +167,9 @@ class Signals extends Component
             'signals' => $signals,
             'byReason' => $byReason,
             'total' => array_sum($byReason),
+            // The stance the feed is being held to, so a signal marked below a floor can be
+            // traced to the setting that put the floor there.
+            'mode' => TradingMode::label(TradingMode::of(BotSettings::where('user_id', Auth::id())->first())),
             'heartbeat' => $heartbeat,
             'feed' => $this->feed($heartbeat),
             'featured' => $featured,

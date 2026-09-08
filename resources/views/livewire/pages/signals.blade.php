@@ -24,6 +24,12 @@
 
     <x-page-tabs group="signals" />
 
+    {{-- Which floors the feed is held to. A "below your floor" on a card leads here. --}}
+    <p class="mb-4 text-xs text-gray-500">
+        Signals are held to your <span class="font-semibold text-gray-300">{{ $mode }}</span> mode
+        &middot; <a href="{{ route('settings') }}" class="text-yellow-500 hover:text-yellow-400">change</a>
+    </p>
+
     <!-- Data feed health -->
     {{--
         Before anything else, deliberately. If bars have stopped arriving, no signal can be

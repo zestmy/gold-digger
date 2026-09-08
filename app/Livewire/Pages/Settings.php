@@ -6,6 +6,7 @@ use App\Models\BotSettings;
 use App\Models\Strategy;
 use App\Services\Ai\AiFund;
 use App\Services\Ai\AiSpend;
+use App\Support\TradingMode;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Layout;
@@ -33,6 +34,9 @@ class Settings extends Component
 {
     #[Validate('boolean')]
     public bool $is_active = false;
+
+    /** Read from the values on save; never typed. See TradingMode. */
+    public string $trading_mode = TradingMode::CUSTOM;
 
     #[Validate('required|numeric|min:0.1|max:10')]
     public string $risk_percentage = '1.00';
@@ -161,6 +165,7 @@ class Settings extends Component
         $settings = Auth::user()->botSettings;
 
         if ($settings) {
+            $this->trading_mode = TradingMode::of($settings);
             $this->is_active = $settings->is_active ?? false;
             $this->risk_percentage = $settings->risk_percentage ?? '1.00';
             $this->max_daily_loss_percentage = $settings->max_daily_loss_percentage ?? '5.00';
@@ -197,6 +202,31 @@ class Settings extends Component
         }
     }
 
+    /**
+     * Choose a mode: write its values into the form and save them.
+     *
+     * One click rather than fill-then-save, because a stance is a decision and the page
+     * should act like one was made. The values land in the same columns the form edits,
+     * and the fields below show what the word now means.
+     */
+    public function chooseMode(string $mode): void
+    {
+        if (! in_array($mode, TradingMode::MODES, true)) {
+            return;
+        }
+
+        foreach (TradingMode::values($mode) as $key => $value) {
+            $this->{$key} = match (true) {
+                is_bool($value), is_array($value) => $value,
+                $value === null => null,
+                is_int($value) && in_array($key, ['max_concurrent_trades', 'ai_max_concurrent_trades', 'news_blackout_before_minutes', 'news_blackout_after_minutes'], true) => $value,
+                default => is_float($value) ? number_format($value, 2, '.', '') : (string) $value,
+            };
+        }
+
+        $this->save();
+    }
+
     public function save(): void
     {
         $this->validate();
@@ -207,7 +237,31 @@ class Settings extends Component
         // settings page that cannot be saved because it was never saved is a locked door.
         $settings = BotSettings::firstOrCreate(['user_id' => Auth::id()]);
 
+        // The mode is read from the values, not stored from the button: an account whose
+        // numbers match no preset is custom whatever was clicked last.
+        $this->trading_mode = TradingMode::detect([
+            'risk_percentage' => $this->risk_percentage,
+            'max_daily_loss_percentage' => $this->max_daily_loss_percentage,
+            'max_concurrent_trades' => $this->max_concurrent_trades,
+            'allowed_sessions' => $this->allowed_sessions,
+            'min_reward_ratio' => $this->min_reward_ratio,
+            'min_confluence' => $this->min_confluence,
+            'min_directional' => $this->min_directional,
+            'news_blackout_before_minutes' => $this->news_blackout_before_minutes,
+            'news_blackout_after_minutes' => $this->news_blackout_after_minutes,
+            'ai_risk_percentage' => $this->ai_risk_percentage,
+            'ai_max_concurrent_trades' => $this->ai_max_concurrent_trades,
+            'ai_max_trades_per_day' => $this->ai_max_trades_per_day,
+            'copier_review' => $this->copier_review,
+            'copier_protect_at_r' => $this->copier_protect_at_r,
+            'copier_breakeven' => $this->copier_breakeven,
+            'copier_profit_lock_pct' => $this->copier_profit_lock_pct,
+            'copier_trail_distance_r' => $this->copier_trail_distance_r,
+            'copier_spread_buffer' => $this->copier_spread_buffer,
+        ]);
+
         $settings->update([
+            'trading_mode' => $this->trading_mode,
             'is_active' => $this->is_active,
             'risk_percentage' => $this->risk_percentage,
             'max_daily_loss_percentage' => $this->max_daily_loss_percentage,

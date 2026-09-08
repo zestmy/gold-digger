@@ -5,6 +5,7 @@ namespace App\Observers;
 use App\Models\BotSettings;
 use App\Models\Strategy;
 use App\Models\User;
+use App\Support\TradingMode;
 
 /**
  * User Observer
@@ -39,6 +40,9 @@ class UserObserver
         BotSettings::create([
             'user_id' => $user->id,
             'is_active' => false, // Bot starts inactive for safety
+            // The values below are the moderate preset; see TradingMode, and the test that
+            // fails if the two ever drift apart.
+            'trading_mode' => TradingMode::MODERATE,
             'risk_percentage' => 1.00, // Risk 1% per trade
             'max_daily_loss_percentage' => 3.00, // Stop at 3% daily loss
             'max_concurrent_trades' => 3,
