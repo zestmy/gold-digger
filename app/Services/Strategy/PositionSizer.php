@@ -40,18 +40,36 @@ final class PositionSizer
      */
     public function size(float $balance, float $riskPercentage, float $stopPips, ?float $pipValuePerLot): ?float
     {
+        if ($balance <= 0.0 || $riskPercentage <= 0.0) {
+            return null;
+        }
+
+        return $this->lotsForRisk($balance * ($riskPercentage / 100.0), $stopPips, $pipValuePerLot);
+    }
+
+    /**
+     * Lots that lose exactly `$riskMoney` at the stop, or null when that cannot be said.
+     *
+     * The one division both sizing paths share. The strategy risks a share of the balance;
+     * the copier risks a share of what the AI fund has left. Those are different decisions
+     * about how much money to put at risk, and they stay different - but "how many lots
+     * lose that much at this stop" has one answer, and it used to be written twice.
+     *
+     * @param  float  $riskMoney  Deposit-currency amount to lose if the stop is hit
+     * @param  float  $stopPips  Distance from entry to stop, in pips
+     * @param  float|null  $pipValuePerLot  Deposit-currency value of a one-pip move on one lot
+     */
+    public function lotsForRisk(float $riskMoney, float $stopPips, ?float $pipValuePerLot): ?float
+    {
         if ($pipValuePerLot === null || $pipValuePerLot <= 0.0) {
             return null;
         }
 
-        if ($balance <= 0.0 || $riskPercentage <= 0.0 || $stopPips <= 0.0) {
+        if ($riskMoney <= 0.0 || $stopPips <= 0.0) {
             return null;
         }
 
-        $riskMoney = $balance * ($riskPercentage / 100.0);
-        $lossPerLot = $stopPips * $pipValuePerLot;
-
-        $lots = $riskMoney / $lossPerLot;
+        $lots = $riskMoney / ($stopPips * $pipValuePerLot);
 
         // Four decimals matches signals.suggested_lot_size. Below that the number is
         // smaller than any broker's minimum volume anyway.

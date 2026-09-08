@@ -9,6 +9,7 @@ use App\Models\Trade;
 use App\Models\TradeCommand;
 use App\Models\User;
 use App\Services\Ai\AiFund;
+use App\Services\Strategy\PositionSizer;
 use App\Services\Strategy\RewardFloor;
 use App\Services\Strategy\SymbolResolver;
 
@@ -293,13 +294,21 @@ final class SignalExecutor
             return $none('The fund has nothing left to risk on this trade.');
         }
 
-        $lots = $risk / ($slPips * $pipValue);
+        // The same division the strategy's own sizing uses, so the two paths cannot
+        // disagree about what a stop distance costs.
+        $lots = app(PositionSizer::class)->lotsForRisk($risk, $slPips, $pipValue);
+
+        if ($lots === null) {
+            return $none('The position cannot be sized from this risk and stop distance.');
+        }
 
         // Down onto the broker's grid, never up: rounding up takes more risk than the
-        // fund allows, which is the one thing the cap exists to prevent.
+        // fund allows, which is the one thing the cap exists to prevent. The terminal
+        // snaps as well; snapping here too is what lets the minimum be checked before a
+        // command is queued that the executor would refuse.
         $step = (float) ($spec['volume_step'] ?? 0.01);
         $min = (float) ($spec['volume_min'] ?? 0.01);
-        $lots = floor($lots / $step) * $step;
+        $lots = floor(($lots + 1e-9) / $step) * $step;
 
         if ($lots < $min) {
             return $none(sprintf(

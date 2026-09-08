@@ -309,6 +309,48 @@ class PositionManagerTest extends TestCase
         $this->assertSame([], (new PositionManager)->manage($this->user));
     }
 
+    /**
+     * A recorded stop of zero is "no stop", not a price. Compared as a price it sat below
+     * every level a sell could be moved to, so a copied sell whose fill never carried a
+     * stop read as already protected and never was. The strategy's manager had learned
+     * this; the copier's had not, until the two shared one rule.
+     */
+    public function test_a_sell_recorded_with_a_zero_stop_is_still_protected(): void
+    {
+        $this->settings->update(['copier_breakeven' => true]);
+
+        // Opened at 2650 with 5.00 of risk recorded at entry; the live stop was never
+        // written back, so the row carries zero.
+        $trade = Trade::create([
+            'user_id' => $this->user->id,
+            'strategy_id' => $this->strategy->id,
+            'broker_account_id' => $this->account->id,
+            'mt5_ticket' => 910002,
+            'symbol' => 'XAUUSD', 'direction' => 'sell',
+            'initial_lot_size' => 0.05, 'remaining_lot_size' => 0.05,
+            'entry_price' => 2650.0, 'sl_price' => 0, 'initial_sl_price' => 2655.0,
+            'status' => 'open', 'origin' => 'ai',
+            'opened_at' => now()->subMinutes(30),
+        ]);
+
+        // Down 2R at its best.
+        Candle::where('broker_account_id', $this->account->id)->delete();
+        for ($i = 5; $i >= 0; $i--) {
+            Candle::create([
+                'user_id' => $this->user->id, 'broker_account_id' => $this->account->id,
+                'symbol' => 'XAUUSD', 'timeframe' => 'M5',
+                'open_time' => now()->subMinutes(5 * $i),
+                'open' => 2650, 'high' => 2651, 'low' => 2640, 'close' => 2641,
+            ]);
+        }
+
+        $this->assertSame(['break_even'], (new PositionManager)->manage($this->user));
+
+        $command = TradeCommand::where('type', 'modify')->sole();
+        $this->assertEqualsWithDelta(2650.0, (float) $command->payload['sl_price'], 1e-9);
+        $this->assertSame($trade->id, $command->trade_id);
+    }
+
     // =====================================================================
     // HELPERS
     // =====================================================================

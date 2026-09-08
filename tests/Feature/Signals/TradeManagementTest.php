@@ -535,6 +535,43 @@ class TradeManagementTest extends TestCase
     }
 
     /**
+     * A padded break-even that would land past the market is a stop on the wrong side of
+     * price - the broker refuses it, or fills it as an immediate exit. The copier's manager
+     * had this guard; the strategy's did not, until the two shared one rule.
+     */
+    public function test_a_break_even_offset_the_trade_has_not_earned_falls_back_to_the_entry(): void
+    {
+        // 100 pips at 0.10 is 10.00 of padding; the run to TP1 is only 3.00.
+        $this->strategy->update(['breakeven_offset_pips' => 100.0]);
+
+        $trade = $this->openTrade(lots: 1.00);
+        $this->seedBarsReaching(self::TP1);
+        $this->fillRung($trade, 'tp1', 0.50);
+
+        $this->manage();
+
+        $command = TradeCommand::where('type', 'modify')->firstOrFail();
+
+        $this->assertEqualsWithDelta(self::ENTRY, (float) $command->payload['sl_price'], 1e-9);
+    }
+
+    public function test_an_earned_break_even_offset_is_applied(): void
+    {
+        // 10 pips at 0.10 is 1.00 of padding, well inside the run to TP1.
+        $this->strategy->update(['breakeven_offset_pips' => 10.0]);
+
+        $trade = $this->openTrade(lots: 1.00);
+        $this->seedBarsReaching(self::TP1);
+        $this->fillRung($trade, 'tp1', 0.50);
+
+        $this->manage();
+
+        $command = TradeCommand::where('type', 'modify')->firstOrFail();
+
+        $this->assertEqualsWithDelta(self::ENTRY + 1.00, (float) $command->payload['sl_price'], 1e-9);
+    }
+
+    /**
      * The close's idempotency key is fixed for the life of the position, so a rejected
      * close used to block its own retry: every later bar found the failed row under the
      * same key and returned it, and the rung was never asked for again.

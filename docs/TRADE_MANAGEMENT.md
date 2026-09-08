@@ -220,6 +220,31 @@ answer a different question from the one being asked.
 
 ---
 
+## One set of rules under two policies
+
+There are two engines that move stops: this one, for the strategy's own positions, and the
+copier's `PositionManager` for copied ones. They stay two *policies* on purpose. A strategy
+trade's rungs are the ladder's own prices and its trail is in pips it chose; a copied
+trade's stop is a stranger's choice, so everything the copier does is in R, because no pip
+figure is right across providers. Folding those into one code path would make every change
+to either a risk to the other, on the two paths where a mistake closes real positions.
+
+What they share is the arithmetic underneath, and that used to be written twice:
+
+| Rule | Where it lives | What disagreeing cost |
+|---|---|---|
+| Does a level tighten the stop? A zero recorded stop is "no stop", and a move under a twentieth of a pip is not a move. | `StopRules::tightens` | The copier compared a zero stop as a price, so a copied **sell** whose fill carried no stop was never protected. |
+| How is a level keyed, so an unchanged trail is not re-sent and a changed one is? | `StopRules::bucket` | The copier rounded to two decimals, so on a five-digit pair every trail shared one key and only the first was sent. |
+| Where does a padded break-even go, and when would it land past the market? | `StopRules::breakEven` | This engine had no guard: a `breakeven_offset_pips` wider than the run so far would have been sent as a stop through the market. |
+| How is a `modify` or `close` queued idempotently? | `ProtectionQueue` | Two payload shapes, two notions of "already queued". |
+| How many lots lose a given amount at a given stop? | `PositionSizer::lotsForRisk` | The strategy and the copier each divided for themselves. |
+
+Each engine now calls those and keeps only its policy. The risk models are deliberately
+not merged: the strategy risks a share of the balance, the copier a share of what the AI
+fund has left, and that is a decision about money rather than arithmetic.
+
+---
+
 ## Not built
 
 - **Partial-close accounting against `tp3_close_pct`.** The final rung closes whatever

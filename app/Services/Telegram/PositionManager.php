@@ -5,10 +5,11 @@ namespace App\Services\Telegram;
 use App\Models\BotHeartbeat;
 use App\Models\BotSettings;
 use App\Models\Trade;
-use App\Models\TradeCommand;
 use App\Models\User;
 use App\Services\Ai\AiFund;
 use App\Services\Strategy\SymbolResolver;
+use App\Services\Trading\ProtectionQueue;
+use App\Services\Trading\StopRules;
 
 /**
  * Position Manager
@@ -23,10 +24,14 @@ use App\Services\Strategy\SymbolResolver;
  * provider remembers to post. Providers go quiet, sleep, and post "secure half" twenty
  * minutes after the move that warranted it.
  *
- * They are separate rather than merged because their ladders are genuinely different. A
- * strategy trade's targets are its own, in pips it chose; a copied trade's are a stranger's
- * prices. Forcing one code path to mean both would make every change to either risk the
- * other, on the two paths where a mistake opens or closes real positions.
+ * The two are separate *policies* rather than one, because their ladders are genuinely
+ * different: a strategy trade's targets are its own, in units it chose; a copied trade's
+ * are a stranger's prices. What they share is the arithmetic underneath - whether a level
+ * tightens the stop, how a level is keyed, where a padded break-even goes - and that is
+ * one implementation in StopRules, with every command sent through ProtectionQueue. Each
+ * of those rules was once written here a second time and disagreed with TradeManager's;
+ * a copied sell whose fill carried no stop was never protected, and a trail on a
+ * five-digit pair was sent once and then never again. See StopRules.
  *
  * ## Everything is measured in R
  *
@@ -58,6 +63,8 @@ final class PositionManager
 
     public function __construct(
         private readonly SignalSeries $series = new SignalSeries,
+        private readonly StopRules $rules = new StopRules,
+        private readonly ProtectionQueue $queue = new ProtectionQueue,
     ) {}
 
     /**
@@ -134,6 +141,9 @@ final class PositionManager
             return [];
         }
 
+        $spec = app(SymbolResolver::class)->for($heartbeat->broker_account_id, $trade->symbol, $heartbeat);
+        $pipSize = $spec['pip_size'];
+
         $actions = [];
 
         // --- Bank part of it ------------------------------------------------------
@@ -142,7 +152,7 @@ final class PositionManager
         // reaches the terminal, having taken profit and not moved the stop is a better
         // place to be than the reverse.
         if ($settings->copier_profit_lock_pct !== null && $settings->copier_profit_lock_pct > 0) {
-            if ($this->lockProfit($trade, $heartbeat, (int) $settings->copier_profit_lock_pct)) {
+            if ($this->lockProfit($trade, $heartbeat, $spec, (int) $settings->copier_profit_lock_pct)) {
                 $actions[] = 'profit_lock';
             }
         }
@@ -159,93 +169,51 @@ final class PositionManager
 
             $target = $isBuy ? $best - $distance : $best + $distance;
         } elseif ($settings->copier_breakeven) {
-            $target = $this->breakEvenPrice($trade, $settings, $heartbeat, $isBuy, $best);
+            // The offset is in pips, alone among these settings. Everything else here is in
+            // R because a copied stop is a stranger's choice and no pip figure could be
+            // right across providers. This is not about the trade: it is what the broker
+            // charges to hold the instrument, the same size whether the provider risked
+            // five points or forty. In R it would shrink exactly where the cost bites
+            // hardest.
+            $target = $this->rules->breakEven(
+                $trade,
+                (float) ($settings->copier_breakeven_offset_pips ?? 0),
+                $pipSize,
+                $best,
+                $this->series->closeFor($heartbeat->broker_account_id, (string) $trade->symbol),
+            );
         }
 
-        if ($target !== null && $this->improves($trade, $target, $isBuy)) {
-            $this->queue($trade, $heartbeat, 'modify', [
-                'ticket' => $trade->mt5_ticket,
-                'sl_price' => round($target, (int) ($heartbeat->digits ?? 2)),
-                // Zero leaves the target alone; see CFXSExecutor::ModifyPosition.
-                'tp_price' => 0.0,
-                'reason' => 'copier-protect',
-            ], "protect:{$trade->id}:".$this->bucket($target));
+        if ($target !== null && $this->rules->tightens($trade, $target, $pipSize)) {
+            $queued = $this->queue->moveStop(
+                $trade,
+                $target,
+                'copier-protect',
+                "protect:{$trade->id}:".$this->rules->bucket($target, $pipSize),
+                $heartbeat->brokerAccount,
+                self::EXPIRY_SECONDS,
+                [
+                    // Zero leaves the target alone; see CFXSExecutor::ModifyPosition.
+                    'tp_price' => 0.0,
+                    'origin' => AiFund::ORIGIN,
+                ],
+            );
 
-            $actions[] = $settings->copier_trail_distance_r ? 'trail' : 'break_even';
+            if ($queued !== null) {
+                $actions[] = $settings->copier_trail_distance_r ? 'trail' : 'break_even';
+            }
         }
 
         return $actions;
     }
 
     /**
-     * Where a break-even stop actually goes.
-     *
-     * The entry plus `copier_breakeven_offset_pips` in the profitable direction. Closing at
-     * the entry exactly is not breaking even - the position has already paid the spread it
-     * crossed to get in, and it still owes commission both ways. On a five-point gold stop
-     * against a two-point spread that is a large share of 1R booked as a loss on every
-     * trade this protection rescues, which is the opposite of what it was turned on for.
-     *
-     * The offset is in pips, alone among these settings. Everything else here is in R
-     * because a copied stop is a stranger's choice and no pip figure could be right across
-     * providers. This is not about the trade: it is what the broker charges to hold the
-     * instrument, the same size whether the provider risked five points or forty. In R it
-     * would shrink exactly where the cost bites hardest.
-     *
-     * Unconfigured, or with no pip size to place it in price, the stop goes to the entry -
-     * which is what this did before the setting existed.
-     */
-    private function breakEvenPrice(
-        Trade $trade,
-        BotSettings $settings,
-        BotHeartbeat $heartbeat,
-        bool $isBuy,
-        float $best,
-    ): float {
-        $entry = (float) $trade->entry_price;
-        $offset = $settings->copier_breakeven_offset_pips;
-
-        if ($offset === null || (float) $offset <= 0.0) {
-            return $entry;
-        }
-
-        $spec = app(SymbolResolver::class)->for($heartbeat->broker_account_id, $trade->symbol, $heartbeat);
-        $pipSize = $spec['pip_size'];
-
-        if ($pipSize === null || $pipSize <= 0.0) {
-            // Refusing to place a level in a unit the account has not reported, the same
-            // rule the sizing path follows.
-            return $entry;
-        }
-
-        $padded = $entry + (($isBuy ? 1.0 : -1.0) * (float) $offset * $pipSize);
-
-        // A padded stop has to stay behind the market on both readings that exist: the best
-        // price the position ever saw, and the last price it is at now. Past either one it
-        // is a stop on the wrong side of price, which the broker refuses outright or fills
-        // as an immediate exit - turning a protective move into a close.
-        //
-        // Both are needed. The best price alone misses a position that has run far and
-        // retraced; the last close alone misses one whose padding was never earned. The
-        // trigger keeps this rare, but rare and closes-the-position is worth the check.
-        $last = $this->series->closeFor($heartbeat->broker_account_id, (string) $trade->symbol);
-
-        $limit = $last === null
-            ? $best
-            : ($isBuy ? min($best, $last) : max($best, $last));
-
-        $beyondTheMarket = $isBuy ? $padded >= $limit : $padded <= $limit;
-
-        return $beyondTheMarket ? $entry : $padded;
-    }
-
-    /**
      * Take a share of what remains off the table, once.
+     *
+     * @param  array<string, mixed>  $spec
      */
-    private function lockProfit(Trade $trade, BotHeartbeat $heartbeat, int $percent): bool
+    private function lockProfit(Trade $trade, BotHeartbeat $heartbeat, array $spec, int $percent): bool
     {
-        $spec = app(SymbolResolver::class)->for($heartbeat->broker_account_id, $trade->symbol, $heartbeat);
-
         $step = (float) ($spec['volume_step'] ?? 0.01);
         $min = (float) ($spec['volume_min'] ?? 0.01);
         $remaining = (float) $trade->remaining_lot_size;
@@ -258,30 +226,17 @@ final class PositionManager
             return false;
         }
 
-        return $this->queue($trade, $heartbeat, 'close', [
-            'ticket' => $trade->mt5_ticket,
-            'volume' => round($volume, 2),
-            'reason' => 'copier-profit-lock',
+        return $this->queue->close(
+            $trade,
+            round($volume, 2),
+            'copier-profit-lock',
             // Once per position, whatever this is called. Without it every pass would take
             // another share until the position was gone.
-        ], "profit-lock:{$trade->id}");
-    }
-
-    /**
-     * Does this level move the stop toward the entry?
-     *
-     * The whole safety property in one function. A stop that would sit further away is
-     * refused here exactly as it is in the follow-up executor.
-     */
-    private function improves(Trade $trade, float $target, bool $isBuy): bool
-    {
-        $current = $trade->sl_price === null ? null : (float) $trade->sl_price;
-
-        if ($current === null) {
-            return true;
-        }
-
-        return $isBuy ? $target > $current : $target < $current;
+            "profit-lock:{$trade->id}",
+            $heartbeat->brokerAccount,
+            self::EXPIRY_SECONDS,
+            ['origin' => AiFund::ORIGIN],
+        ) !== null;
     }
 
     /**
@@ -310,48 +265,5 @@ final class PositionManager
             $trade->opened_at,
             $isBuy,
         );
-    }
-
-    /**
-     * Group a price into a band so an unchanged trail does not re-queue every minute.
-     *
-     * The idempotency key carries this rather than the raw price: a stop that has genuinely
-     * moved gets a new key and is sent, and one that has drifted by a rounding error keeps
-     * the old key and is not.
-     */
-    private function bucket(float $price): string
-    {
-        return (string) (int) round($price * 100);
-    }
-
-    /**
-     * @param  array<string, mixed>  $payload
-     */
-    private function queue(Trade $trade, BotHeartbeat $heartbeat, string $type, array $payload, string $key): bool
-    {
-        // Only a row that is still live counts as "already queued". A `failed` or `expired`
-        // row is an attempt that is over - a trail the broker refused with 10016 because
-        // price had come back near the level, say - and TradeCommand::enqueue re-arms
-        // those on the same key. This check used to look at any row regardless of status,
-        // so one rejection meant that stop level was never proposed again for the life of
-        // the position, while the trade carried on as though it had been protected.
-        $existing = TradeCommand::where('idempotency_key', $key)
-            ->whereNotIn('status', TradeCommand::RETRYABLE_STATUSES)
-            ->exists();
-
-        if ($existing) {
-            return false;
-        }
-
-        TradeCommand::enqueue(
-            user: User::find($trade->user_id),
-            type: $type,
-            account: $heartbeat->brokerAccount,
-            payload: $payload + ['symbol' => $trade->symbol, 'origin' => AiFund::ORIGIN],
-            idempotencyKey: $key,
-            expiresInSeconds: self::EXPIRY_SECONDS,
-        );
-
-        return true;
     }
 }
