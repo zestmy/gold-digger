@@ -294,7 +294,7 @@
         @else
             <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
                 <div class="rounded-lg bg-gray-900 p-3"><p class="text-xs text-gray-500">Tracked</p><p class="mt-1 text-xl font-bold text-white">{{ $outcomes['tracked'] }}</p><p class="text-[11px] text-gray-500">{{ $outcomes['open'] }} still open</p></div>
-                <div class="rounded-lg bg-gray-900 p-3"><p class="text-xs text-gray-500">Win rate</p><p class="mt-1 text-xl font-bold {{ $outcomes['win_rate'] === null ? 'text-gray-500' : ($outcomes['win_rate'] >= 50 ? 'text-green-400' : 'text-red-400') }}">{{ $rate($outcomes['win_rate']) }}</p><p class="text-[11px] text-gray-500">{{ $outcomes['won'] }} won · {{ $outcomes['lost'] }} lost · {{ $outcomes['expired'] }} expired</p></div>
+                <div class="rounded-lg bg-gray-900 p-3"><p class="text-xs text-gray-500">Win rate</p><p class="mt-1 text-xl font-bold {{ $outcomes['win_rate'] === null ? 'text-gray-500' : ($outcomes['win_rate'] >= 50 ? 'text-green-400' : 'text-red-400') }}">{{ $rate($outcomes['win_rate']) }}</p><p class="text-[11px] text-gray-500">{{ $outcomes['won'] }} won · {{ $outcomes['lost'] }} lost · {{ $outcomes['expired'] }} expired · {{ $outcomes['unfilled'] }} never filled</p></div>
                 <div class="rounded-lg bg-gray-900 p-3"><p class="text-xs text-gray-500">Expectancy</p><p class="mt-1 text-xl font-bold {{ $tone($outcomes['expectancy_r']) }}">{{ $r($outcomes['expectancy_r']) }}</p><p class="text-[11px] text-gray-500">per signal, on TP1</p></div>
                 <div class="rounded-lg bg-gray-900 p-3"><p class="text-xs text-gray-500">Avg best excursion</p><p class="mt-1 text-xl font-bold text-green-400">{{ $r($outcomes['avg_mfe_r']) }}</p></div>
                 <div class="rounded-lg bg-gray-900 p-3"><p class="text-xs text-gray-500">Avg worst excursion</p><p class="mt-1 text-xl font-bold text-red-400">{{ $r($outcomes['avg_mae_r']) }}</p></div>
@@ -324,7 +324,7 @@
                                 <tbody>
                                     @foreach($groups as $name => $g)
                                         <tr class="border-t border-gray-800">
-                                            <td class="py-1.5 text-gray-300">{{ $name }}</td>
+                                            <td class="py-1.5 text-gray-300">{{ ucfirst((string) $name) }}</td>
                                             <td class="py-1.5 text-right text-gray-400">{{ $g['won'] + $g['lost'] }}</td>
                                             <td class="py-1.5 text-right text-gray-200">{{ $rate($g['win_rate']) }}</td>
                                             <td class="py-1.5 text-right {{ $tone($g['expectancy_r']) }}">{{ $r($g['expectancy_r']) }}</td>

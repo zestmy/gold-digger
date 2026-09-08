@@ -41,6 +41,12 @@ use Illuminate\Support\Collection;
  * - The first bar counted is the one after the signal bar for the strategy's signals
  *   (the bar close is the entry reference and its own bar is spent) and the first bar
  *   opening at or after the post time for a copied one.
+ * - A copied signal that names an entry is a pending order. Nothing is scored until a
+ *   bar's range reaches that entry (or zone); the bars before that are counted as
+ *   waiting, and a signal the market never comes back to within the horizon is
+ *   `unfilled` - neither a win nor a loss. Scoring a sell posted at 4,600 with price at
+ *   4,550 from the post itself credited an instant target and a favourable "worst"
+ *   excursion, which is how the first day's average worst excursion came out above zero.
  */
 final class OutcomeTracker
 {
@@ -125,8 +131,10 @@ final class OutcomeTracker
             'tp3_price' => $signal->tp3_price === null ? null : (float) $signal->tp3_price,
             'risk' => abs($entry - $stop),
             // The signal bar is spent: its close is the reference, so counting starts on
-            // the bar after it.
+            // the bar after it - and starts scoring at once, because the reference is
+            // where the market was.
             'started_at' => $signal->generated_at->copy()->addSeconds(Timeframe::seconds((string) $signal->timeframe)),
+            'activated_at' => $signal->generated_at->copy()->addSeconds(Timeframe::seconds((string) $signal->timeframe)),
             'horizon_bars' => $this->horizon(),
             'context' => $this->context([
                 'confidence' => $features['quality']['confidence'] ?? null,
@@ -159,7 +167,12 @@ final class OutcomeTracker
         $timeframe = strtoupper((string) config('outcomes.copied_timeframe', 'M5'));
         $symbol = $this->symbols->for($accountId, (string) $signal->symbol)['symbol'];
 
+        // A named entry is a pending order: the reference is the entry, and scoring waits
+        // for price to reach it. Without one the signal is at market, the reference is the
+        // last close stored at the post, and scoring starts at once.
         $entry = $signal->entry_price !== null ? (float) $signal->entry_price : null;
+        $zoneHigh = $signal->entry_zone_high !== null ? (float) $signal->entry_zone_high : null;
+        $pending = $entry !== null;
 
         if ($entry === null) {
             $entry = Candle::query()
@@ -198,8 +211,12 @@ final class OutcomeTracker
             // already be under way, and crediting it a level it touched before the post
             // would flatter every provider.
             'started_at' => $postedAt,
+            'activated_at' => $pending ? null : $postedAt,
             'horizon_bars' => $this->horizon(),
             'context' => $this->context([
+                'pending' => $pending,
+                'entry_low' => $pending ? min($entry, $zoneHigh ?? $entry) : null,
+                'entry_high' => $pending ? max($entry, $zoneHigh ?? $entry) : null,
                 'channel_id' => $signal->telegram_channel_id ?? null,
                 'review' => $signal->review_status,
                 'execution' => $signal->execution_status,
@@ -316,12 +333,35 @@ final class OutcomeTracker
      */
     private function fold(SignalOutcome $outcome, Candle $bar): void
     {
-        $n = $outcome->bars_seen + 1;
         $buy = $outcome->isBuy();
 
         $high = (float) $bar->high;
         $low = (float) $bar->low;
         $close = (float) $bar->close;
+
+        // A pending entry: nothing is scored until price reaches it. The bar that does is
+        // the fill bar and is scored in full, stop included - a limit that fills and is
+        // stopped inside the same bar is a loss, not a miss.
+        if ($outcome->activated_at === null) {
+            $entryLow = (float) ($outcome->context['entry_low'] ?? $outcome->reference_price);
+            $entryHigh = (float) ($outcome->context['entry_high'] ?? $outcome->reference_price);
+
+            if ($low <= $entryHigh && $high >= $entryLow) {
+                $outcome->activated_at = $bar->open_time;
+            } else {
+                $outcome->wait_bars++;
+                $outcome->last_bar_at = $bar->open_time;
+
+                if ($outcome->wait_bars >= $outcome->horizon_bars) {
+                    $outcome->status = SignalOutcome::UNFILLED;
+                    $outcome->resolved_at = $bar->open_time;
+                }
+
+                return;
+            }
+        }
+
+        $n = $outcome->bars_seen + 1;
 
         // Excursions: the best and worst the bar's range did, in R.
         $favourable = $outcome->r($buy ? $high : $low);

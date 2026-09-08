@@ -127,6 +127,84 @@ class OutcomeTrackerTest extends TestCase
         $this->assertEqualsWithDelta(2002.0, $outcome->reference_price, 1e-6);
     }
 
+    /**
+     * The bug the first day's numbers showed: a sell posted at 2010 while price stood at
+     * 2000 was an instant win with a favourable "worst" excursion. It is a pending order,
+     * and nothing counts until price reaches it.
+     */
+    public function test_a_copied_signal_with_a_named_entry_waits_for_price_to_reach_it(): void
+    {
+        $outcome = $this->tracker()->openForCopied($this->copied([
+            'symbol' => self::SYMBOL, 'direction' => 'sell', 'entry_price' => 2010.0, 'sl_price' => 2015.0, 'tp_prices' => [2005.0],
+            'posted_at' => $this->bar->copy()->addMinutes(1),
+        ]));
+
+        $this->assertNull($outcome->activated_at);
+
+        // Price sits at 2000 for two bars: nothing is scored, however far below the entry.
+        $this->bars([2000.0, 2000.0]);
+        $this->tracker()->advance($this->account->id, self::SYMBOL, 'M5');
+
+        $outcome->refresh();
+        $this->assertSame(SignalOutcome::OPEN, $outcome->status);
+        $this->assertSame(2, $outcome->wait_bars);
+        $this->assertSame(0, $outcome->bars_seen);
+        $this->assertNull($outcome->mfe_r);
+        $this->assertSame('Waiting for entry · 2 bars so far', $outcome->summary());
+
+        // Bar 3 reaches 2010: the fill bar, scored in full. Bar 4 reaches the target.
+        Candle::create($this->candle($this->bar->copy()->addMinutes(15), 2008.0, 2010.5, 2007.0, 2009.0));
+        Candle::create($this->candle($this->bar->copy()->addMinutes(20), 2009.0, 2009.5, 2004.5, 2005.0));
+        $this->tracker()->advance($this->account->id, self::SYMBOL, 'M5');
+
+        $outcome->refresh();
+        $this->assertNotNull($outcome->activated_at);
+        $this->assertSame(SignalOutcome::WON, $outcome->status);
+        $this->assertSame(2, $outcome->tp1_bars, 'Bars are counted from the fill, not from the post.');
+        $this->assertEqualsWithDelta(-0.1, $outcome->mae_r, 1e-3, 'The fill bar\'s high of 2010.5 is the worst it did.');
+    }
+
+    public function test_a_named_entry_the_market_never_returns_to_is_unfilled(): void
+    {
+        $outcome = $this->tracker()->openForCopied($this->copied([
+            'symbol' => self::SYMBOL, 'direction' => 'buy', 'entry_price' => 1990.0, 'sl_price' => 1985.0, 'tp_prices' => [1996.0],
+            'posted_at' => $this->bar->copy()->addMinutes(1),
+        ]));
+
+        $this->bars(array_fill(0, 12, 2000.0));
+        $this->tracker()->advance($this->account->id, self::SYMBOL, 'M5');
+
+        $outcome->refresh();
+        $this->assertSame(SignalOutcome::UNFILLED, $outcome->status);
+        $this->assertSame(10, $outcome->wait_bars);
+        $this->assertNotNull($outcome->resolved_at);
+        $this->assertNull($outcome->first_hit);
+    }
+
+    /**
+     * A limit that fills and is stopped inside the same bar is a loss, not a miss.
+     */
+    public function test_a_fill_bar_that_also_reaches_the_stop_is_a_loss(): void
+    {
+        $outcome = $this->tracker()->openForCopied($this->copied([
+            'symbol' => self::SYMBOL, 'direction' => 'buy', 'entry_price' => 1998.0, 'sl_price' => 1995.0, 'tp_prices' => [2004.0],
+            'posted_at' => $this->bar->copy()->addMinutes(1),
+        ]));
+
+        Candle::create($this->candle($this->bar->copy()->addMinutes(5), 2001.0, 2001.5, 1994.0, 1996.0));
+        $this->tracker()->advance($this->account->id, self::SYMBOL, 'M5');
+
+        $this->assertSame(SignalOutcome::LOST, $outcome->fresh()->status);
+    }
+
+    public function test_the_strategys_own_signals_score_from_their_first_bar(): void
+    {
+        $outcome = $this->tracker()->openForSignal($this->signal());
+
+        $this->assertNotNull($outcome->activated_at);
+        $this->assertTrue($outcome->activated_at->equalTo($outcome->started_at));
+    }
+
     public function test_open_pending_opens_every_signal_that_has_no_outcome_once(): void
     {
         // Inside the backfill window, which the fixture bar in March is not.

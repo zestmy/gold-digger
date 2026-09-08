@@ -35,6 +35,9 @@ class SignalOutcome extends Model
 
     public const EXPIRED = 'expired';
 
+    /** A named entry the market never came back to: a limit order that never filled. */
+    public const UNFILLED = 'unfilled';
+
     public const SOURCE_AI = 'ai';
 
     public const SOURCE_COPIED = 'copied';
@@ -43,7 +46,7 @@ class SignalOutcome extends Model
         'user_id', 'subject_type', 'subject_id', 'source', 'broker_account_id',
         'symbol', 'timeframe', 'direction',
         'reference_price', 'stop_price', 'tp1_price', 'tp2_price', 'tp3_price', 'risk',
-        'started_at', 'last_bar_at', 'bars_seen', 'horizon_bars',
+        'started_at', 'activated_at', 'last_bar_at', 'bars_seen', 'wait_bars', 'horizon_bars',
         'mfe_r', 'mae_r', 'tp1_bars', 'tp2_bars', 'tp3_bars', 'sl_bars', 'first_hit',
         'r_at_1', 'r_at_5', 'r_at_20',
         'status', 'resolved_at', 'context',
@@ -64,6 +67,7 @@ class SignalOutcome extends Model
             'r_at_5' => 'float',
             'r_at_20' => 'float',
             'started_at' => 'datetime',
+            'activated_at' => 'datetime',
             'last_bar_at' => 'datetime',
             'resolved_at' => 'datetime',
             'context' => 'array',
@@ -138,7 +142,12 @@ class SignalOutcome extends Model
             self::WON => 'TP1 in '.$this->bars($this->tp1_bars),
             self::LOST => 'Stopped in '.$this->bars($this->sl_bars),
             self::EXPIRED => 'Neither level in '.$this->bars($this->horizon_bars),
-            default => $this->bars_seen === 0 ? null : 'Open · '.$this->bars($this->bars_seen).' so far',
+            self::UNFILLED => 'Entry never reached in '.$this->bars($this->wait_bars),
+            default => match (true) {
+                $this->activated_at === null && $this->wait_bars > 0 => 'Waiting for entry · '.$this->bars($this->wait_bars).' so far',
+                $this->bars_seen > 0 => 'Open · '.$this->bars($this->bars_seen).' so far',
+                default => null,
+            },
         };
     }
 

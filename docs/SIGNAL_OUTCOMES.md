@@ -57,6 +57,14 @@ for the strategy's own, `App\Models\TelegramSignal` for a parsed copied one):
   Its instrument is resolved to the broker's own name, because that is the name the bars
   are stored under. Where the provider named no entry, the last close stored at the post
   time is the reference - where a market order would have filled.
+- **A copied signal that names an entry is a pending order.** Nothing is scored until a
+  bar's range reaches that entry (or zone); the bars before are counted as `wait_bars`,
+  and a signal the market never comes back to within the horizon is `unfilled` - neither
+  a win nor a loss, but reported, because a provider whose entries rarely fill is one
+  whose published results were mostly never available. The first day's figures, scored
+  from the post itself, credited a sell posted at 4,600 with price at 4,550 an instant
+  target and a favourable "worst" excursion; the average worst excursion came out above
+  zero, which no correctly scored signal can produce. That is the bug this rule fixed.
 
 `won` is a statement about the levels the signal published, not about any position. A
 trade managed with a break-even stop can lose on a `won` signal and vice versa. It is the

@@ -41,10 +41,13 @@ class OutcomeStatsTest extends TestCase
         $this->outcome(['status' => 'lost', 'first_hit' => 'sl', 'sl_bars' => 2, 'mfe_r' => 0.2, 'mae_r' => -1.0]);
         $this->outcome(['status' => 'expired', 'mfe_r' => 0.4, 'mae_r' => -0.4]);
         $this->outcome(['status' => 'open', 'bars_seen' => 0]);
+        // A named entry the market never returned to: neither won nor lost, but counted.
+        $this->outcome(['status' => 'unfilled', 'wait_bars' => 100]);
 
         $stats = app(OutcomeStats::class)->forUser($this->user->id);
 
-        $this->assertSame(5, $stats['tracked']);
+        $this->assertSame(6, $stats['tracked']);
+        $this->assertSame(1, $stats['unfilled']);
         $this->assertSame(1, $stats['open']);
         $this->assertSame(2, $stats['won']);
         $this->assertSame(1, $stats['lost']);

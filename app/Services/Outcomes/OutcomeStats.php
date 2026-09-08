@@ -48,7 +48,7 @@ final class OutcomeStats
             ->when($since !== null, fn ($q) => $q->where('started_at', '>=', $since))
             ->get();
 
-        $decided = $outcomes->where('status', '!=', SignalOutcome::OPEN);
+        $decided = $outcomes->whereIn('status', [SignalOutcome::WON, SignalOutcome::LOST, SignalOutcome::EXPIRED]);
 
         return $this->summarise($outcomes) + [
             'by_source' => $this->groupBy($decided, fn (SignalOutcome $o) => $o->source),
@@ -68,6 +68,7 @@ final class OutcomeStats
         $won = $outcomes->where('status', SignalOutcome::WON);
         $lost = $outcomes->where('status', SignalOutcome::LOST);
         $expired = $outcomes->where('status', SignalOutcome::EXPIRED);
+        $unfilled = $outcomes->where('status', SignalOutcome::UNFILLED);
         $decided = $won->count() + $lost->count();
 
         // Expired signals count as neither won nor lost in the rate - the level was never
@@ -90,6 +91,10 @@ final class OutcomeStats
             'won' => $won->count(),
             'lost' => $lost->count(),
             'expired' => $expired->count(),
+            // A named entry the market never came back to. Neither a win nor a loss, and
+            // worth showing: a provider whose entries rarely fill is a provider whose
+            // published results were mostly never available.
+            'unfilled' => $unfilled->count(),
             'win_rate' => $winRate,
             'expectancy_r' => $expectancy,
             'avg_mfe_r' => $this->avg($walked, 'mfe_r'),
