@@ -87,6 +87,16 @@ class Signals extends Component
     }
 
     /**
+     * Back to the latest signal. On a phone the selected card is an overlay over the
+     * feed, and this is its close button; on a desktop the panel simply shows the newest
+     * signal again.
+     */
+    public function close(): void
+    {
+        $this->selected = null;
+    }
+
+    /**
      * What each skip reason means, in the terms a person would ask the question.
      *
      * Kept here rather than in the view because it is the page's actual content: a bare

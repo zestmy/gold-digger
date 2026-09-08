@@ -222,15 +222,32 @@
         </div>
 
         <!-- The signal, read for entry -->
-        <div class="lg:col-span-3 lg:sticky lg:top-4 lg:self-start">
+        {{-- On a desktop this is the right-hand column, beside the feed. On a phone the
+             feed pushes it below the fold, so tapping a row used to mean scrolling down to
+             find what was tapped. A *selected* signal therefore opens as an overlay on
+             small screens - the same card, fixed over the feed, with a close button - and
+             only the unselected "latest" card stays inline. --}}
+        @php($isSelected = $selected !== null && $featured?->id === $selected)
+        <div class="lg:col-span-3 lg:sticky lg:top-4 lg:self-start {{ $isSelected ? 'fixed inset-0 z-50 overflow-y-auto bg-gray-900 p-4 pb-8 lg:static lg:inset-auto lg:z-auto lg:overflow-visible lg:bg-transparent lg:p-0' : '' }}"
+             @if($isSelected) role="dialog" aria-modal="true" aria-label="Selected signal" @endif>
             @if($card !== null)
                 <div class="mb-3 flex items-center justify-between">
                     <h2 class="text-sm font-semibold text-white">
                         {{-- A link to a signal that is not this user's falls back to the newest,
                              and the heading has to say which it is showing, not which was asked. --}}
-                        {{ $selected !== null && $featured?->id === $selected ? 'Selected signal' : 'Latest signal' }}
+                        {{ $isSelected ? 'Selected signal' : 'Latest signal' }}
                     </h2>
-                    <span class="text-xs text-gray-500">Pick any row to read it here</span>
+                    @if($isSelected)
+                        <button type="button" wire:click="close"
+                                class="inline-flex items-center gap-1 rounded-md bg-gray-800 px-3 py-1.5 text-xs font-medium text-gray-200 ring-1 ring-inset ring-gray-700 hover:bg-gray-700 lg:hidden"
+                                aria-label="Close the selected signal">
+                            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+                            Close
+                        </button>
+                        <span class="hidden text-xs text-gray-500 lg:inline">Pick any row to read it here</span>
+                    @else
+                        <span class="text-xs text-gray-500">Pick any row to read it here</span>
+                    @endif
                 </div>
                 @include('livewire.pages.partials.signal-card', ['card' => $card])
             @else
