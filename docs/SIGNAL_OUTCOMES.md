@@ -156,6 +156,25 @@ entry. If it only turns them into slower losers or "neither", the entry is too e
 no stop fixes it. Signals whose bars have since been pruned are counted as unscorable,
 never guessed at.
 
+### Is it the entry?
+
+The stop-width table answered "not the stop". **"If the entry had waited for a pullback"**
+asks the other half: the same signals with a limit resting 0.25, 0.5 or 0.75 of the stop
+behind the signal price, or at the signal's own zone, filled if price returns within twelve
+bars. The stop stays where the signal put it, so a fill risks less and the ladder is measured
+off that shorter risk. A limit price never returns to is a missed trade worth 0R, and it is
+counted in the per-signal expectancy - "we only take the ones that come back" is a strategy
+whose cost is the ones that never do. The per-fill figure is shown beside it.
+
+```bash
+php artisan signals:pullback-entry                      # every user, default depths, 12-bar wait
+php artisan signals:pullback-entry --depths=0,0.5,zone --wait=6
+```
+
+How to read it: a pullback row whose per-signal expectancy beats the as-traded row is a
+better entry rule even after the missed trades. One that only beats it per fill is a rule
+that looks good on the trades it gets and pays for it on the ones it does not.
+
 ### The first change it asked for
 
 The first month of numbers: AI signals reached their first target 50% of the time and

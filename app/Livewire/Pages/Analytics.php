@@ -4,6 +4,7 @@ namespace App\Livewire\Pages;
 
 use App\Models\Trade;
 use App\Services\Outcomes\OutcomeStats;
+use App\Services\Outcomes\PullbackEntryReport;
 use App\Services\Outcomes\StopWidthReport;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
@@ -180,6 +181,9 @@ class Analytics extends Component
             // stop or the entry is the problem is the first question the outcomes raise,
             // and this is the table that answers it.
             'stopWidths' => app(StopWidthReport::class)->forUser($userId, $dateConstraint),
+            // And with the entry waiting for a pullback instead. The stop-width table
+            // says whether the stop is the problem; this says whether the entry is.
+            'pullbacks' => app(PullbackEntryReport::class)->forUser($userId, $dateConstraint),
         ]);
     }
 }

@@ -393,6 +393,64 @@
         </div>
     @endif
 
+    {{--
+        The same AI signals with the entry resting as a limit some fraction of the stop
+        behind the signal price. The stop stays where the signal put it, so a filled
+        pullback risks less and its ladder is measured off that shorter risk; a limit
+        that never fills is a missed trade worth 0R and counts in the per-signal figure.
+    --}}
+    @if($pullbacks['scorable'] > 0)
+        <div class="mt-6 rounded-lg bg-gray-800 p-6">
+            <div class="flex flex-wrap items-baseline justify-between gap-2">
+                <h3 class="text-lg font-semibold text-white">If the entry had waited for a pullback</h3>
+                <p class="text-xs text-gray-500">
+                    {{ $pullbacks['scorable'] }} AI signals re-walked &middot; limits wait {{ $pullbacks['wait_bars'] }} bars
+                </p>
+            </div>
+            <p class="mt-1 text-xs text-gray-500">
+                A limit resting behind the signal price. The stop stays where the signal put it, so a fill risks less and the 1R / 2R / 3R ladder moves in with it. A limit price never returns to is a missed trade worth 0R, and it counts.
+            </p>
+            <div class="mt-4 overflow-x-auto">
+                <table class="w-full text-xs">
+                    <thead>
+                        <tr class="text-left text-gray-500">
+                            <th class="py-1.5 font-medium">Pullback</th>
+                            <th class="py-1.5 text-right font-medium">Filled</th>
+                            <th class="py-1.5 text-right font-medium">Missed</th>
+                            <th class="py-1.5 text-right font-medium">Won</th>
+                            <th class="py-1.5 text-right font-medium">Lost</th>
+                            <th class="py-1.5 text-right font-medium">Win rate</th>
+                            <th class="py-1.5 text-right font-medium">Per signal</th>
+                            <th class="py-1.5 text-right font-medium">Per fill</th>
+                            <th class="py-1.5 text-right font-medium">Risk kept</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach($pullbacks['rows'] as $row)
+                            @continue($row['n'] === 0)
+                            <tr class="border-t border-gray-800 {{ $row['depth'] === 0.0 ? 'bg-gray-900/60' : '' }}">
+                                <td class="py-1.5 text-gray-300">
+                                    @if($row['depth'] === 'zone') the signal's zone
+                                    @elseif($row['depth'] === 0.0) none (as traded)
+                                    @else {{ rtrim(rtrim(number_format($row['depth'], 2), '0'), '.') }} of the stop
+                                    @endif
+                                </td>
+                                <td class="py-1.5 text-right text-gray-400">{{ $row['filled'] }}</td>
+                                <td class="py-1.5 text-right text-gray-500">{{ $row['unfilled'] }}</td>
+                                <td class="py-1.5 text-right text-gray-400">{{ $row['won'] }}</td>
+                                <td class="py-1.5 text-right text-gray-400">{{ $row['lost'] }}</td>
+                                <td class="py-1.5 text-right text-gray-200">{{ $rate($row['win_rate']) }}</td>
+                                <td class="py-1.5 text-right {{ $tone($row['expectancy_r']) }}">{{ $r($row['expectancy_r']) }}</td>
+                                <td class="py-1.5 text-right {{ $tone($row['expectancy_filled_r']) }}">{{ $r($row['expectancy_filled_r']) }}</td>
+                                <td class="py-1.5 text-right text-gray-400">{{ $row['avg_risk_share'] === null ? '—' : number_format($row['avg_risk_share'] * 100, 0).'%' }}</td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    @endif
+
     <!-- Info Box -->
     @if($metrics['total_trades'] === 0)
         <div class="rounded-lg bg-gray-800/50 border border-gray-700 p-6 text-center">
