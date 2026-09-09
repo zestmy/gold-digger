@@ -170,9 +170,11 @@ Either way, creating a user also creates:
   the same trend-following trade on EURUSD and GBPUSD (H1 trend, M5 entries)
 
 An account created before the majors were added keeps the set it was given, because a strategy
-is configuration rather than schema and no migration touches it. `php artisan
-strategies:add-starters` adds whatever is missing; it skips any symbol the account already has
-a strategy for, and `--dry-run` shows what it would do.
+is configuration rather than schema and no migration touches it. The deploy runs `php artisan
+strategies:add-starters` after migrations to close that gap, so a released change to the
+starter set reaches existing accounts on its own. Run it by hand on any box that is not
+deployed from `main`; it skips any symbol the account already has a strategy for, never
+touches one that was renamed, and `--dry-run` shows what it would do.
 
 A strategy only produces signals once it is activated on `/strategies` **and** its symbol is in
 the terminal's `BaseSymbols` input, which is what decides the instruments the EA pushes bars

@@ -129,6 +129,25 @@ jobs:
             php artisan db:backup --keep=7
 
             php artisan migrate --force
+
+            # Give every account any starter strategy it does not have yet. A strategy is
+            # configuration rather than schema, so no migration reaches one, and
+            # `UserObserver` only fires at registration - which means growing the starter
+            # set (as adding EURUSD and GBPUSD did) would otherwise change nothing for any
+            # account that already exists. The symptom is a signals feed showing fewer
+            # instruments than the strategy layer supports.
+            #
+            # Safe on every deploy: it matches on symbol, so it never touches a strategy
+            # somebody is already trading, never duplicates one that was renamed, and adds
+            # nothing at all once each account is covered. New rows are inactive, so this
+            # cannot start trading an instrument on its own.
+            #
+            # `|| true` for the same reason as news:fetch below. Nothing here is needed for
+            # the site to serve, the previous state is still correct if it fails, and the
+            # next deploy runs it again - none of which is worth leaving the box in
+            # maintenance mode over.
+            php artisan strategies:add-starters || true
+
             php artisan config:cache
             php artisan route:cache
             php artisan view:cache

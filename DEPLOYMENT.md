@@ -3,8 +3,11 @@
 > **How deploys work now.** A push to `main` runs the test suite first, and the deploy job
 > only starts if it passes - see `.github/workflows/deploy.yml`. Before migrations run, the
 > deploy takes a compressed dump into `storage/backups` (`php artisan db:backup`, keeping the
-> last 7). If any step fails, the workflow lifts maintenance mode rather than leaving the
-> site down.
+> last 7). After they run, `php artisan strategies:add-starters` gives every account any
+> starter strategy it is missing, because a strategy is configuration rather than schema and
+> no migration reaches one. It adds nothing once each account is covered, and the rows it does
+> add are inactive. If any step fails, the workflow lifts maintenance mode rather than leaving
+> the site down.
 >
 > **PHP version.** The scripts and examples below provision **8.2**. The deploy no longer
 > hardcodes a version - it reloads whichever `php{major}.{minor}-fpm` the server's own PHP
