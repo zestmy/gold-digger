@@ -166,8 +166,8 @@ people join.
 
 Either way, creating a user also creates:
 - Default bot settings, with the bot switched **off**
-- Three starter strategies, all **inactive**: "Fira-Style Gold Trend Scalp" on XAUUSD, plus
-  the same trend-following trade on EURUSD and GBPUSD (H1 trend, M5 entries)
+- Five starter strategies, all **inactive**: "Fira-Style Gold Trend Scalp" on XAUUSD, plus
+  the same trend-following trade on EURUSD, GBPUSD, USDJPY and AUDUSD (H1 trend, M5 entries)
 
 An account created before the majors were added keeps the set it was given, because a strategy
 is configuration rather than schema and no migration touches it. The deploy runs `php artisan
@@ -178,7 +178,8 @@ touches one that was renamed, and `--dry-run` shows what it would do.
 
 A strategy only produces signals once it is activated on `/strategies` **and** its symbol is in
 the terminal's `BaseSymbols` input, which is what decides the instruments the EA pushes bars
-for. See [`docs/SIGNAL_GENERATION.md`](docs/SIGNAL_GENERATION.md).
+for. That input holds up to eight, so the five starters fit with room to spare. See
+[`docs/SIGNAL_GENERATION.md`](docs/SIGNAL_GENERATION.md).
 
 ## Routes
 

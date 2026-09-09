@@ -4,6 +4,7 @@ namespace Tests\Feature\Strategy;
 
 use App\Models\Strategy;
 use App\Models\User;
+use App\Support\StarterStrategies;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -17,8 +18,13 @@ use Tests\TestCase;
  * and `strategies:add-starters` reaches accounts that registered before the set grew.
  *
  * The properties that matter are the ones that make the backfill safe to run on a live
- * deployment: it never touches a symbol the account already covers, it never activates
- * anything, and running it twice does nothing the second time.
+ * deployment, and on every deploy, which is where it runs from: it never touches a symbol the
+ * account already covers, it never activates anything, and running it twice does nothing the
+ * second time.
+ *
+ * Only the first case names the symbols. The rest derive what they expect from
+ * `StarterStrategies`, so growing the set again is one edit here rather than six - while that
+ * first case still fails if the set changes without somebody meaning it to.
  */
 class StarterStrategiesTest extends TestCase
 {
@@ -36,11 +42,25 @@ class StarterStrategiesTest extends TestCase
             ->all();
     }
 
-    public function test_a_new_account_starts_with_gold_and_both_majors(): void
+    /**
+     * @return array<int, string>
+     */
+    private function starterSymbols(): array
+    {
+        $symbols = array_column(StarterStrategies::definitions(), 'symbol');
+        sort($symbols);
+
+        return $symbols;
+    }
+
+    public function test_a_new_account_starts_with_gold_and_the_four_majors(): void
     {
         $user = User::factory()->create();
 
-        $this->assertSame(['EURUSD', 'GBPUSD', 'XAUUSD'], $this->symbolsFor($user));
+        $this->assertSame(
+            ['AUDUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD'],
+            $this->symbolsFor($user)
+        );
     }
 
     /**
@@ -68,14 +88,14 @@ class StarterStrategiesTest extends TestCase
 
         Strategy::acrossTenants()
             ->where('user_id', $user->id)
-            ->whereIn('symbol', ['EURUSD', 'GBPUSD'])
+            ->where('symbol', '!=', 'XAUUSD')
             ->delete();
 
         $this->assertSame(['XAUUSD'], $this->symbolsFor($user));
 
         $this->artisan('strategies:add-starters')->assertSuccessful();
 
-        $this->assertSame(['EURUSD', 'GBPUSD', 'XAUUSD'], $this->symbolsFor($user));
+        $this->assertSame($this->starterSymbols(), $this->symbolsFor($user));
     }
 
     public function test_running_the_command_twice_adds_nothing_the_second_time(): void
@@ -85,7 +105,31 @@ class StarterStrategiesTest extends TestCase
         $this->artisan('strategies:add-starters')->assertSuccessful();
         $this->artisan('strategies:add-starters')->assertSuccessful();
 
-        $this->assertSame(['EURUSD', 'GBPUSD', 'XAUUSD'], $this->symbolsFor($user));
+        $this->assertSame($this->starterSymbols(), $this->symbolsFor($user));
+    }
+
+    /**
+     * The deploy runs this on every push, so it has to be safe against an account that has
+     * already been backfilled and then had its strategies activated.
+     */
+    public function test_it_does_not_deactivate_or_alter_a_strategy_that_is_already_running(): void
+    {
+        $user = User::factory()->create();
+
+        Strategy::acrossTenants()
+            ->where('user_id', $user->id)
+            ->where('symbol', 'EURUSD')
+            ->update(['is_active' => true, 'adx_threshold' => 31.00]);
+
+        $this->artisan('strategies:add-starters')->assertSuccessful();
+
+        $euro = Strategy::acrossTenants()
+            ->where('user_id', $user->id)
+            ->where('symbol', 'EURUSD')
+            ->sole();
+
+        $this->assertTrue($euro->is_active);
+        $this->assertSame('31.00', (string) $euro->adx_threshold);
     }
 
     /**
@@ -122,9 +166,11 @@ class StarterStrategiesTest extends TestCase
             ->where('symbol', 'GBPUSD')
             ->delete();
 
+        $expected = array_values(array_diff($this->starterSymbols(), ['GBPUSD']));
+
         $this->artisan('strategies:add-starters --dry-run')->assertSuccessful();
 
-        $this->assertSame(['EURUSD', 'XAUUSD'], $this->symbolsFor($user));
+        $this->assertSame($expected, $this->symbolsFor($user));
     }
 
     /**
@@ -145,7 +191,10 @@ class StarterStrategiesTest extends TestCase
 
         $this->artisan('strategies:add-starters --user='.$target->id)->assertSuccessful();
 
-        $this->assertSame(['EURUSD', 'GBPUSD', 'XAUUSD'], $this->symbolsFor($target));
-        $this->assertSame(['EURUSD', 'XAUUSD'], $this->symbolsFor($kept));
+        $this->assertSame($this->starterSymbols(), $this->symbolsFor($target));
+        $this->assertSame(
+            array_values(array_diff($this->starterSymbols(), ['GBPUSD'])),
+            $this->symbolsFor($kept)
+        );
     }
 }

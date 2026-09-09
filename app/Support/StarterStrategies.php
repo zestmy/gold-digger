@@ -21,9 +21,14 @@ namespace App\Support;
  *
  * Targets are taken in R - multiples of the ATR-sized stop - for every preset here, so the
  * pip columns are dormant unless someone clears `tp1_r`. See `TargetLadder`. But dormant is
- * not the same as harmless: gold's 30/100/200 read as a sane ladder on an instrument quoted
- * to two decimals and as an unreachable one on a major quoted to four. If those columns ever
+ * not the same as harmless: gold's 30/100/200 read as a sane ladder on gold and as an
+ * unreachable one on a major, where a hundred pips is a long way. If those columns ever
  * become the live ladder, they should describe the instrument they sit on.
+ *
+ * A pip is not the same fraction of price on every major - USDJPY quotes to three decimals
+ * where the rest quote to five - but a ladder written in pips is already in that instrument's
+ * own units, so one set of figures is right for all of them. `SymbolResolver` supplies the
+ * pip size, per broker and per symbol; nothing here needs to know it.
  *
  * ## Why every preset starts inactive
  *
@@ -44,6 +49,8 @@ final class StarterStrategies
             self::goldTrendScalp(),
             self::majorTrendScalp('EURUSD', 'EUR/USD Trend Scalp'),
             self::majorTrendScalp('GBPUSD', 'GBP/USD Trend Scalp'),
+            self::majorTrendScalp('USDJPY', 'USD/JPY Trend Scalp'),
+            self::majorTrendScalp('AUDUSD', 'AUD/USD Trend Scalp'),
         ];
     }
 
@@ -132,8 +139,8 @@ final class StarterStrategies
             'tp2_r' => 2.00,
             'tp3_r' => 3.00,
 
-            // Dormant unless the R values are cleared, and scaled for a four-decimal major
-            // rather than inherited from gold.
+            // Dormant unless the R values are cleared, and sized for a major rather than
+            // inherited from gold.
             'tp1_pips' => 10.00,
             'tp1_close_pct' => 50.00,
             'tp2_pips' => 20.00,
