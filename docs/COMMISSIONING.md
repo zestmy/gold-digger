@@ -72,7 +72,7 @@ Any chart — the EA works off its own timer and ignores the chart's symbol and 
 | Input | Set it to |
 |---|---|
 | `ApiBaseUrl`, `ApiToken` | Your dashboard and the token from above |
-| `BaseSymbols` | `XAUUSD` — suffixes are resolved at runtime. Comma-separated for more than one instrument on this terminal |
+| `BaseSymbols` | Defaults to `XAUUSD,EURUSD,GBPUSD,USDJPY,AUDUSD` — suffixes are resolved at runtime. Trim it to the instruments this terminal should carry; keep `XAUUSD` first, because `PipSize` applies to the first symbol only |
 | `PipSize` | **`0.10`** for gold. Read the note below before changing it |
 | `EntryTimeframe` / `TrendTimeframe` | **Must match the strategy's.** If they disagree, bars accumulate and nothing is ever generated |
 | `DemoOnly` | Leave on |

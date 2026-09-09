@@ -90,7 +90,7 @@ Set the inputs:
 |---|---|
 | `ApiBaseUrl` | Must match the whitelisted URL exactly |
 | `ApiToken` | From step 3 |
-| `BaseSymbols` | `XAUUSD`, or a comma-separated list (`XAUUSD,EURUSD`; up to `FXS_MAX_SYMBOLS`, eight). Broker suffixes are resolved per symbol |
+| `BaseSymbols` | A comma-separated list, up to `FXS_MAX_SYMBOLS` (eight). Defaults to `XAUUSD,EURUSD,GBPUSD,USDJPY,AUDUSD`, matching the starter strategies. Broker suffixes are resolved per symbol. Keep `XAUUSD` first while `PipSize` is set, since that input describes the first symbol only |
 | `PipSize` | **`0.10` for gold.** See the warning below |
 | `MagicNumber` | Identifies this EA's positions; `close_all` only touches these |
 | `Deviation` | `20`–`30` points. Gold moves fast; tighter values requote |

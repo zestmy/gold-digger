@@ -47,8 +47,10 @@ input int      PollSeconds   = 5;                                    // Seconds 
 input int      HttpTimeoutMs = 4000;                                 // Per-request timeout
 
 input group             "Trading"
-input string   BaseSymbols   = "XAUUSD";     // Base symbols, comma separated; suffixes resolved per symbol
-input double   PipSize       = 0.10;         // Price move of one pip (0 = infer; gold is usually 0.10)
+//--- Keep XAUUSD first. PipSize below applies to the first symbol only and every other
+//--- infers its own, so leading with gold is what lets the 0.10 default stay correct.
+input string   BaseSymbols   = "XAUUSD,EURUSD,GBPUSD,USDJPY,AUDUSD"; // Base symbols, comma separated; suffixes resolved per symbol
+input double   PipSize       = 0.10;         // Price move of one pip for the FIRST symbol (0 = infer; gold is usually 0.10)
 input long     MagicNumber   = 20240101;     // Identifies this EA's positions
 input int      Deviation     = 20;           // Max slippage in points (gold needs 20-30)
 input int      MaxRetries    = 3;            // Attempts on requote / price-changed
