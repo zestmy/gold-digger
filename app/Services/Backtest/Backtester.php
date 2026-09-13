@@ -9,6 +9,8 @@ use App\Services\Strategy\PositionSizer;
 use App\Services\Strategy\StrategyEvaluator;
 use App\Services\Strategy\TargetLadder;
 use App\Services\Strategy\TradingSession;
+use App\Services\Trading\VolumeRules;
+use App\Support\Timeframe;
 
 /**
  * Backtester
@@ -40,11 +42,22 @@ use App\Services\Strategy\TradingSession;
  *   - Ladder rungs fill at the bar's close, not at the rung. That is what the live system
  *     really does - it notices on bar close and closes at market - so a backtest that fills
  *     at the rung is measuring a system that does not exist.
+ *   - Every market order fills late. A decision here becomes an order the EA claims one poll
+ *     interval later at best, so entries and market exits pay a share of the bar's adverse
+ *     excursion for the wait. See afterLatency().
+ *
+ * ## Volumes are the broker's, not arithmetic's
+ *
+ * A size is snapped down onto the broker's lot step before it is traded, and a size below the
+ * broker's minimum is declined rather than traded at the minimum - which is what the terminal
+ * would do with it, and is more risk than the setting asked for. See VolumeRules.
  *
  * ## What it does not model
  *
  * Swap, requotes, weekend gaps as anything other than the next bar's open, and partial fills.
- * News spikes appear only as whatever the bar recorded.
+ * News spikes appear only as whatever the bar recorded. Latency is applied to the price a
+ * market order fills at, but not to whether a stop or target inside the same bar would have
+ * been reached first.
  */
 final class Backtester
 {
@@ -96,6 +109,10 @@ final class Backtester
         /** @var array<int, SimulatedTrade> $open */
         $open = [];
 
+        // One bar's length, which is what turns the latency in seconds into a share of a
+        // bar's own movement. See MarketAssumptions::latencyFraction().
+        $barSeconds = Timeframe::seconds((string) $strategy->timeframe_entry);
+
         $maxConcurrent = (int) ($settings?->max_concurrent_trades ?? 1);
         $sessionsAllowed = $settings?->allowed_sessions;
         $minAtr = $settings?->min_atr_threshold !== null ? (float) $settings->min_atr_threshold : null;
@@ -109,7 +126,7 @@ final class Backtester
             foreach ($open as $key => $trade) {
                 $trade->barsHeld++;
 
-                $this->manage($trade, $bar, $strategy, $entryCandles, $i, $market, $report);
+                $this->manage($trade, $bar, $strategy, $entryCandles, $i, $market, $report, $barSeconds);
 
                 if (! $trade->isOpen()) {
                     $balance += $trade->netPnl;
@@ -153,7 +170,19 @@ final class Backtester
                 continue;
             }
 
-            $open[] = $this->enter($setup, $entryCandles[$i + 1], $strategy, $stopDistance, $stopPips, $lots, $market, $report);
+            // Onto the broker's grid, exactly as the live path now does before queueing and
+            // as the executor does before sending. A simulation that trades 0.037 lots is
+            // scoring a position no broker would have held; one that trades a size below
+            // the minimum is scoring a trade the terminal would have quietly enlarged.
+            $lots = VolumeRules::tradeable($lots, $market->volumeStep, $market->volumeMin);
+
+            if ($lots === null) {
+                $report->skip('below_min_volume');
+
+                continue;
+            }
+
+            $open[] = $this->enter($setup, $entryCandles[$i + 1], $strategy, $stopDistance, $stopPips, $lots, $market, $report, $barSeconds);
         }
 
         // Anything still open at the end is closed at the last price, marked so it can be
@@ -197,14 +226,16 @@ final class Backtester
         float $lots,
         MarketAssumptions $market,
         BacktestReport $report,
+        int $barSeconds,
     ): SimulatedTrade {
         $isBuy = $setup->isBuy();
         $sign = $isBuy ? 1.0 : -1.0;
 
         // The signal was produced from bar i's close, so filling at that close would be
         // trading on information the decision was made from. The next bar's open is the
-        // first price the system could actually have reached.
-        $mid = (float) $fillBar->open;
+        // first price the system could actually have reached - and then only if the order
+        // arrived instantly, which it does not.
+        $mid = $this->afterLatency((float) $fillBar->open, $fillBar, $isBuy, $market, $barSeconds);
         $spread = $market->spreadPipsFor($fillBar->spread_points);
 
         // Candle prices are bid: a buy crosses the spread on the way in, a sell on the way
@@ -248,7 +279,12 @@ final class Backtester
         int $i,
         MarketAssumptions $market,
         BacktestReport $report,
+        int $barSeconds,
     ): void {
+        // Where a market exit decided on this bar's close actually fills: one queue round
+        // trip later, which is inside the next bar. Null on the last bar of the series.
+        $next = $entryCandles[$i + 1] ?? null;
+
         $high = (float) $bar->high;
         $low = (float) $bar->low;
         $close = (float) $bar->close;
@@ -303,14 +339,14 @@ final class Backtester
             $reversal = $this->evaluator->crossDirection($slice, (int) $strategy->ema_fast, (int) $strategy->ema_slow);
 
             if ($reversal !== null && $reversal !== $trade->direction) {
-                $this->settle($trade, 'reversal_exit', $trade->remainingLots, $this->exitPrice($trade, $close, $market, slip: true), $bar, $market);
+                $this->settle($trade, 'reversal_exit', $trade->remainingLots, $this->exitAtMarket($trade, $close, $next, $market, $barSeconds), $bar, $market);
 
                 return;
             }
         }
 
         if ($strategy->max_holding_bars !== null && $trade->barsHeld >= (int) $strategy->max_holding_bars) {
-            $this->settle($trade, 'time_exit', $trade->remainingLots, $this->exitPrice($trade, $close, $market, slip: true), $bar, $market);
+            $this->settle($trade, 'time_exit', $trade->remainingLots, $this->exitAtMarket($trade, $close, $next, $market, $barSeconds), $bar, $market);
 
             return;
         }
@@ -341,11 +377,21 @@ final class Backtester
                 continue;
             }
 
+            // The same two refusals TradeManager::rungVolume() makes: a share below the
+            // broker's minimum is snapped to zero by the executor, and a remainder below it
+            // is a size the broker will not let the position sit at. A position too small to
+            // divide runs to its final target whole - which is the live outcome for a
+            // 0.01-lot trade, and simulating the division instead scores a ladder that would
+            // have failed at every rung.
+            if ($lots < $market->volumeMin || ($trade->remainingLots - $lots) < $market->volumeMin) {
+                continue;
+            }
+
             // Filled at the bar's *close*, not at the rung. The live system notices when the
             // bar closes and then closes at market, so a fill at the rung would be measuring
             // a system nobody built. This is the single biggest source of optimism in a
             // naive ladder backtest.
-            $this->settle($trade, $name, $lots, $this->exitPrice($trade, $close, $market, slip: true), $bar, $market);
+            $this->settle($trade, $name, $lots, $this->exitAtMarket($trade, $close, $next, $market, $barSeconds), $bar, $market);
 
             // Break-even once the first rung has actually filled, matching TradeManager -
             // including the offset that makes the phrase mean what it says.
@@ -441,6 +487,76 @@ final class Backtester
             $market->commissionPerLot * $lots * 2,
             $bar->open_time,
         );
+    }
+
+    /**
+     * A whole- or part-position exit the dashboard decided on this bar's close.
+     *
+     * Rungs, the reversal exit and the time exit are all noticed when a bar closes and then
+     * sent as market orders, so they wait in the same queue an entry waits in and fill
+     * inside the *next* bar. The stop and the final target are not here on purpose: those
+     * sit on the order at the broker and fill without anything having to be sent.
+     */
+    private function exitAtMarket(
+        SimulatedTrade $trade,
+        float $close,
+        ?Candle $next,
+        MarketAssumptions $market,
+        int $barSeconds,
+    ): float {
+        // A sell closes against the ask. `$close` was lifted by this bar's spread in
+        // manage(); the next bar's extreme has to be lifted by its own.
+        $lift = ! $trade->isBuy() && $next !== null
+            ? $market->pipsToPrice($market->spreadPipsFor($next->spread_points))
+            : 0.0;
+
+        $drifted = $this->afterLatency($close, $next, ! $trade->isBuy(), $market, $barSeconds, $lift);
+
+        return $this->exitPrice($trade, $drifted, $market, slip: true);
+    }
+
+    /**
+     * Where a market order really fills, once the queue has had its share of the bar.
+     *
+     * Nothing here executes at the price that triggered it. A bar closes, the EA pushes it
+     * on its next timer tick, the dashboard queues a command, and the EA claims it on the
+     * tick after that - two poll intervals at `PollSeconds = 5`, before the broker has seen
+     * anything. `MarketAssumptions::latencySeconds` is that wait, measured from
+     * `trade_commands` where there is a queue to measure.
+     *
+     * Which price it fills at in the meantime is not knowable from bars, so it resolves the
+     * way every other ambiguity here resolves - against the trade. The order gets the same
+     * share of the bar's adverse excursion that the latency is of the bar's length: ten
+     * seconds of an M5 bar is a thirtieth of the distance the price ran the wrong way. That
+     * is bounded by what the bar actually did rather than by an invented number of pips,
+     * and it falls to nothing as the latency does.
+     *
+     * `$from` is the price the fill is measured out of - the bar's open for an entry, the
+     * previous bar's close for an exit decided on that close. `$adverseUp` says which way
+     * hurts: true when a higher price is worse, which is a buy going in and a sell coming
+     * out. `$lift` carries the spread when the side being read is the ask.
+     */
+    private function afterLatency(
+        float $from,
+        ?Candle $bar,
+        bool $adverseUp,
+        MarketAssumptions $market,
+        int $barSeconds,
+        float $lift = 0.0,
+    ): float {
+        $fraction = $market->latencyFraction($barSeconds);
+
+        if ($fraction <= 0.0 || $bar === null) {
+            return $from;
+        }
+
+        $extreme = ($adverseUp ? (float) $bar->high : (float) $bar->low) + $lift;
+
+        // A gap the trade's way is not a gift. Latency is a cost or it is nothing, and a
+        // model that can pay out on the drift is one that rewards being slow.
+        $extreme = $adverseUp ? max($extreme, $from) : min($extreme, $from);
+
+        return $from + ($fraction * ($extreme - $from));
     }
 
     /**

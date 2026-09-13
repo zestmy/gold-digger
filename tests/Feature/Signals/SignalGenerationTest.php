@@ -14,6 +14,7 @@ use App\Models\TradeCommand;
 use App\Models\TradePartial;
 use App\Models\User;
 use App\Services\Strategy\SignalGenerator;
+use App\Services\Trading\VolumeRules;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -148,9 +149,14 @@ class SignalGenerationTest extends TestCase
         $signal = $this->generate();
 
         $stopPips = $signal->features['sl_pips'];
-        $expected = round(100.0 / ($stopPips * 10.0), 4);
+        $honest = 100.0 / ($stopPips * 10.0);
 
-        $this->assertEqualsWithDelta($expected, (float) $signal->suggested_lot_size, 1e-4);
+        // The size that would trade, which is the honest size snapped down onto the
+        // broker's lot grid. Asserting the unsnapped figure asserts a volume no broker
+        // would hold - and the direction of the snap is the point: never upward, because
+        // upward is more risk than the 1% this test is about.
+        $this->assertEqualsWithDelta(VolumeRules::snap($honest), (float) $signal->suggested_lot_size, 1e-4);
+        $this->assertLessThanOrEqual($honest, (float) $signal->suggested_lot_size);
     }
 
     /**
@@ -532,6 +538,57 @@ class SignalGenerationTest extends TestCase
 
         $this->assertSame('lot_size_unavailable', $signal->skip_reason);
         $this->assertSame(0, TradeCommand::count());
+    }
+
+    /**
+     * The defect this reason exists for.
+     *
+     * A wide stop on a small balance sizes below the broker's minimum lot.
+     * `CFXSExecutor::NormalizeVolume` does not refuse such a size - it raises it to the
+     * minimum - so the position traded would be larger than `risk_percentage` asked for,
+     * with nothing recording that the risk had been changed. Declining is the honest
+     * answer: the signal is kept, named, and no command is queued.
+     */
+    public function test_a_size_below_the_brokers_minimum_is_declined_rather_than_inflated(): void
+    {
+        $this->seedBullishSetup();
+
+        // A 0.10 lot minimum against 1% of ten thousand dollars over this stop: the
+        // arithmetic lands near 0.15, so a minimum above that is the case, without
+        // needing a fixture whose ATR has to be reasoned about.
+        BotHeartbeat::where('user_id', $this->user->id)->update([
+            'volume_min' => 5.0,
+            'volume_step' => 0.01,
+        ]);
+
+        $signal = $this->generate();
+
+        $this->assertSame('below_min_volume', $signal->skip_reason);
+        $this->assertNull($signal->suggested_lot_size);
+        $this->assertSame(0, TradeCommand::count());
+    }
+
+    /**
+     * And the size that is queued is the one the broker can hold, snapped down onto its
+     * step rather than left as the arithmetic produced it.
+     */
+    public function test_the_queued_volume_sits_on_the_brokers_step(): void
+    {
+        $this->seedBullishSetup();
+
+        BotHeartbeat::where('user_id', $this->user->id)->update([
+            'volume_min' => 0.01,
+            'volume_step' => 0.10,
+        ]);
+
+        $signal = $this->generate();
+
+        $this->assertNull($signal->skip_reason);
+
+        $lots = (float) $signal->suggested_lot_size;
+
+        $this->assertEqualsWithDelta(0.0, fmod(round($lots * 10, 6), 1.0), 1e-6, 'lots should be a multiple of 0.10');
+        $this->assertEqualsWithDelta($lots, (float) TradeCommand::where('type', 'open')->firstOrFail()->payload['volume'], 1e-6);
     }
 
     public function test_the_concurrent_trade_cap_is_enforced(): void

@@ -17,6 +17,11 @@ fills, instrument precision — each of which is a small change to `app/Services
 of which makes a backtest here harder to fool. One of them found a live parity defect while this
 document was being written; see [Volume is snapped in one place only](#volume-is-snapped-in-one-place-only).
 
+> **Since written:** items 1 and 2 of the [recommendation](#recommendation) are built — volumes
+> now snap in the dashboard and sub-minimum sizes are declined rather than inflated, and every
+> simulated market order pays for the queue's delay, calibrated from `trade_commands`. See
+> `docs/BACKTESTING.md` and `docs/SIGNAL_GENERATION.md`. The rest stands as written.
+
 ---
 
 ## What we already agree on
@@ -65,13 +70,15 @@ So the pessimism in `MarketAssumptions` — adverse slippage on every market ord
 spread, stop-before-target inside a bar — has a hole in it precisely where our architecture is
 slowest, and the hole is on the flattering side.
 
-The fix is cheap and does not need a guess, because **we already store the measurement**.
+The fix was cheap and needed no guess, because **we already store the measurement**.
 `trade_commands` carries `created_at`, `claimed_at` and `completed_at`, and `result` carries the
-fill price. Once the kill switch has been on for a week there is a distribution of real
-queue-to-fill latency sitting in the database. Take a percentile off it, add
-`latencySeconds` to `MarketAssumptions`, and fill an entry at the interpolated price that far into
-the next bar rather than at its open. A `--latency=` flag then makes the sensitivity visible: a
-strategy that only works at zero latency is not a strategy we can run through a 5-second poll.
+fill price, so the median queue wait is a fact about this deployment rather than an assumption
+about one. `MarketAssumptions::latencySeconds` now carries it — that median plus one nominal poll
+interval for the bar-push leg, which has no timestamp of its own — falling back to ten seconds
+until ten claimed commands exist. Entries and dashboard-decided market exits pay that share of
+the bar's adverse excursion; the stop and the final target do not, because they sit on the order
+at the broker. `--latency=` makes the sensitivity visible: a strategy that only works at zero
+latency is not a strategy we can run through a 5-second poll.
 
 That also gives `PollSeconds` a number instead of a shrug — if backtested edge collapses between
 2s and 8s, the poll interval is a strategy parameter and belongs in the tuning discussion.
@@ -129,11 +136,12 @@ case the error is the other way and smaller (0.037 sized, 0.03 traded, ~19% less
 simulated), which is survivable but still means the equity curve is not the one that would have
 been traded.
 
-`symbol_specs` and `bot_heartbeats` already carry step, min and max. The fix is for
-`MarketAssumptions` to carry them too and for the backtester to snap through the same arithmetic
-the EA uses — and, separately, for the sizer to refuse a trade whose honest size is below
-`volume_min` rather than let the terminal quietly inflate it. `WireProtocolContractTest` is the
-precedent for keeping the two implementations honest: a test that reads both and fails on drift.
+`symbol_specs` and `bot_heartbeats` already carried step and minimum, so both halves of the fix
+were short: `App\Services\Trading\VolumeRules` is now the one copy of the EA's floor-onto-the-step
+arithmetic — shared by the strategy path, the backtester and the three copier call sites that had
+each grown their own — and where the terminal would raise a sub-minimum size, the dashboard
+declines it as `below_min_volume` instead. Rounding twice is harmless when both roundings are
+`floor` onto the same grid; trading more than the setting allows is not.
 
 ### 4. Bar ambiguity as a switch rather than a constant
 
@@ -235,8 +243,8 @@ software consequence, not a refactor.
 
 | # | Change | Effort | Why now |
 |---|---|---|---|
-| 1 | Snap simulated volume through the EA's arithmetic; refuse sub-minimum sizes | Hours | Live parity defect, and the error direction is more risk than configured |
-| 2 | `latencySeconds` in `MarketAssumptions`, calibrated from `trade_commands` timings, with a `--latency=` sweep | ~1 day | Our slowest link is unmodelled on the flattering side; the data to calibrate it is already stored |
+| 1 | ~~Snap simulated volume through the EA's arithmetic; refuse sub-minimum sizes~~ **done** | Hours | Live parity defect, and the error direction is more risk than configured |
+| 2 | ~~`latencySeconds` in `MarketAssumptions`, calibrated from `trade_commands` timings, with a `--latency=` sweep~~ **done** | ~1 day | Our slowest link is unmodelled on the flattering side; the data to calibrate it is already stored |
 | 3 | Seeded `FillModel`: limit-fill and rejection probabilities, defaults preserving today's behaviour | ~1 day | Removes the last "every order fills" certainty; seed keeps runs reproducible |
 | 4 | `--ordering=optimistic` to report the intrabar spread | ~1 day | Quantifies how much of a result is intrabar artefact; informs the intrabar-exit decision |
 | 5 | Inject the clock instead of `setTestNow` | ~1 day | Makes news-window and session edges directly testable |

@@ -10,6 +10,7 @@ use App\Models\TradeCommand;
 use App\Models\User;
 use App\Services\Ai\AiFund;
 use App\Services\Strategy\SymbolResolver;
+use App\Services\Trading\VolumeRules;
 
 /**
  * Follow-Up Executor
@@ -124,13 +125,13 @@ final class FollowUpExecutor
     {
         $spec = app(SymbolResolver::class)->for($heartbeat->broker_account_id, $trade->symbol, $heartbeat);
 
-        $step = (float) ($spec['volume_step'] ?? 0.01);
-        $min = (float) ($spec['volume_min'] ?? 0.01);
+        $step = (float) ($spec['volume_step'] ?? VolumeRules::DEFAULT_STEP);
+        $min = (float) ($spec['volume_min'] ?? VolumeRules::DEFAULT_MIN);
         $remaining = (float) $trade->remaining_lot_size;
 
         // Snapped down: closing more than instructed books a winner early, and the
         // instruction said part.
-        $volume = floor(($remaining * (float) $followUp->follow_up_fraction) / $step) * $step;
+        $volume = VolumeRules::snap($remaining * (float) $followUp->follow_up_fraction, $step);
 
         if ($volume < $min) {
             return $this->blocked($followUp, sprintf(

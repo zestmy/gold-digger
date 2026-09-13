@@ -88,6 +88,7 @@ objection is recorded: it is the gate that would have to change for the signal t
 | `max_trades_reached` | `max_concurrent_trades` already open |
 | `daily_loss_limit` | Realised losses today past `max_daily_loss_percentage` |
 | `lot_size_unavailable` | `pip_value_per_lot` unknown, so no honest size exists |
+| `below_min_volume` | The honest size is below the broker's minimum lot, and trading it at the minimum would risk more than the setting allows |
 
 ### The floors an entry has to clear
 
@@ -187,9 +188,31 @@ is. Fixed lots do the opposite: a wide ATR stop on a volatile day loses several 
 a quiet day's trade loses, so the worst losses cluster exactly where they hurt most.
 
 `pip_value_per_lot` comes from the heartbeat and has **no default**. Absent it, the signal
-is recorded `lot_size_unavailable`. The result is deliberately not snapped to the broker's
-volume step — `CFXSExecutor::NormalizeVolume` already snaps *downward*, and rounding twice
-could round up into more risk than the setting allows.
+is recorded `lot_size_unavailable`.
+
+The result is then snapped down onto the broker's volume step, and a size below the broker's
+minimum is declined as `below_min_volume` rather than queued.
+
+That snapping used to be left entirely to the terminal, on the reasoning that only it knows the
+step and that rounding in two places could round twice. The reasoning was right about
+double-rounding and wrong about the consequence, because `CFXSExecutor::NormalizeVolume` does
+not only round down:
+
+```cpp
+double snapped = MathFloor(volume / m_vol_step) * m_vol_step;
+if(snapped < m_vol_min) snapped = m_vol_min;     // <- upward, past the risk setting
+if(snapped > m_vol_max) snapped = m_vol_max;
+```
+
+So a size the risk percentage worked out as 0.004 lots was not refused, it was *raised* to the
+broker's minimum — typically 0.01, two and a half times the risk that was asked for, on the
+accounts least able to carry it, with nothing in the signal or the command saying so. Any of a
+small balance, a wide ATR stop or a low risk percentage is enough to reach it.
+
+Both roundings are now `floor` onto the same grid, which is harmless, and where the terminal
+would inflate, the dashboard declines and records why. `App\Services\Trading\VolumeRules` is
+the one copy of that arithmetic, shared with the copier and the backtester, so the four paths
+cannot disagree about what the grid is.
 
 ---
 

@@ -12,6 +12,7 @@ use App\Services\Ai\AiFund;
 use App\Services\Strategy\PositionSizer;
 use App\Services\Strategy\RewardFloor;
 use App\Services\Strategy\SymbolResolver;
+use App\Services\Trading\VolumeRules;
 
 /**
  * Signal Executor
@@ -306,11 +307,11 @@ final class SignalExecutor
         // fund allows, which is the one thing the cap exists to prevent. The terminal
         // snaps as well; snapping here too is what lets the minimum be checked before a
         // command is queued that the executor would refuse.
-        $step = (float) ($spec['volume_step'] ?? 0.01);
-        $min = (float) ($spec['volume_min'] ?? 0.01);
-        $lots = floor(($lots + 1e-9) / $step) * $step;
+        $step = (float) ($spec['volume_step'] ?? VolumeRules::DEFAULT_STEP);
+        $min = (float) ($spec['volume_min'] ?? VolumeRules::DEFAULT_MIN);
+        $lots = VolumeRules::tradeable($lots, $step, $min);
 
-        if ($lots < $min) {
+        if ($lots === null) {
             return $none(sprintf(
                 'Risking %s over a %s pip stop works out below the %s lot minimum. The fund is too small for this stop distance.',
                 round($risk, 2),

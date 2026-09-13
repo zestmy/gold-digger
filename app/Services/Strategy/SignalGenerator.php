@@ -11,6 +11,7 @@ use App\Models\Trade;
 use App\Models\TradeCommand;
 use App\Models\TradePartial;
 use App\Services\News\NewsBlackout;
+use App\Services\Trading\VolumeRules;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -143,6 +144,17 @@ final class SignalGenerator
 
             if ($lots === null) {
                 $skipReason = 'lot_size_unavailable';
+            } else {
+                // Onto the broker's grid here rather than leaving it to the terminal.
+                // NormalizeVolume snaps down *and clamps up to the minimum*, so a size
+                // below that minimum was being traded at the minimum - more risk than
+                // the setting asked for, with nothing recording that it had happened.
+                // See VolumeRules.
+                $lots = VolumeRules::tradeable($lots, $spec['volume_step'], $spec['volume_min']);
+
+                if ($lots === null) {
+                    $skipReason = 'below_min_volume';
+                }
             }
         }
 

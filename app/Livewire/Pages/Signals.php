@@ -119,6 +119,7 @@ class Signals extends Component
         'max_trades_reached' => ['label' => 'Too many open', 'help' => 'Already at max concurrent trades.'],
         'daily_loss_limit' => ['label' => 'Daily loss limit', 'help' => "Today's realised losses passed the configured limit."],
         'lot_size_unavailable' => ['label' => 'Cannot size', 'help' => 'Pip value per lot is unknown, so no position size could be computed.'],
+        'below_min_volume' => ['label' => 'Too small to trade', 'help' => "The risk percentage over this stop distance works out below the broker's minimum lot. Trading it would mean taking more risk than the setting allows, so it is declined - widen the risk, or accept that this stop is too wide for this balance."],
     ];
 
     public function updatingFilter(): void

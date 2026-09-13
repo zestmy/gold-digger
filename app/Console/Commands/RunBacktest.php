@@ -30,6 +30,7 @@ class RunBacktest extends Command
                             {--spread= : Fixed spread in pips, overriding each bar\'s own}
                             {--slippage=0.3 : Adverse slippage in pips on every market order}
                             {--commission=7.0 : Commission per lot per side}
+                            {--latency= : Seconds from bar close to the order reaching the broker, overriding what the queue measured}
                             {--json= : Write the full report to this file}
                             {--trades : List every simulated trade}';
 
@@ -63,11 +64,16 @@ class RunBacktest extends Command
             return self::FAILURE;
         }
 
+        // Read once and passed to the header, so the run does not ask the queue the same
+        // question twice just to label its own output.
+        $measuredLatency = MarketAssumptions::measuredLatency($heartbeat);
+
         $market = MarketAssumptions::fromHeartbeat($heartbeat, array_filter([
             'spreadPips' => $this->option('spread') !== null ? (float) $this->option('spread') : null,
             'slippagePips' => (float) $this->option('slippage'),
             'commissionPerLot' => (float) $this->option('commission'),
             'startingBalance' => (float) $this->option('balance'),
+            'latencySeconds' => $this->option('latency') !== null ? (float) $this->option('latency') : null,
         ], fn ($v) => $v !== null));
 
         $settings = BotSettings::where('user_id', $strategy->user_id)->first();
@@ -77,7 +83,7 @@ class RunBacktest extends Command
             $settings->risk_percentage = (float) $this->option('risk');
         }
 
-        $this->header($strategy, $symbol, $entry, $trend, $market);
+        $this->header($strategy, $symbol, $entry, $trend, $market, $measuredLatency);
 
         $report = $backtester->run($strategy, $entry, $trend, $market, $settings);
 
@@ -136,7 +142,7 @@ class RunBacktest extends Command
             ->all();
     }
 
-    private function header(Strategy $strategy, string $symbol, array $entry, array $trend, MarketAssumptions $market): void
+    private function header(Strategy $strategy, string $symbol, array $entry, array $trend, MarketAssumptions $market, ?float $measuredLatency): void
     {
         $this->newLine();
         $this->line("<options=bold>{$strategy->name}</> on {$symbol}");
@@ -155,6 +161,17 @@ class RunBacktest extends Command
             $market->slippagePips,
             $market->commissionPerLot,
             $market->pipValuePerLot,
+        ));
+        $this->line(sprintf(
+            '  latency %.1fs%s, lots on a %s grid, minimum %s',
+            $market->latencySeconds,
+            // Which of the two it is decides how much the figure is worth: measured is this
+            // deployment's own queue, default is an assumption about a poll interval.
+            $this->option('latency') !== null
+                ? ' (given)'
+                : ($measuredLatency !== null ? ' (measured)' : ' (assumed)'),
+            rtrim(rtrim(number_format($market->volumeStep, 4), '0'), '.'),
+            rtrim(rtrim(number_format($market->volumeMin, 4), '0'), '.'),
         ));
         $this->newLine();
     }

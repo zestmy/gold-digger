@@ -24,9 +24,13 @@ namespace App\Services\Strategy;
  *
  * ## Rounding
  *
- * The result is deliberately *not* snapped to the broker's volume step. Only the terminal
- * knows the step, and CFXSExecutor::NormalizeVolume already snaps downward - rounding here
- * as well would round twice and could round up into more risk than the setting allows.
+ * This returns the honest size and nothing else: no grid, no minimum. Both belong to the
+ * broker, and both are applied by the caller through `VolumeRules` - which is where the
+ * reasoning for snapping in the dashboard at all is written down, and why a size below the
+ * broker's minimum is declined rather than handed to a terminal that would raise it.
+ *
+ * Rounding to four decimals here is not that: it matches `signals.suggested_lot_size`, and
+ * below four decimals the number is smaller than any broker's minimum anyway.
  */
 final class PositionSizer
 {

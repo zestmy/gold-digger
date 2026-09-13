@@ -203,6 +203,11 @@ Either sent as `null` makes the dashboard record signals unexecuted (`no_symbol_
 `lot_size_unavailable`) rather than size a position from a hardcoded gold multiplier. A
 wrong value here does not fail loudly — it trades a size nobody chose.
 
+`volume_min` and `volume_step` also decide what a sized position becomes before it is queued:
+down onto the step, and declined as `below_min_volume` if what is left is under the minimum.
+Leaving that to the terminal meant a sub-minimum size was *raised* to the minimum rather than
+refused — see `SIGNAL_GENERATION.md`.
+
 ### More than one instrument
 
 One EA instance carries several. `BaseSymbols` is a comma-separated list (up to

@@ -10,6 +10,7 @@ use App\Services\Ai\AiFund;
 use App\Services\Strategy\SymbolResolver;
 use App\Services\Trading\ProtectionQueue;
 use App\Services\Trading\StopRules;
+use App\Services\Trading\VolumeRules;
 
 /**
  * Position Manager
@@ -214,11 +215,11 @@ final class PositionManager
      */
     private function lockProfit(Trade $trade, BotHeartbeat $heartbeat, array $spec, int $percent): bool
     {
-        $step = (float) ($spec['volume_step'] ?? 0.01);
-        $min = (float) ($spec['volume_min'] ?? 0.01);
+        $step = (float) ($spec['volume_step'] ?? VolumeRules::DEFAULT_STEP);
+        $min = (float) ($spec['volume_min'] ?? VolumeRules::DEFAULT_MIN);
         $remaining = (float) $trade->remaining_lot_size;
 
-        $volume = floor(($remaining * $percent / 100) / $step) * $step;
+        $volume = VolumeRules::snap($remaining * $percent / 100, $step);
 
         // A remainder the broker cannot hold is not a partial close, it is a full exit -
         // and a full exit is emphatically not what "lock some profit" asked for.
