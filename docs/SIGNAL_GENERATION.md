@@ -87,7 +87,43 @@ objection is recorded: it is the gate that would have to change for the signal t
 | `reward_below_floor` | The order's own target was too close against its stop, for `min_reward_ratio` |
 | `max_trades_reached` | `max_concurrent_trades` already open |
 | `daily_loss_limit` | Realised losses today past `max_daily_loss_percentage` |
+| `drawdown_limit` | Equity is further below the account's peak than `max_drawdown_percentage` allows |
+| `rollover_window` | The bar closed inside the minutes before the broker's daily rollover |
 | `lot_size_unavailable` | `pip_value_per_lot` unknown, so no honest size exists |
+| `below_min_volume` | The honest size is below the broker's minimum lot, and trading it at the minimum would risk more than the setting allows |
+
+### The two limits that are not about the setup
+
+Both are off unless configured, and neither is part of a trading mode: a mode says how much
+to trade, and these say when to stop trading at all.
+
+**`max_drawdown_percentage`** is the limit the daily one cannot see. `max_daily_loss_percentage`
+asks whether *today* went badly and forgets at midnight; an account can bleed a quarter of
+itself over three weeks without a single day breaching 3%. This measures equity against the
+highest equity the account has ever reported — `broker_accounts.peak_equity`, written by the
+heartbeat — and has no reset.
+
+Equity rather than balance, unlike the daily limit. That difference is deliberate: a daily
+limit that tripped on an open position would halt the day over a trade that recovers within
+the hour, where this one only declines *new* entries, never closes anything, and lifts itself
+the moment equity comes back. Declining to add risk while the account is deep underwater is
+right even if the open position later recovers.
+
+A deposit raises the peak and a withdrawal reads exactly like a loss — there is no deal
+history here to tell them apart — so the risk page shows the peak, when it was set, and a
+reset to current equity. A halt nobody can unstick is one somebody switches off for good.
+
+**`rollover_at` + `flat_before_rollover_minutes`** stand the account aside around the broker's
+daily break: no new entries inside the window, and `TradeManager` closes what is open (see
+[`TRADE_MANAGEMENT.md`](TRADE_MANAGEMENT.md)). The costs being avoided are swap, the widest
+spread of the day, and the gap at the reopen — the first of which the backtester has never
+charged anybody.
+
+The time has no default. Elev8 rolls gold at 21:00 UTC and another broker does not; the
+dashboard cannot derive it, and a guess closes positions at an hour nobody chose. This gate
+is judged at the bar's **close**, not at `barTime`, because the question is whether the order
+would *arrive* inside the window — a bar opening at 20:40 and closing at 20:45 would otherwise
+produce an entry the trade manager flattens a minute later.
 
 ### The floors an entry has to clear
 
@@ -187,9 +223,31 @@ is. Fixed lots do the opposite: a wide ATR stop on a volatile day loses several 
 a quiet day's trade loses, so the worst losses cluster exactly where they hurt most.
 
 `pip_value_per_lot` comes from the heartbeat and has **no default**. Absent it, the signal
-is recorded `lot_size_unavailable`. The result is deliberately not snapped to the broker's
-volume step — `CFXSExecutor::NormalizeVolume` already snaps *downward*, and rounding twice
-could round up into more risk than the setting allows.
+is recorded `lot_size_unavailable`.
+
+The result is then snapped down onto the broker's volume step, and a size below the broker's
+minimum is declined as `below_min_volume` rather than queued.
+
+That snapping used to be left entirely to the terminal, on the reasoning that only it knows the
+step and that rounding in two places could round twice. The reasoning was right about
+double-rounding and wrong about the consequence, because `CFXSExecutor::NormalizeVolume` does
+not only round down:
+
+```cpp
+double snapped = MathFloor(volume / m_vol_step) * m_vol_step;
+if(snapped < m_vol_min) snapped = m_vol_min;     // <- upward, past the risk setting
+if(snapped > m_vol_max) snapped = m_vol_max;
+```
+
+So a size the risk percentage worked out as 0.004 lots was not refused, it was *raised* to the
+broker's minimum — typically 0.01, two and a half times the risk that was asked for, on the
+accounts least able to carry it, with nothing in the signal or the command saying so. Any of a
+small balance, a wide ATR stop or a low risk percentage is enough to reach it.
+
+Both roundings are now `floor` onto the same grid, which is harmless, and where the terminal
+would inflate, the dashboard declines and records why. `App\Services\Trading\VolumeRules` is
+the one copy of that arithmetic, shared with the copier and the backtester, so the four paths
+cannot disagree about what the grid is.
 
 ---
 

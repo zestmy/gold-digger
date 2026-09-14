@@ -601,8 +601,124 @@ class TradeManagementTest extends TestCase
     }
 
     // =====================================================================
+    // FLAT BEFORE THE ROLLOVER
+    // =====================================================================
+
+    /**
+     * The one exit decided by the clock rather than by the series.
+     *
+     * A position carried through the break pays swap, sits through the widest spread of the
+     * day, and takes whatever gap the reopen brings. `trades:manage` runs every minute,
+     * which is what makes a wall-clock exit reliable at all - the bar-close trigger alone
+     * could miss the window entirely on an H1 strategy.
+     */
+    public function test_a_position_is_flattened_inside_the_rollover_window(): void
+    {
+        $this->settings(['rollover_at' => '21:00', 'flat_before_rollover_minutes' => 15]);
+        $trade = $this->openTrade(0.10);
+        $this->seedBarsReaching(self::ENTRY);
+
+        Carbon::setTestNow(Carbon::parse('2026-03-10 20:50:00', 'UTC'));
+
+        $this->assertSame([['trade_id' => $trade->id, 'action' => 'rollover_exit']], $this->manage());
+
+        $command = TradeCommand::where('type', 'close')->firstOrFail();
+
+        $this->assertSame('rollover_exit', $command->payload['reason']);
+        // The whole remaining position: a partial would leave something to carry through
+        // the break, which is the thing being avoided.
+        $this->assertEqualsWithDelta(0.10, (float) $command->payload['volume'], 0.001);
+    }
+
+    public function test_a_position_outside_the_window_is_left_alone(): void
+    {
+        $this->settings(['rollover_at' => '21:00', 'flat_before_rollover_minutes' => 15]);
+        $this->openTrade(0.10);
+        $this->seedBarsReaching(self::ENTRY);
+
+        Carbon::setTestNow(Carbon::parse('2026-03-10 20:44:00', 'UTC'));
+
+        $this->assertSame([], $this->manage());
+        $this->assertSame(0, TradeCommand::where('type', 'close')->count());
+    }
+
+    public function test_nothing_is_flattened_when_no_rollover_is_configured(): void
+    {
+        $this->settings(['rollover_at' => null, 'flat_before_rollover_minutes' => 15]);
+        $this->openTrade(0.10);
+        $this->seedBarsReaching(self::ENTRY);
+
+        Carbon::setTestNow(Carbon::parse('2026-03-10 20:50:00', 'UTC'));
+
+        $this->assertSame([], $this->manage());
+        $this->assertSame(0, TradeCommand::where('type', 'close')->count());
+    }
+
+    /**
+     * It supersedes the ladder on the same pass, for the same reason the other whole-position
+     * exits do: two commands where one would do, and the partial's fill would move the
+     * exit's fill.
+     */
+    public function test_the_rollover_exit_supersedes_a_rung_on_the_same_pass(): void
+    {
+        $this->settings(['rollover_at' => '21:00', 'flat_before_rollover_minutes' => 15]);
+        $trade = $this->openTrade(0.10);
+
+        // A bar that reached TP1, which would otherwise queue a partial close.
+        $this->seedBarsReaching(self::TP1 + 0.50);
+
+        Carbon::setTestNow(Carbon::parse('2026-03-10 20:50:00', 'UTC'));
+
+        $this->assertSame([['trade_id' => $trade->id, 'action' => 'rollover_exit']], $this->manage());
+        $this->assertSame(1, TradeCommand::where('type', 'close')->count());
+        $this->assertSame('rollover_exit', TradeCommand::where('type', 'close')->first()->payload['reason']);
+    }
+
+    /**
+     * The case the flatten is hoisted above the candle load for: a feed that stopped is the
+     * strongest reason to be flat by the rollover, not an excuse to carry a position
+     * through it. Every other exit here is read off the series, so no series means nothing
+     * to decide - this one is decided by the clock.
+     */
+    public function test_a_position_is_flattened_even_when_no_bars_are_stored(): void
+    {
+        $this->settings(['rollover_at' => '21:00', 'flat_before_rollover_minutes' => 15]);
+        $trade = $this->openTrade(0.10);
+
+        // No seedBars() at all.
+        Carbon::setTestNow(Carbon::parse('2026-03-10 20:50:00', 'UTC'));
+
+        $this->assertSame([['trade_id' => $trade->id, 'action' => 'rollover_exit']], $this->manage());
+        $this->assertSame('rollover_exit', TradeCommand::where('type', 'close')->firstOrFail()->payload['reason']);
+    }
+
+    /**
+     * Every minute of the window runs another pass, and the close must not be queued once
+     * per minute. The idempotency key is what collapses them.
+     */
+    public function test_the_flatten_is_queued_once_however_many_passes_run(): void
+    {
+        $this->settings(['rollover_at' => '21:00', 'flat_before_rollover_minutes' => 15]);
+        $this->openTrade(0.10);
+        $this->seedBarsReaching(self::ENTRY);
+
+        Carbon::setTestNow(Carbon::parse('2026-03-10 20:50:00', 'UTC'));
+        $this->manage();
+
+        Carbon::setTestNow(Carbon::parse('2026-03-10 20:51:00', 'UTC'));
+        $this->manage();
+
+        $this->assertSame(1, TradeCommand::where('type', 'close')->count());
+    }
+
+    // =====================================================================
     // HELPERS
     // =====================================================================
+
+    private function settings(array $attributes): void
+    {
+        BotSettings::firstOrCreate(['user_id' => $this->user->id])->update($attributes);
+    }
 
     private function manage(): array
     {

@@ -20,7 +20,10 @@ That matters because a backtester with its own copy of the logic drifts from the
 trades, usually without anyone noticing, and then its results describe a strategy nobody is
 running. The exit side mirrors `TradeManager` for the same reason: rungs detected on bar close
 and filled at market, the final target sitting on the order as a broker-side limit, break-even
-once the first rung actually fills. The ladder itself comes from the same `TargetLadder` the
+once the first rung actually fills, a position too small to divide — either the share or the
+remainder under the broker's minimum lot — running to its final target whole rather than taking
+rungs the broker would refuse, and the rollover window standing the account aside on both
+sides: no entries inside it, and anything open when it arrives closed. The ladder itself comes from the same `TargetLadder` the
 generator uses — rungs in R off the simulated stop, or in pips — so a sweep over `tp1_r` is
 a sweep over the ladder the live strategy would place.
 
@@ -34,18 +37,54 @@ A backtest is only worth running if it can say no. The ways one quietly says yes
 
 | Ambiguity | What this does | Why |
 |---|---|---|
-| When does a signal fill? | **Next bar's open** | The signal was produced *from* the current bar's close. Filling there is trading on the information that produced it. |
+| When does a signal fill? | **Into the next bar**, from its open | The signal was produced *from* the current bar's close, so filling there is trading on the information that produced it. How far into that bar is the latency below. |
 | A bar spans both the stop and the target | **Stop** | Without tick data the order is unknowable. Taking the target converts every losing bar into a winner. |
 | A ladder rung is reached | **Fills at the bar's close**, not the rung | That is what the live system does — it notices on bar close and closes at market. Filling at the rung measures a system nobody built. |
 | The broker-side final target | Fills **at** the level | It is a limit order, and limits do not slip. |
 | Spread | Each bar's own, from `candles.spread_points` | A fixed spread hides that spreads widen exactly when a strategy is most likely to trigger. |
 | Slippage | Adverse on every market order | Entries, stops, rungs and exits — never in your favour. |
+| How long the order takes to arrive | **A share of the bar's adverse excursion**, that share being the latency over the bar's length | Nothing here executes at the price that triggered it — see below. Where the price went in those seconds is unknowable from bars, so it resolves against the trade like every other ambiguity. |
+| What volume trades | **Snapped down onto the broker's lot step**; below the minimum, the setup is declined | An unsnapped 0.037 lots is a position no broker holds. And the terminal *raises* a sub-minimum size to the minimum rather than refusing it, which is more risk than the setting asked for. |
+
+### Orders arrive late
+
+A bar closes, the EA pushes it on its next timer tick, the dashboard queues a command, and the
+EA claims it on the tick after that. At the EA's default `PollSeconds = 5` that is five to ten
+seconds before the broker has seen anything — and the backtester used to fill at the next bar's
+open, which, bars being contiguous, is the price *at the moment of the close*. The one price the
+system certainly did not get.
+
+`MarketAssumptions::latencySeconds` is that wait, and it is measured rather than guessed:
+`trade_commands` records `created_at` and `claimed_at`, so the median queue wait is this
+deployment's own. One nominal poll interval is added for the leg before it — the bar closing and
+waiting to be pushed — because that hop leaves no timestamp to subtract. Fewer than ten claimed
+commands and the measurement is not believed; the run falls back to ten seconds, which is two
+nominal poll intervals.
+
+The header of every run says which it used:
+
+```
+  latency 9.0s (measured), lots on a 0.01 grid, minimum 0.01
+  latency 10.0s (assumed), lots on a 0.01 grid, minimum 0.01
+```
+
+It applies to entries and to the market exits the dashboard decides — rungs, the reversal exit,
+the time exit. It deliberately does **not** apply to the stop or the final target: those sit on
+the order at the broker and fill without anything being sent. `--latency=` overrides it, and the
+sweep is the point: a strategy whose edge only exists at zero latency is not one this
+architecture can run, and that makes `PollSeconds` a strategy parameter rather than a
+deployment detail.
 
 Candle prices are treated as **bid**, which is what MT5 charts show. A buy enters at bid+spread
 and exits at bid. A sell enters at bid and is managed entirely against **ask**: its stop and
 targets trigger on bid+spread and its exits fill there. The spread is paid once per round trip,
 on the side that really crosses it. (Until September 2026 a sell paid no spread at all, so every
 short result before then was flattered by one spread per trade.)
+
+Two more assumptions arrived in September 2026, so a result from before then is not comparable
+with one from after: every market order now pays for the queue's delay, and every volume is the
+one the broker would actually have held. Both make results worse, which is the direction that
+was wrong.
 
 ---
 
@@ -56,6 +95,7 @@ php artisan backtest                    # the only active strategy
 php artisan backtest 3 --trades         # a specific one, listing every trade
 php artisan backtest --from=2026-01-01 --to=2026-03-01
 php artisan backtest --spread=2.5 --slippage=0.5 --commission=7
+php artisan backtest --latency=0        # what the queue's delay is costing
 php artisan backtest --json=storage/backtest.json
 ```
 
@@ -63,9 +103,10 @@ It **reads only**. No signal, trade or command row is written — a backtest tha
 would poison the very analytics it exists to inform, and a test asserts the table counts are
 unchanged.
 
-Assumptions default from the terminal's own reported symbol specification: the pip size and pip
-value on the latest heartbeat. Running with a pip value the broker does not use is measuring a
-different instrument, and position sizing is a division by exactly that number.
+Assumptions default from the terminal's own reported symbol specification: the pip size, the pip
+value, and the lot step and minimum on the latest heartbeat. Running with a pip value the broker
+does not use is measuring a different instrument, and position sizing is a division by exactly
+that number.
 
 ---
 
@@ -88,14 +129,33 @@ infinite edge, and it is reported as a blank rather than a number that invites b
 
 ---
 
+## The two account limits
+
+`max_drawdown_percentage` and the rollover window are both mirrored here, because a backtest
+that kept trading through limits the live system stops for would overstate every result that
+touched one.
+
+The drawdown halt is the one place the two cannot agree exactly. Live it is measured on the
+equity the terminal reports, which includes open positions; here there is no floating equity
+to read, so the simulated drawdown is the **shallower** of the two and the gate trips later
+than it would in life. That is the same limitation the max-drawdown metric above already
+carries, and it leans the way every other assumption here leans — against believing the
+result.
+
+---
+
 ## What it does not model
 
-- **Swap**, so a strategy that holds overnight will look better here than it trades.
+- **Swap**, so a strategy that holds overnight will look better here than it trades. Setting
+  a rollover window is the cheap way out of that one: a position that is never carried through
+  the break never pays it.
 - **Requotes and rejections.** Every order fills.
 - **Weekend and news gaps** as anything other than the next bar's open.
 - **Partial fills.** Volume is always available.
 - **Intrabar sequence.** The pessimistic assumptions above are the substitute for tick data,
   and they are assumptions, not measurements.
+- **Latency changing *which* level was reached.** A late order fills at a worse price, but the
+  stop and target inside that same bar are still judged as though it had arrived instantly.
 
 ---
 

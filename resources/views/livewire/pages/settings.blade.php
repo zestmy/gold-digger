@@ -134,6 +134,80 @@
                     @error('max_concurrent_trades') <p class="mt-1 text-sm text-red-400">{{ $message }}</p> @enderror
                     <p class="mt-1 text-xs text-gray-500">Maximum open positions</p>
                 </div>
+
+                <!-- Max Drawdown. The limit the daily one cannot see: peak to trough, no reset. -->
+                <div>
+                    <label for="max_drawdown_percentage" class="block text-sm font-medium text-gray-300">Max Drawdown (%)</label>
+                    <div class="mt-1 relative">
+                        <input
+                            type="number"
+                            id="max_drawdown_percentage"
+                            wire:model="max_drawdown_percentage"
+                            step="1"
+                            min="1"
+                            max="90"
+                            placeholder="Off"
+                            class="block w-full rounded-md border-gray-600 bg-gray-700 text-white shadow-sm focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm"
+                        >
+                        <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                            <span class="text-gray-400 sm:text-sm">%</span>
+                        </div>
+                    </div>
+                    @error('max_drawdown_percentage') <p class="mt-1 text-sm text-red-400">{{ $message }}</p> @enderror
+
+                    @if($drawdown['peak'] !== null)
+                        <p class="mt-1 text-xs text-gray-500">
+                            Now {{ number_format($drawdown['percent'] ?? 0, 1) }}% below a peak of
+                            {{ number_format($drawdown['peak'], 2) }}@if($drawdown['peak_at']), set {{ $drawdown['peak_at']->diffForHumans() }}@endif.
+                            <button
+                                type="button"
+                                wire:click="resetPeakEquity"
+                                wire:confirm="Reset the peak to the account's current equity? Do this after a withdrawal, not after a loss."
+                                class="text-yellow-500 underline hover:text-yellow-400"
+                            >Reset peak</button>
+                            after a deposit or withdrawal — nothing here can tell one from a loss.
+                        </p>
+                    @else
+                        <p class="mt-1 text-xs text-gray-500">Peak-to-trough, with no daily reset. Blank is off.</p>
+                    @endif
+                </div>
+            </div>
+        </div>
+
+        <!-- Daily rollover -->
+        <div class="rounded-lg bg-gray-800 p-6">
+            <h3 class="mb-4 text-lg font-semibold text-white">Daily Rollover</h3>
+            <p class="mb-4 text-sm text-gray-400">
+                Brokers close for a daily rollover — the widest spread of the day, and the point at
+                which a position starts paying swap. Set the broker's own time and the bot will stop
+                opening and close what is open before it. Leave the time blank to carry positions through.
+            </p>
+            <div class="grid gap-6 md:grid-cols-2">
+                <div>
+                    <label for="rollover_at" class="block text-sm font-medium text-gray-300">Rollover Time (UTC)</label>
+                    <input
+                        type="time"
+                        id="rollover_at"
+                        wire:model="rollover_at"
+                        class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white shadow-sm focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm"
+                    >
+                    @error('rollover_at') <p class="mt-1 text-sm text-red-400">{{ $message }}</p> @enderror
+                    <p class="mt-1 text-xs text-gray-500">Your broker's, in UTC. Elev8 rolls gold at 21:00.</p>
+                </div>
+
+                <div>
+                    <label for="flat_before_rollover_minutes" class="block text-sm font-medium text-gray-300">Flat Before Rollover (min)</label>
+                    <input
+                        type="number"
+                        id="flat_before_rollover_minutes"
+                        wire:model="flat_before_rollover_minutes"
+                        min="0"
+                        max="240"
+                        class="mt-1 block w-full rounded-md border-gray-600 bg-gray-700 text-white shadow-sm focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm"
+                    >
+                    @error('flat_before_rollover_minutes') <p class="mt-1 text-sm text-red-400">{{ $message }}</p> @enderror
+                    <p class="mt-1 text-xs text-gray-500">0 is off, even with a time set.</p>
+                </div>
             </div>
         </div>
 

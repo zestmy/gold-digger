@@ -11,6 +11,9 @@ use App\Models\Trade;
 use App\Models\TradeCommand;
 use App\Models\TradePartial;
 use App\Services\News\NewsBlackout;
+use App\Services\Trading\EquityDrawdown;
+use App\Services\Trading\RolloverWindow;
+use App\Services\Trading\VolumeRules;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -59,6 +62,8 @@ final class SignalGenerator
         private readonly RewardFloor $reward = new RewardFloor,
         private readonly SignalQuality $quality = new SignalQuality,
         private readonly TargetLadder $ladder = new TargetLadder,
+        private readonly RolloverWindow $rollover = new RolloverWindow,
+        private readonly EquityDrawdown $drawdown = new EquityDrawdown,
     ) {}
 
     /**
@@ -143,6 +148,17 @@ final class SignalGenerator
 
             if ($lots === null) {
                 $skipReason = 'lot_size_unavailable';
+            } else {
+                // Onto the broker's grid here rather than leaving it to the terminal.
+                // NormalizeVolume snaps down *and clamps up to the minimum*, so a size
+                // below that minimum was being traded at the minimum - more risk than
+                // the setting asked for, with nothing recording that it had happened.
+                // See VolumeRules.
+                $lots = VolumeRules::tradeable($lots, $spec['volume_step'], $spec['volume_min']);
+
+                if ($lots === null) {
+                    $skipReason = 'below_min_volume';
+                }
             }
         }
 
@@ -398,6 +414,24 @@ final class SignalGenerator
             return $newsObjection;
         }
 
+        // Beside the session and news gates for the same reason they are beside each other:
+        // all three answer "not allowed to trade at this moment", which is more decisive
+        // than anything about the setup. An entry taken minutes before the broker's
+        // rollover is one TradeManager is about to close again, into the widest spread of
+        // the day - see RolloverWindow.
+        //
+        // Judged at the moment the order would reach the broker - the bar's *close* - and
+        // not at `barTime`, which is the bar's open. The session and news gates use the
+        // open because they are about the conditions the setup formed in; this one is about
+        // whether the order would arrive inside the window, and a bar that opens at 20:40
+        // and closes at 20:45 produces an entry TradeManager would flatten a minute later.
+        $placedAt = Carbon::parse($setup->barTime)
+            ->addSeconds($this->timeframeSeconds((string) $strategy->timeframe_entry));
+
+        if ($this->rollover->isOpen($settings, $placedAt)) {
+            return 'rollover_window';
+        }
+
         if ($setup->adx < (float) $strategy->adx_threshold) {
             return 'adx_below_threshold';
         }
@@ -443,6 +477,15 @@ final class SignalGenerator
 
         if ($this->dailyLossBreached($strategy->user_id, $settings, (float) $heartbeat->balance)) {
             return 'daily_loss_limit';
+        }
+
+        // And the limit the daily one cannot see: how far the account is below its own best,
+        // with no reset at midnight. An account can bleed a quarter of itself over three
+        // weeks without one day breaching a 3% daily limit. See EquityDrawdown.
+        $drawdownObjection = $this->drawdown->objection($settings, $heartbeat, $heartbeat->brokerAccount);
+
+        if ($drawdownObjection !== null) {
+            return $drawdownObjection;
         }
 
         return null;

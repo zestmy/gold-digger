@@ -39,13 +39,15 @@ class FillController extends Controller
     private const REPLAY_NOTE = 'replayed from history on attach';
 
     /**
-     * What `trade_partials.close_reason` can hold.
+     * What `trade_partials.close_reason` is allowed to hold.
      *
-     * The column is a MySQL enum, so this list and the migration change together. Any
-     * reason outside it is flattened to `manual` and kept verbatim in the note - see
-     * normaliseReason() for why rejecting it instead was the wrong answer.
+     * The column itself is a plain string since 000073 - it was an enum, and widening it
+     * for every new reason was churn for a constraint that never did the enforcing. This
+     * list is what does. Any reason outside it is flattened to `manual` and kept verbatim
+     * in the note - see normaliseReason() for why rejecting it instead was the wrong
+     * answer.
      */
-    private const CLOSE_REASONS = ['tp1', 'tp2', 'tp3', 'sl', 'reversal_exit', 'time_exit', 'manual'];
+    private const CLOSE_REASONS = ['tp1', 'tp2', 'tp3', 'sl', 'reversal_exit', 'time_exit', 'rollover_exit', 'manual'];
 
     public function store(Request $request): JsonResponse
     {

@@ -37,6 +37,11 @@ class BrokerAccount extends Model
         'leverage',
         'last_balance',
         'last_equity',
+        // The high-water mark the drawdown halt measures against. Written by the heartbeat
+        // through EquityDrawdown::observe(), and resettable from the risk page - a deposit
+        // raises it and a withdrawal looks exactly like a loss.
+        'peak_equity',
+        'peak_equity_at',
         'last_synced_at',
     ];
 
@@ -59,8 +64,10 @@ class BrokerAccount extends Model
             // Decimals for financial precision
             'last_balance' => 'decimal:2',
             'last_equity' => 'decimal:2',
+            'peak_equity' => 'decimal:2',
 
-            // Timestamp for last sync
+            // Timestamps
+            'peak_equity_at' => 'datetime',
             'last_synced_at' => 'datetime',
         ];
     }

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Phase3;
 
+use App\Models\BotHeartbeat;
 use App\Models\BotSettings;
 use App\Models\BrokerAccount;
 use App\Models\Candle;
@@ -98,7 +99,22 @@ class BacktestTest extends TestCase
             slippagePips: $overrides['slippagePips'] ?? 0.0,
             commissionPerLot: $overrides['commissionPerLot'] ?? 0.0,
             startingBalance: $overrides['startingBalance'] ?? 10000.0,
+            volumeStep: $overrides['volumeStep'] ?? 0.01,
+            volumeMin: $overrides['volumeMin'] ?? 0.01,
+            // Zero unless a test is about latency, so every other assertion here is about
+            // the thing it names. Real runs get the queue's measured figure, or ten
+            // seconds - see MarketAssumptions::fromHeartbeat().
+            latencySeconds: $overrides['latencySeconds'] ?? 0.0,
         );
+    }
+
+    /** The stored bar a simulated trade filled on. */
+    private function barAt($openTime): Candle
+    {
+        return Candle::where('broker_account_id', $this->account->id)
+            ->where('timeframe', 'M5')
+            ->where('open_time', $openTime)
+            ->firstOrFail();
     }
 
     /** @param array<int, float> $closes */
@@ -302,8 +318,13 @@ class BacktestTest extends TestCase
         $this->seedBars($closes, 'M5');
         $this->seedBars($this->trendCloses(80, rising: false), 'H1');
 
-        $free = $this->backtest($this->market());
-        $costly = $this->backtest($this->market(['spreadPips' => 4.0]));
+        // A fifty-ATR stop on a ten-thousand-dollar account sizes below the broker's
+        // minimum lot, and a size below the minimum is now declined rather than traded at
+        // the minimum. The stop stays wide - it is what keeps the stop and the ladder out
+        // of a test about the spread - so the account is the thing that has to be big
+        // enough to hold it.
+        $free = $this->backtest($this->market(['startingBalance' => 500000.0]));
+        $costly = $this->backtest($this->market(['spreadPips' => 4.0, 'startingBalance' => 500000.0]));
 
         $a = $free->trades[0];
         $b = $costly->trades[0];
@@ -556,11 +577,475 @@ class BacktestTest extends TestCase
             'commands' => TradeCommand::count(),
         ];
 
-        $this->artisan('backtest '.$this->strategy->id)->assertSuccessful();
+        $this->artisan('backtest '.$this->strategy->id)
+            // The header has to say which latency and which lot grid produced the numbers
+            // under it, or two runs cannot be compared.
+            ->expectsOutputToContain('latency 10.0s (assumed), lots on a 0.01 grid, minimum 0.01')
+            ->assertSuccessful();
+
+        $this->artisan('backtest '.$this->strategy->id.' --latency=2.5')
+            ->expectsOutputToContain('latency 2.5s (given)')
+            ->assertSuccessful();
 
         // A backtest that left rows behind would poison the analytics it exists to inform.
         $this->assertSame($before['signals'], Signal::count());
         $this->assertSame($before['trades'], Trade::count());
         $this->assertSame($before['commands'], TradeCommand::count());
+    }
+
+    // =====================================================================
+    // THE BROKER'S LOT GRID
+    // =====================================================================
+
+    /**
+     * A size the arithmetic produces is not a size the broker holds. 0.1554 lots is traded
+     * as 0.15, and simulating the unsnapped figure scores a position that never existed.
+     */
+    public function test_an_entry_is_sized_on_the_brokers_lot_grid(): void
+    {
+        // Closed by the clock, so the position lands in `trades` rather than in `unclosed`.
+        $this->strategy->update(['max_holding_bars' => 3, 'tp3_r' => 50]);
+
+        ['closes' => $closes] = $this->crossThenRoom(12);
+
+        $this->seedBars($closes, 'M5');
+        $this->seedBars($this->trendCloses(80, rising: true), 'H1');
+
+        $report = $this->backtest();
+
+        $this->assertNotEmpty($report->trades, 'fixture should take a trade');
+
+        $lots = $report->trades[0]->lots;
+
+        $this->assertSame($lots, round($lots, 2), 'lots should sit on the 0.01 grid');
+        $this->assertEqualsWithDelta(0.0, fmod(round($lots * 100), 1.0), 1e-9);
+    }
+
+    /**
+     * The defect this pair of assertions exists for.
+     *
+     * A wide stop on a small account sizes below the broker's minimum lot.
+     * `CFXSExecutor::NormalizeVolume` does not refuse that - it raises it to the minimum -
+     * so the position traded is larger than the risk setting asked for while the backtest
+     * scores the smaller one. Declining is the honest answer, and it is recorded by name.
+     */
+    public function test_a_setup_below_the_minimum_lot_is_declined_rather_than_traded_at_the_minimum(): void
+    {
+        // A stop fifty ATRs wide against a 1% risk on ten thousand dollars: a few
+        // thousandths of a lot.
+        $this->strategy->update(['sl_atr_multiplier' => 50, 'tp3_r' => 50, 'max_holding_bars' => 3]);
+
+        ['closes' => $closes] = $this->crossThenRoom(12);
+
+        $this->seedBars($closes, 'M5');
+        $this->seedBars($this->trendCloses(80, rising: true), 'H1');
+
+        $report = $this->backtest();
+
+        $this->assertSame([], $report->trades);
+        $this->assertArrayHasKey('below_min_volume', $report->skips);
+
+        // And the same setup on an account big enough for it does trade, so the decline is
+        // about the size rather than about the setup.
+        $this->assertNotEmpty($this->backtest($this->market(['startingBalance' => 500000.0]))->trades);
+    }
+
+    /**
+     * A position the broker could not divide is not divided here either.
+     *
+     * `TradeManager::rungVolume()` refuses a rung whose share is below the broker's minimum,
+     * or whose remainder would be, and lets such a position run to its final target whole.
+     * A backtest that takes the rung anyway scores a ladder that would have failed at every
+     * step - which is the one outcome a small account is most likely to see.
+     */
+    public function test_a_position_too_small_to_divide_takes_no_rungs(): void
+    {
+        $this->strategy->update(['max_holding_bars' => 30, 'tp3_r' => 50]);
+
+        $this->seedBars($this->winningSeries(), 'M5');
+        $this->seedBars($this->trendCloses(80, rising: true), 'H1');
+
+        // A minimum equal to whatever the entry sizes at: any share of it is below the
+        // minimum, and so is any remainder.
+        $whole = $this->backtest($this->market(['volumeMin' => 0.01, 'volumeStep' => 0.01]));
+        $entry = $whole->trades[0]->lots;
+
+        $undividable = $this->backtest($this->market([
+            'volumeStep' => $entry,
+            'volumeMin' => $entry,
+        ]));
+
+        // filledRungs() lists every close, the final one included, so the rungs are what is
+        // being asserted about - not the length of the list.
+        $this->assertNotContains('tp1', $undividable->trades[0]->filledRungs());
+        $this->assertNotContains('tp2', $undividable->trades[0]->filledRungs());
+
+        // And the same fixture on a divisible grid does take them, so the refusal is about
+        // the size rather than about the ladder.
+        $this->assertContains('tp1', $whole->trades[0]->filledRungs());
+    }
+
+    // =====================================================================
+    // LATENCY
+    // =====================================================================
+
+    /**
+     * Nothing here executes at the price that triggered it.
+     *
+     * A bar closes, the EA pushes it on its next timer tick, the dashboard queues a
+     * command, and the EA claims it on the tick after that. The backtester used to fill at
+     * the next bar's open, which is the price at the moment of the close - the one price
+     * the system certainly did not get. With a latency of a fifth of a bar, the fill takes
+     * a fifth of that bar's adverse excursion.
+     */
+    public function test_latency_fills_an_entry_into_the_bar_rather_than_at_its_open(): void
+    {
+        $this->strategy->update(['max_holding_bars' => 3, 'tp3_r' => 50]);
+
+        ['closes' => $closes] = $this->crossThenRoom(12);
+
+        $this->seedBars($closes, 'M5');
+        $this->seedBars($this->trendCloses(80, rising: true), 'H1');
+
+        // 60 seconds of a 300-second bar.
+        $instant = $this->backtest($this->market());
+        $delayed = $this->backtest($this->market(['latencySeconds' => 60.0]));
+
+        $a = $instant->trades[0];
+        $b = $delayed->trades[0];
+
+        $fillBar = $this->barAt($a->openedAt);
+
+        $this->assertSame('buy', $a->direction);
+        $this->assertEqualsWithDelta((float) $fillBar->open, $a->entryPrice, 0.001, 'no latency fills at the open');
+
+        // A buy fills worse higher, so it pays a fifth of the distance from the open to
+        // the bar's high.
+        $expected = (float) $fillBar->open + (0.2 * ((float) $fillBar->high - (float) $fillBar->open));
+
+        $this->assertEqualsWithDelta($expected, $b->entryPrice, 0.001);
+        $this->assertGreaterThan($a->entryPrice, $b->entryPrice);
+    }
+
+    /**
+     * A sell is delayed the other way: it fills lower, which is also worse.
+     */
+    public function test_latency_moves_a_sell_entry_down_rather_than_up(): void
+    {
+        $this->strategy->update(['max_holding_bars' => 3, 'tp3_r' => 50]);
+
+        $closes = $this->crossCloses('sell');
+        $last = end($closes);
+
+        for ($i = 1; $i <= 8; $i++) {
+            $closes[] = $last - ($i * 0.4);
+        }
+
+        $this->seedBars($closes, 'M5');
+        $this->seedBars($this->trendCloses(80, rising: false), 'H1');
+
+        $instant = $this->backtest($this->market());
+        $delayed = $this->backtest($this->market(['latencySeconds' => 60.0]));
+
+        $a = $instant->trades[0];
+        $b = $delayed->trades[0];
+
+        $fillBar = $this->barAt($a->openedAt);
+        $expected = (float) $fillBar->open + (0.2 * ((float) $fillBar->low - (float) $fillBar->open));
+
+        $this->assertSame('sell', $a->direction);
+        $this->assertEqualsWithDelta($expected, $b->entryPrice, 0.001);
+        $this->assertLessThan($a->entryPrice, $b->entryPrice);
+    }
+
+    /**
+     * Exits decided on a bar close wait in the same queue an entry waits in, so a rung, a
+     * reversal exit and a time exit all fill inside the *next* bar. The stop and the final
+     * target do not: those sit on the order at the broker and need nothing sent.
+     */
+    public function test_latency_moves_a_market_exit_against_the_position(): void
+    {
+        $this->strategy->update(['max_holding_bars' => 3, 'tp3_r' => 50, 'exit_on_reversal' => false]);
+
+        ['closes' => $closes] = $this->crossThenRoom(12);
+
+        $this->seedBars($closes, 'M5');
+        $this->seedBars($this->trendCloses(80, rising: true), 'H1');
+
+        $instant = $this->backtest($this->market());
+        $delayed = $this->backtest($this->market(['latencySeconds' => 60.0]));
+
+        $a = $instant->trades[0];
+        $b = $delayed->trades[0];
+
+        $this->assertSame('time_exit', $a->closureReason);
+        $this->assertSame('time_exit', $b->closureReason);
+
+        // A buy is closed by selling, so a delayed exit sells lower - and its pip result
+        // is worse for it, not merely different.
+        $this->assertLessThan($a->closes[0]['price'], $b->closes[0]['price']);
+        $this->assertLessThan($a->closes[0]['pips'], $b->closes[0]['pips']);
+    }
+
+    /**
+     * Latency is a cost or it is nothing. A bar that gapped the trade's way would otherwise
+     * hand the drift back as profit, which would make a slow queue an edge.
+     */
+    public function test_latency_never_pays_out(): void
+    {
+        $this->strategy->update(['max_holding_bars' => 3, 'tp3_r' => 50, 'exit_on_reversal' => false]);
+
+        ['closes' => $closes] = $this->crossThenRoom(12);
+
+        $this->seedBars($closes, 'M5');
+        $this->seedBars($this->trendCloses(80, rising: true), 'H1');
+
+        $instant = $this->backtest($this->market())->metrics();
+        $delayed = $this->backtest($this->market(['latencySeconds' => 60.0]))->metrics();
+
+        $this->assertLessThanOrEqual($instant['net_pnl'], $delayed['net_pnl']);
+    }
+
+    /**
+     * The report has to say which latency produced it, or two runs cannot be compared.
+     */
+    public function test_the_report_records_the_latency_and_the_lot_grid(): void
+    {
+        ['closes' => $closes] = $this->crossThenRoom(12);
+
+        $this->seedBars($closes, 'M5');
+        $this->seedBars($this->trendCloses(80, rising: true), 'H1');
+
+        $assumptions = $this->backtest($this->market(['latencySeconds' => 7.5]))->toArray()['assumptions'];
+
+        $this->assertSame(7.5, $assumptions['latency_seconds']);
+        $this->assertSame(0.01, $assumptions['volume_step']);
+        $this->assertSame(0.01, $assumptions['volume_min']);
+    }
+
+    // =====================================================================
+    // THE LIMITS THAT ARE NOT ABOUT THE SETUP
+    // =====================================================================
+
+    /**
+     * The rollover window, mirrored from the live path on both sides: nothing is entered
+     * inside it, and anything open when it arrives is closed.
+     *
+     * Without this the backtest would keep trading through a break the live system stands
+     * aside for, which is the drift the whole class is built to avoid - and it would do it
+     * in the flattering direction, since the bars around a rollover are the cheapest place
+     * to be wrong about the spread.
+     */
+    public function test_a_position_open_when_the_window_arrives_is_flattened(): void
+    {
+        $this->strategy->update(['max_holding_bars' => 30, 'tp3_r' => 50]);
+
+        $this->seedBars($this->winningSeries(), 'M5');
+        $this->seedBars($this->trendCloses(80, rising: true), 'H1');
+
+        // The fixture's bars run up to 13:00, so a rollover at 13:00 with a two-hour window
+        // covers the last stretch of the series.
+        $this->settings->update([
+            'rollover_at' => '13:00',
+            'flat_before_rollover_minutes' => 120,
+        ]);
+
+        $this->assertContains('rollover_exit', array_keys($this->backtest()->exitBreakdown()));
+    }
+
+    /**
+     * And the entry side of the same window, judged at the bar's close exactly as the live
+     * gate judges it.
+     */
+    public function test_a_setup_inside_the_window_is_declined(): void
+    {
+        ['closes' => $closes] = $this->crossThenRoom(12);
+
+        $this->seedBars($closes, 'M5');
+        $this->seedBars($this->trendCloses(80, rising: true), 'H1');
+
+        // Twelve M5 bars back from 13:00 puts the cross bar's close at 12:05, which a
+        // window of 11:55 to 12:10 contains.
+        $this->settings->update([
+            'rollover_at' => '12:10',
+            'flat_before_rollover_minutes' => 15,
+        ]);
+
+        $report = $this->backtest();
+
+        $this->assertArrayHasKey('rollover_window', $report->skips);
+        $this->assertSame([], $report->trades);
+    }
+
+    public function test_no_rollover_configured_leaves_the_walk_as_it_was(): void
+    {
+        $this->strategy->update(['max_holding_bars' => 30, 'tp3_r' => 50]);
+
+        $this->seedBars($this->winningSeries(), 'M5');
+        $this->seedBars($this->trendCloses(80, rising: true), 'H1');
+
+        $report = $this->backtest();
+
+        $this->assertNotContains('rollover_exit', array_keys($report->exitBreakdown()));
+        $this->assertArrayNotHasKey('rollover_window', $report->skips);
+    }
+
+    /**
+     * The drawdown halt, mirrored so a strategy that would have been stopped in life is
+     * stopped here too.
+     *
+     * Measured on realised equity, because a close-to-close walk has no floating equity to
+     * read. That makes the simulated drawdown the shallower of the two and this gate trip
+     * later than the live one - the same limit `docs/BACKTESTING.md` already states for the
+     * max-drawdown metric.
+     */
+    public function test_a_drawdown_limit_stops_the_walk_taking_more_entries(): void
+    {
+        $this->seedBars($this->loseThenSetUpAgain(), 'M5');
+        $this->seedBars($this->trendCloses(80, rising: true), 'H1');
+
+        // Without a limit the fixture takes its second entry.
+        $this->settings->update(['max_drawdown_percentage' => null]);
+        $before = $this->backtest();
+
+        // With one that any realised loss is past, it does not.
+        $this->settings->update(['max_drawdown_percentage' => 0.01]);
+        $after = $this->backtest();
+
+        $this->assertArrayHasKey('drawdown_limit', $after->skips);
+        $this->assertLessThan(count($before->trades), count($after->trades));
+    }
+
+    /**
+     * A cross that loses, then a second cross once the first is out.
+     *
+     * @return array<int, float>
+     */
+    private function loseThenSetUpAgain(): array
+    {
+        $closes = $this->crossCloses('buy');
+        $last = end($closes);
+
+        // Down, far enough to take the stop and pull the fast EMA back under the slow.
+        for ($i = 1; $i <= 25; $i++) {
+            $closes[] = $last - ($i * 1.2);
+        }
+
+        $bottom = end($closes);
+
+        // And back up, which crosses again.
+        for ($i = 1; $i <= 25; $i++) {
+            $closes[] = $bottom + ($i * 1.5);
+        }
+
+        return $closes;
+    }
+
+    // =====================================================================
+    // THE LATENCY ASSUMPTION ITSELF
+    // =====================================================================
+
+    /**
+     * The figure is not guessed where there is a queue to measure.
+     *
+     * `trade_commands` records when a command was created and when an executor claimed it,
+     * so the wait is this deployment's own, in its own conditions. What the measurement
+     * cannot see is the leg before it - the bar closing and waiting to be pushed - which
+     * has no timestamp of its own, so one nominal poll interval is added for it.
+     */
+    public function test_the_latency_assumption_is_measured_from_the_queue(): void
+    {
+        $heartbeat = $this->heartbeatFor();
+
+        // Twelve commands, each claimed four seconds after it was queued.
+        for ($i = 1; $i <= 12; $i++) {
+            $created = now()->subMinutes($i);
+
+            $this->claimedCommand("latency:{$i}", $created, 4);
+        }
+
+        $this->assertSame(
+            4.0 + MarketAssumptions::PUSH_SECONDS,
+            MarketAssumptions::measuredLatency($heartbeat),
+        );
+
+        $this->assertSame(
+            4.0 + MarketAssumptions::PUSH_SECONDS,
+            MarketAssumptions::fromHeartbeat($heartbeat)->latencySeconds,
+        );
+    }
+
+    /**
+     * A handful of commands is one afternoon, not a distribution. The assumption falls back
+     * rather than believing them.
+     */
+    public function test_too_few_commands_fall_back_to_the_assumed_latency(): void
+    {
+        $heartbeat = $this->heartbeatFor();
+
+        for ($i = 1; $i <= 3; $i++) {
+            $created = now()->subMinutes($i);
+
+            $this->claimedCommand("sparse:{$i}", $created, 30);
+        }
+
+        $this->assertNull(MarketAssumptions::measuredLatency($heartbeat));
+        $this->assertSame(
+            MarketAssumptions::DEFAULT_LATENCY_SECONDS,
+            MarketAssumptions::fromHeartbeat($heartbeat)->latencySeconds,
+        );
+    }
+
+    /**
+     * And a figure given on the command line beats both, because a sweep over latency is
+     * the point of having the number at all.
+     */
+    public function test_a_given_latency_overrides_what_was_measured(): void
+    {
+        $this->assertSame(
+            2.5,
+            MarketAssumptions::fromHeartbeat($this->heartbeatFor(), ['latencySeconds' => 2.5])->latencySeconds,
+        );
+    }
+
+    /**
+     * A command queued at $created and claimed $waited seconds later.
+     *
+     * `created_at` is not fillable, so it is written after the insert rather than through
+     * it - mass-assigning it silently leaves the row stamped `now()`, which would make the
+     * wait negative and this fixture measure nothing.
+     */
+    private function claimedCommand(string $key, Carbon $created, int $waited): void
+    {
+        $command = TradeCommand::create([
+            'user_id' => $this->user->id,
+            'broker_account_id' => $this->account->id,
+            'type' => 'open',
+            'payload' => ['symbol' => self::SYMBOL, 'volume' => 0.1],
+            'status' => 'done',
+            'idempotency_key' => $key,
+            'claimed_at' => $created->copy()->addSeconds($waited),
+        ]);
+
+        TradeCommand::whereKey($command->id)->update(['created_at' => $created]);
+    }
+
+    private function heartbeatFor(): BotHeartbeat
+    {
+        return BotHeartbeat::create([
+            'user_id' => $this->user->id,
+            'broker_account_id' => $this->account->id,
+            'source' => 'mql5_ea',
+            'algo_trading_enabled' => true,
+            'broker_connected' => true,
+            'resolved_symbol' => self::SYMBOL,
+            'pip_size' => 0.10,
+            'pip_value_per_lot' => 10.0,
+            'volume_min' => 0.01,
+            'volume_step' => 0.01,
+            'balance' => 10000.00,
+            'equity' => 10000.00,
+            'last_seen_at' => now(),
+        ]);
     }
 }

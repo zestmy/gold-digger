@@ -3,11 +3,13 @@
 namespace App\Services\Strategy;
 
 use App\Models\BotHeartbeat;
+use App\Models\BotSettings;
 use App\Models\Candle;
 use App\Models\Strategy;
 use App\Models\Trade;
 use App\Models\TradePartial;
 use App\Services\Trading\ProtectionQueue;
+use App\Services\Trading\RolloverWindow;
 use App\Services\Trading\StopRules;
 
 /**
@@ -72,6 +74,7 @@ final class TradeManager
         private readonly SymbolResolver $symbols = new SymbolResolver,
         private readonly StopRules $rules = new StopRules,
         private readonly ProtectionQueue $queue = new ProtectionQueue,
+        private readonly RolloverWindow $rollover = new RolloverWindow,
     ) {}
 
     /**
@@ -102,6 +105,25 @@ final class TradeManager
         // quietly wrong position rather than a visible failure.
         $spec = $this->symbols->for($accountId, $strategy->symbol, $heartbeat);
         $symbol = $spec['symbol'];
+
+        // The clock, before the bars - and before the early return below, which is the
+        // point. Every other exit here is read off the series, so no series means nothing
+        // to decide; the rollover is a fact about the time of day, and a feed that stopped
+        // at 20:30 is the strongest reason to be flat by 21:00 rather than an excuse to
+        // carry a position through it.
+        //
+        // One reading for all of this strategy's positions, for the same reason as the
+        // reversal below: a pass that straddled the boundary would flatten some and leave
+        // others.
+        $settings = BotSettings::where('user_id', $strategy->user_id)->first();
+
+        if ($this->rollover->isOpen($settings, now())) {
+            return $trades->map(function (Trade $trade) {
+                $this->queueClose($trade, 'rollover_exit', null);
+
+                return ['trade_id' => $trade->id, 'action' => 'rollover_exit'];
+            })->all();
+        }
 
         $candles = Candle::recentSeries(
             $accountId,
