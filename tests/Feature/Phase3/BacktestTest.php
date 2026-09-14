@@ -824,6 +824,124 @@ class BacktestTest extends TestCase
     }
 
     // =====================================================================
+    // THE LIMITS THAT ARE NOT ABOUT THE SETUP
+    // =====================================================================
+
+    /**
+     * The rollover window, mirrored from the live path on both sides: nothing is entered
+     * inside it, and anything open when it arrives is closed.
+     *
+     * Without this the backtest would keep trading through a break the live system stands
+     * aside for, which is the drift the whole class is built to avoid - and it would do it
+     * in the flattering direction, since the bars around a rollover are the cheapest place
+     * to be wrong about the spread.
+     */
+    public function test_a_position_open_when_the_window_arrives_is_flattened(): void
+    {
+        $this->strategy->update(['max_holding_bars' => 30, 'tp3_r' => 50]);
+
+        $this->seedBars($this->winningSeries(), 'M5');
+        $this->seedBars($this->trendCloses(80, rising: true), 'H1');
+
+        // The fixture's bars run up to 13:00, so a rollover at 13:00 with a two-hour window
+        // covers the last stretch of the series.
+        $this->settings->update([
+            'rollover_at' => '13:00',
+            'flat_before_rollover_minutes' => 120,
+        ]);
+
+        $this->assertContains('rollover_exit', array_keys($this->backtest()->exitBreakdown()));
+    }
+
+    /**
+     * And the entry side of the same window, judged at the bar's close exactly as the live
+     * gate judges it.
+     */
+    public function test_a_setup_inside_the_window_is_declined(): void
+    {
+        ['closes' => $closes] = $this->crossThenRoom(12);
+
+        $this->seedBars($closes, 'M5');
+        $this->seedBars($this->trendCloses(80, rising: true), 'H1');
+
+        // Twelve M5 bars back from 13:00 puts the cross bar's close at 12:05, which a
+        // window of 11:55 to 12:10 contains.
+        $this->settings->update([
+            'rollover_at' => '12:10',
+            'flat_before_rollover_minutes' => 15,
+        ]);
+
+        $report = $this->backtest();
+
+        $this->assertArrayHasKey('rollover_window', $report->skips);
+        $this->assertSame([], $report->trades);
+    }
+
+    public function test_no_rollover_configured_leaves_the_walk_as_it_was(): void
+    {
+        $this->strategy->update(['max_holding_bars' => 30, 'tp3_r' => 50]);
+
+        $this->seedBars($this->winningSeries(), 'M5');
+        $this->seedBars($this->trendCloses(80, rising: true), 'H1');
+
+        $report = $this->backtest();
+
+        $this->assertNotContains('rollover_exit', array_keys($report->exitBreakdown()));
+        $this->assertArrayNotHasKey('rollover_window', $report->skips);
+    }
+
+    /**
+     * The drawdown halt, mirrored so a strategy that would have been stopped in life is
+     * stopped here too.
+     *
+     * Measured on realised equity, because a close-to-close walk has no floating equity to
+     * read. That makes the simulated drawdown the shallower of the two and this gate trip
+     * later than the live one - the same limit `docs/BACKTESTING.md` already states for the
+     * max-drawdown metric.
+     */
+    public function test_a_drawdown_limit_stops_the_walk_taking_more_entries(): void
+    {
+        $this->seedBars($this->loseThenSetUpAgain(), 'M5');
+        $this->seedBars($this->trendCloses(80, rising: true), 'H1');
+
+        // Without a limit the fixture takes its second entry.
+        $this->settings->update(['max_drawdown_percentage' => null]);
+        $before = $this->backtest();
+
+        // With one that any realised loss is past, it does not.
+        $this->settings->update(['max_drawdown_percentage' => 0.01]);
+        $after = $this->backtest();
+
+        $this->assertArrayHasKey('drawdown_limit', $after->skips);
+        $this->assertLessThan(count($before->trades), count($after->trades));
+    }
+
+    /**
+     * A cross that loses, then a second cross once the first is out.
+     *
+     * @return array<int, float>
+     */
+    private function loseThenSetUpAgain(): array
+    {
+        $closes = $this->crossCloses('buy');
+        $last = end($closes);
+
+        // Down, far enough to take the stop and pull the fast EMA back under the slow.
+        for ($i = 1; $i <= 25; $i++) {
+            $closes[] = $last - ($i * 1.2);
+        }
+
+        $bottom = end($closes);
+
+        // And back up, which crosses again.
+        for ($i = 1; $i <= 25; $i++) {
+            $closes[] = $bottom + ($i * 1.5);
+        }
+
+        return $closes;
+    }
+
+    // =====================================================================
     // THE LATENCY ASSUMPTION ITSELF
     // =====================================================================
 

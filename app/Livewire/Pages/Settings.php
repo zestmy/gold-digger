@@ -2,11 +2,15 @@
 
 namespace App\Livewire\Pages;
 
+use App\Models\BotHeartbeat;
 use App\Models\BotSettings;
+use App\Models\BrokerAccount;
 use App\Models\Strategy;
 use App\Services\Ai\AiFund;
 use App\Services\Ai\AiSpend;
+use App\Services\Trading\EquityDrawdown;
 use App\Support\TradingMode;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Layout;
@@ -43,6 +47,29 @@ class Settings extends Component
 
     #[Validate('required|numeric|min:1|max:50')]
     public string $max_daily_loss_percentage = '5.00';
+
+    /**
+     * The other loss limit: peak-to-trough, with no reset at midnight.
+     *
+     * Blank rather than zero when it is off, for the same reason the floors below are: a
+     * limit nobody set and a limit set to nothing are different decisions, and only one of
+     * them should read back as a number on the form.
+     */
+    #[Validate('nullable|numeric|min:1|max:90')]
+    public ?string $max_drawdown_percentage = null;
+
+    /**
+     * The broker's daily rollover, in UTC, and how long before it to stand flat.
+     *
+     * No default for the time: the dashboard cannot derive it and brokers disagree about
+     * it, so a guess would close positions at an hour nobody chose. Zero minutes is off
+     * even when a time is recorded.
+     */
+    #[Validate('nullable|date_format:H:i')]
+    public ?string $rollover_at = null;
+
+    #[Validate('required|integer|min:0|max:240')]
+    public int $flat_before_rollover_minutes = 0;
 
     #[Validate('required|integer|min:1|max:10')]
     public int $max_concurrent_trades = 3;
@@ -169,6 +196,10 @@ class Settings extends Component
             $this->is_active = $settings->is_active ?? false;
             $this->risk_percentage = $settings->risk_percentage ?? '1.00';
             $this->max_daily_loss_percentage = $settings->max_daily_loss_percentage ?? '5.00';
+            $this->max_drawdown_percentage = $settings->max_drawdown_percentage === null
+                ? null : (string) $settings->max_drawdown_percentage;
+            $this->rollover_at = $settings->rollover_at;
+            $this->flat_before_rollover_minutes = (int) ($settings->flat_before_rollover_minutes ?? 0);
             $this->max_concurrent_trades = $settings->max_concurrent_trades ?? 3;
             $this->allowed_sessions = $settings->allowed_sessions ?? [];
             $this->min_atr_threshold = $settings->min_atr_threshold ?? '0.50';
@@ -265,6 +296,10 @@ class Settings extends Component
             'is_active' => $this->is_active,
             'risk_percentage' => $this->risk_percentage,
             'max_daily_loss_percentage' => $this->max_daily_loss_percentage,
+            // Blank is off, not zero - see the property.
+            'max_drawdown_percentage' => $this->blankToNull($this->max_drawdown_percentage),
+            'rollover_at' => $this->blankToNull($this->rollover_at),
+            'flat_before_rollover_minutes' => $this->flat_before_rollover_minutes,
             'max_concurrent_trades' => $this->max_concurrent_trades,
             'allowed_sessions' => $this->allowed_sessions,
             'min_atr_threshold' => $this->min_atr_threshold,
@@ -364,6 +399,85 @@ class Settings extends Component
         return ($value === null || trim($value) === '') ? null : $value;
     }
 
+    /**
+     * Start the drawdown measurement again from where the account stands now.
+     *
+     * The halt measures against a peak the heartbeat recorded, and nothing here can tell a
+     * withdrawal from a loss: take $2,000 out of a $10,000 account and it reads as a 20%
+     * drawdown that never recovers. Without this button the only remedies are editing the
+     * database or abandoning the limit, and people choose the second one.
+     *
+     * It is deliberately a reset to *current equity* rather than an edit box. The peak is a
+     * measurement, and the only honest thing to do with a measurement that no longer
+     * describes the account is to take it again.
+     */
+    public function resetPeakEquity(): void
+    {
+        $account = $this->account();
+
+        if ($account === null) {
+            return;
+        }
+
+        $equity = app(EquityDrawdown::class)->equity($this->heartbeat(), $account);
+
+        if ($equity === null) {
+            return;
+        }
+
+        $account->forceFill([
+            'peak_equity' => $equity,
+            'peak_equity_at' => now(),
+        ])->save();
+
+        session()->flash('message', 'Peak equity reset to the account\'s current equity.');
+    }
+
+    /**
+     * The account the drawdown is measured on: whichever one is heartbeating, else the
+     * user's active one. Both lookups are the same ones the strategy layer makes.
+     */
+    private function account(): ?BrokerAccount
+    {
+        $heartbeat = $this->heartbeat();
+
+        if ($heartbeat?->broker_account_id !== null) {
+            return BrokerAccount::find($heartbeat->broker_account_id);
+        }
+
+        return BrokerAccount::where('user_id', Auth::id())
+            ->orderByDesc('is_active')
+            ->first();
+    }
+
+    private function heartbeat(): ?BotHeartbeat
+    {
+        return BotHeartbeat::where('user_id', Auth::id())
+            ->orderByDesc('last_seen_at')
+            ->first();
+    }
+
+    /**
+     * Peak, current equity and the gap between them, or nulls when there is nothing to say.
+     *
+     * @return array{peak: float|null, peak_at: Carbon|null, equity: float|null, percent: float|null}
+     */
+    private function drawdownState(): array
+    {
+        $account = $this->account();
+        $heartbeat = $this->heartbeat();
+        $drawdown = app(EquityDrawdown::class);
+
+        return [
+            'peak' => $account?->peak_equity !== null ? (float) $account->peak_equity : null,
+            'peak_at' => $account?->peak_equity_at,
+            'equity' => $drawdown->equity($heartbeat, $account),
+            // The same call the gate makes, so the page cannot report one number while the
+            // generator declines on another.
+            'percent' => $drawdown->percent($heartbeat, $account),
+        ];
+    }
+
     public function render()
     {
         return view('livewire.pages.settings', [
@@ -385,6 +499,10 @@ class Settings extends Component
             // all. Shown beside each other because "the AI stopped" has two possible
             // causes and they need different remedies.
             'allowance' => app(AiSpend::class)->allowance((int) Auth::id()),
+            // Where the account stands against its own high-water mark, so the drawdown
+            // limit is set beside the number it will be judged against rather than in the
+            // abstract - and so a peak left behind by a withdrawal is visible as one.
+            'drawdown' => $this->drawdownState(),
         ]);
     }
 }

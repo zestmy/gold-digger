@@ -591,6 +591,87 @@ class SignalGenerationTest extends TestCase
         $this->assertEqualsWithDelta($lots, (float) TradeCommand::where('type', 'open')->firstOrFail()->payload['volume'], 1e-6);
     }
 
+    // =====================================================================
+    // THE LIMITS THAT ARE NOT ABOUT THIS SETUP
+    // =====================================================================
+
+    /**
+     * The halt the daily loss limit cannot see: how far the account is below its own best,
+     * with no reset at midnight.
+     */
+    public function test_an_account_past_its_drawdown_limit_takes_nothing_new(): void
+    {
+        $this->seedBullishSetup();
+
+        BotSettings::where('user_id', $this->user->id)->update(['max_drawdown_percentage' => 10.00]);
+        $this->account->forceFill(['peak_equity' => 12000, 'peak_equity_at' => now()])->save();
+
+        // 10,000 against a 12,000 peak is 16.7% down.
+        $signal = $this->generate();
+
+        $this->assertSame('drawdown_limit', $signal->skip_reason);
+        $this->assertSame(0, TradeCommand::count());
+    }
+
+    public function test_an_account_inside_its_drawdown_limit_still_trades(): void
+    {
+        $this->seedBullishSetup();
+
+        BotSettings::where('user_id', $this->user->id)->update(['max_drawdown_percentage' => 30.00]);
+        $this->account->forceFill(['peak_equity' => 12000, 'peak_equity_at' => now()])->save();
+
+        $this->assertNull($this->generate()->skip_reason);
+    }
+
+    /**
+     * An entry minutes before the broker's rollover is one TradeManager is about to close
+     * again, into the widest spread of the day.
+     *
+     * The window is judged at the bar's *close* - the instant the order would reach the
+     * broker - rather than at its open. The fixture's signal bar opens at 13:00 and closes
+     * at 13:05, which is why these two rollover times give opposite answers.
+     */
+    public function test_a_setup_inside_the_rollover_window_is_declined(): void
+    {
+        $this->seedBullishSetup();
+
+        BotSettings::where('user_id', $this->user->id)->update([
+            'rollover_at' => '13:15',
+            'flat_before_rollover_minutes' => 15,
+        ]);
+
+        $signal = $this->generate();
+
+        $this->assertSame('rollover_window', $signal->skip_reason);
+        $this->assertSame(0, TradeCommand::count());
+    }
+
+    public function test_a_setup_that_closes_on_the_rollover_itself_is_not_in_the_window(): void
+    {
+        $this->seedBullishSetup();
+
+        // 12:50 to 13:05, and the bar closes at 13:05 - the moment the break starts, which
+        // is past the window rather than inside it.
+        BotSettings::where('user_id', $this->user->id)->update([
+            'rollover_at' => '13:05',
+            'flat_before_rollover_minutes' => 15,
+        ]);
+
+        $this->assertNull($this->generate()->skip_reason);
+    }
+
+    public function test_no_rollover_time_configured_changes_nothing(): void
+    {
+        $this->seedBullishSetup();
+
+        BotSettings::where('user_id', $this->user->id)->update([
+            'rollover_at' => null,
+            'flat_before_rollover_minutes' => 15,
+        ]);
+
+        $this->assertNull($this->generate()->skip_reason);
+    }
+
     public function test_the_concurrent_trade_cap_is_enforced(): void
     {
         $this->seedBullishSetup();

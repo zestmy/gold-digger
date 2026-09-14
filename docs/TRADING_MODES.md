@@ -61,3 +61,8 @@ Not a claim about profit. Passive loses less when the signals are bad; aggressiv
 when they are good. Which they are is measured on **Trades → Performance**, under every mode
 alike, and the strategy's own parameters - EMA periods, the ADX floor, the ladder - are the
 platform's and are not part of a mode.
+
+Nor are the two hard stops on the risk page: `max_drawdown_percentage` and the rollover
+window. A mode says how much to trade; those say when to stop trading at all, one of them
+needs a number only the broker knows, and both stay exactly where they were set when a mode
+is chosen. See [`SIGNAL_GENERATION.md`](SIGNAL_GENERATION.md).

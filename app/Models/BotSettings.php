@@ -14,7 +14,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  *
  * This model controls:
  * - Master bot on/off switch (is_active)
- * - Risk management parameters (risk_percentage, max_daily_loss_percentage)
+ * - Risk management parameters (risk_percentage, max_daily_loss_percentage, and
+ *   max_drawdown_percentage - the peak-to-trough halt that has no midnight reset)
+ * - When to stand aside: allowed_sessions, the news filter, and the minutes before the
+ *   broker's rollover in which nothing is opened and everything is closed
  * - Trade filters (allowed_sessions, news_filter_enabled)
  * - The AI fund, the copier's protection rules, and the per-tenant AI allowance
  *
@@ -43,6 +46,9 @@ class BotSettings extends Model
         'trading_mode',
         'risk_percentage',
         'max_daily_loss_percentage',
+        'max_drawdown_percentage',
+        'rollover_at',
+        'flat_before_rollover_minutes',
         'max_concurrent_trades',
         'allowed_sessions',
         'min_atr_threshold',
@@ -83,6 +89,7 @@ class BotSettings extends Model
 
             // Minutes either side of a high-impact release. Cast so NewsBlackout compares
             // integers rather than the strings a raw column read would give it.
+            'flat_before_rollover_minutes' => 'integer',
             'news_blackout_before_minutes' => 'integer',
             'news_blackout_after_minutes' => 'integer',
 
@@ -107,6 +114,7 @@ class BotSettings extends Model
             // Decimals - Laravel casts these to strings for precision
             'risk_percentage' => 'decimal:2',
             'max_daily_loss_percentage' => 'decimal:2',
+            'max_drawdown_percentage' => 'decimal:2',
             'min_atr_threshold' => 'decimal:2',
             'min_reward_ratio' => 'decimal:2',
             'min_confluence' => 'decimal:1',

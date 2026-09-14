@@ -32,6 +32,7 @@ class PartialsRelationManager extends RelationManager
                         'sl' => 'Stop Loss',
                         'reversal_exit' => 'Reversal Exit',
                         'time_exit' => 'Time Exit',
+                        'rollover_exit' => 'Rollover Exit',
                         'manual' => 'Manual',
                     ])
                     ->required(),

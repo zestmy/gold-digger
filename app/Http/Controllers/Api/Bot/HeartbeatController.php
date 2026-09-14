@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\BotHeartbeat;
 use App\Models\BotToken;
 use App\Models\BrokerAccount;
+use App\Services\Trading\EquityDrawdown;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -99,11 +100,23 @@ class HeartbeatController extends Controller
         // Keep the cached balance on the broker account fresh too - these columns
         // exist in the schema and were never written by anything before now.
         if ($accountId && isset($data['balance'])) {
-            BrokerAccount::where('id', $accountId)->update([
-                'last_balance' => $data['balance'],
-                'last_equity' => $data['equity'] ?? $data['balance'],
-                'last_synced_at' => now(),
-            ]);
+            $account = BrokerAccount::find($accountId);
+
+            if ($account !== null) {
+                $equity = $data['equity'] ?? $data['balance'];
+
+                $account->forceFill([
+                    'last_balance' => $data['balance'],
+                    'last_equity' => $equity,
+                    'last_synced_at' => now(),
+                ])->save();
+
+                // The high-water mark the drawdown halt measures against. Written here
+                // because this is the only place the account's own equity arrives, and
+                // stored rather than derived because bot_heartbeats is pruned - see
+                // EquityDrawdown.
+                app(EquityDrawdown::class)->observe($account, $equity !== null ? (float) $equity : null);
+            }
         }
 
         $settings = $user->botSettings;

@@ -20,9 +20,10 @@ That matters because a backtester with its own copy of the logic drifts from the
 trades, usually without anyone noticing, and then its results describe a strategy nobody is
 running. The exit side mirrors `TradeManager` for the same reason: rungs detected on bar close
 and filled at market, the final target sitting on the order as a broker-side limit, break-even
-once the first rung actually fills, and a position too small to divide — either the share or the
+once the first rung actually fills, a position too small to divide — either the share or the
 remainder under the broker's minimum lot — running to its final target whole rather than taking
-rungs the broker would refuse. The ladder itself comes from the same `TargetLadder` the
+rungs the broker would refuse, and the rollover window standing the account aside on both
+sides: no entries inside it, and anything open when it arrives closed. The ladder itself comes from the same `TargetLadder` the
 generator uses — rungs in R off the simulated stop, or in pips — so a sweep over `tp1_r` is
 a sweep over the ladder the live strategy would place.
 
@@ -128,9 +129,26 @@ infinite edge, and it is reported as a blank rather than a number that invites b
 
 ---
 
+## The two account limits
+
+`max_drawdown_percentage` and the rollover window are both mirrored here, because a backtest
+that kept trading through limits the live system stops for would overstate every result that
+touched one.
+
+The drawdown halt is the one place the two cannot agree exactly. Live it is measured on the
+equity the terminal reports, which includes open positions; here there is no floating equity
+to read, so the simulated drawdown is the **shallower** of the two and the gate trips later
+than it would in life. That is the same limitation the max-drawdown metric above already
+carries, and it leans the way every other assumption here leans — against believing the
+result.
+
+---
+
 ## What it does not model
 
-- **Swap**, so a strategy that holds overnight will look better here than it trades.
+- **Swap**, so a strategy that holds overnight will look better here than it trades. Setting
+  a rollover window is the cheap way out of that one: a position that is never carried through
+  the break never pays it.
 - **Requotes and rejections.** Every order fills.
 - **Weekend and news gaps** as anything other than the next bar's open.
 - **Partial fills.** Volume is always available.

@@ -9,8 +9,10 @@ use App\Services\Strategy\PositionSizer;
 use App\Services\Strategy\StrategyEvaluator;
 use App\Services\Strategy\TargetLadder;
 use App\Services\Strategy\TradingSession;
+use App\Services\Trading\RolloverWindow;
 use App\Services\Trading\VolumeRules;
 use App\Support\Timeframe;
+use Illuminate\Support\Carbon;
 
 /**
  * Backtester
@@ -65,6 +67,7 @@ final class Backtester
         private readonly StrategyEvaluator $evaluator = new StrategyEvaluator,
         private readonly PositionSizer $sizer = new PositionSizer,
         private readonly TradingSession $sessions = new TradingSession,
+        private readonly RolloverWindow $rollover = new RolloverWindow,
     ) {}
 
     /**
@@ -104,6 +107,11 @@ final class Backtester
         $this->primeTrend($trendCandles);
 
         $balance = $market->startingBalance;
+
+        // The high-water mark the drawdown halt measures against. Realised, because that is
+        // all a close-to-close walk has - see the note in objection().
+        $peak = $balance;
+
         $report->openEquity($balance, $entryCandles[$warmup]->open_time);
 
         /** @var array<int, SimulatedTrade> $open */
@@ -126,10 +134,11 @@ final class Backtester
             foreach ($open as $key => $trade) {
                 $trade->barsHeld++;
 
-                $this->manage($trade, $bar, $strategy, $entryCandles, $i, $market, $report, $barSeconds);
+                $this->manage($trade, $bar, $strategy, $entryCandles, $i, $market, $report, $barSeconds, $settings);
 
                 if (! $trade->isOpen()) {
                     $balance += $trade->netPnl;
+                    $peak = max($peak, $balance);
                     $report->recordTrade($trade);
                     $report->markEquity($balance, $bar->open_time);
                     unset($open[$key]);
@@ -151,7 +160,7 @@ final class Backtester
                 continue;
             }
 
-            $skip = $this->objection($setup, $strategy, $sessionsAllowed, $minAtr, count($open), $maxConcurrent, $report, $balance, $market);
+            $skip = $this->objection($setup, $strategy, $settings, $sessionsAllowed, $minAtr, count($open), $maxConcurrent, $report, $balance, $peak, $barSeconds);
 
             if ($skip !== null) {
                 $report->skip($skip);
@@ -280,6 +289,7 @@ final class Backtester
         MarketAssumptions $market,
         BacktestReport $report,
         int $barSeconds,
+        ?BotSettings $settings = null,
     ): void {
         // Where a market exit decided on this bar's close actually fills: one queue round
         // trip later, which is inside the next bar. Null on the last bar of the series.
@@ -334,6 +344,18 @@ final class Backtester
         }
 
         // ---- whole-position exits, checked before rungs, as TradeManager does ----
+
+        // The rollover first among them, because it is the only one decided by the clock
+        // rather than by the series: a position inside the window is closed whatever the
+        // bars say. After the stop and the final target above, though - those sit on the
+        // order at the broker and fill without anything being sent, so a bar that reached
+        // one of them reached it before any command could have been claimed.
+        if ($this->rollover->isOpen($settings, $bar->open_time->copy()->addSeconds($barSeconds))) {
+            $this->settle($trade, 'rollover_exit', $trade->remainingLots, $this->exitAtMarket($trade, $close, $next, $market, $barSeconds), $bar, $market);
+
+            return;
+        }
+
         if ($strategy->exit_on_reversal) {
             $slice = array_slice($entryCandles, max(0, $i - StrategyEvaluator::LOOKBACK_BARS + 1), min($i + 1, StrategyEvaluator::LOOKBACK_BARS));
             $reversal = $this->evaluator->crossDirection($slice, (int) $strategy->ema_fast, (int) $strategy->ema_slow);
@@ -590,16 +612,38 @@ final class Backtester
     private function objection(
         $setup,
         Strategy $strategy,
+        ?BotSettings $settings,
         ?array $sessionsAllowed,
         ?float $minAtr,
         int $openCount,
         int $maxConcurrent,
         BacktestReport $report,
         float $balance,
-        MarketAssumptions $market,
+        float $peak,
+        int $barSeconds,
     ): ?string {
         if (! $this->sessions->isOpen($sessionsAllowed, $setup->barTime)) {
             return 'session_closed';
+        }
+
+        // At the bar's close, which is where the live gate judges it too: the instant the
+        // order would have reached the broker rather than the instant the bar opened.
+        if ($this->rollover->isOpen($settings, Carbon::parse($setup->barTime)->addSeconds($barSeconds))) {
+            return 'rollover_window';
+        }
+
+        // The drawdown halt, on realised equity. Live it is measured on the equity the
+        // terminal reports, which includes open positions; here there is no floating
+        // equity to read, so a simulated drawdown is the *shallower* of the two and this
+        // gate trips later than the live one would. That is the same limit
+        // `docs/BACKTESTING.md` already states for the max-drawdown metric, and it is worth
+        // knowing which way it leans rather than pretending the two agree.
+        $limit = $settings?->max_drawdown_percentage !== null
+            ? (float) $settings->max_drawdown_percentage
+            : 0.0;
+
+        if ($limit > 0.0 && $peak > 0.0 && ((($peak - $balance) / $peak) * 100.0) >= $limit) {
+            return 'drawdown_limit';
         }
 
         if ($setup->adx < (float) $strategy->adx_threshold) {

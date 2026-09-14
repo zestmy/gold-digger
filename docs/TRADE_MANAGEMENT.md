@@ -89,6 +89,7 @@ defaults should change with it.
 |---|---|---|
 | Price traded through TP1 | `close`, reason `tp1` | `tp1_close_pct` of initial |
 | Price traded through TP2 *(only when a TP3 exists)* | `close`, reason `tp2` | `tp2_close_pct` of initial |
+| Inside the minutes before the broker's rollover | `close`, reason `rollover_exit` | all remaining |
 | EMAs crossed against the position, `exit_on_reversal` on | `close`, reason `reversal_exit` | all remaining |
 | Bars since entry ≥ `max_holding_bars` | `close`, reason `time_exit` | all remaining |
 | TP1 **filled**, stop not yet at break-even | `modify`, reason `break_even` | — |
@@ -101,6 +102,19 @@ one, otherwise TP2.
 **Exits supersede rungs** on the same bar. An exit takes the whole position, so pairing it
 with a partial would queue two commands where one does the job, and the partial's fill would
 move the exit's.
+
+**The rollover exit is the only one decided by the clock.** Every other row in that table is
+read off the bars; this one asks what time it is. `rollover_at` is the broker's own rollover
+in UTC and `flat_before_rollover_minutes` is how long before it to stand flat — both off
+unless configured, because the dashboard cannot derive a broker's rollover time and a guess
+closes positions at an hour nobody chose.
+
+It is checked before everything else, including the "are there bars since entry" guard: a
+position nobody can find bars for is exactly the one that should not be carried through a
+break. What it avoids is swap, the widest spread of the day, and the gap at the reopen. The
+every-minute schedule is what makes it reliable — a bar-close trigger alone could miss the
+window outright on an H1 strategy — and the idempotency key is what stops sixty passes
+queueing sixty closes.
 
 **Exits never expire**, unlike entries. An entry that waited out its bar is no longer the
 trade the strategy intended; an exit that is late is still the exit, and expiring it would
@@ -204,6 +218,14 @@ One consequence worth knowing: the EA labels a **broker-side** take-profit `tp3`
 order always carries the final rung and the terminal never saw the ladder. When the strategy
 set no TP3, `FillController` corrects that to `tp2`. `TradeManager` never commands `tp3`, so
 the correction cannot collide with a commanded close.
+
+`close_reason` was a database enum and is a plain string as of 000073, when `rollover_exit`
+needed a place — the same conversion `trade_commands.type` and `trades.origin` had already
+been through, for the same reason: rewriting a column on every deployment that adds a value
+is churn for a constraint that was never what enforced anything. `FillController::CLOSE_REASONS`
+is the list, and a reason outside it is still flattened to `manual` with the original kept
+verbatim in `trades.closure_reason`, because losing a fill over an unrecognised word would be
+worse than recording it imprecisely.
 
 ---
 

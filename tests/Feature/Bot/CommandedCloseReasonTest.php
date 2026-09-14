@@ -106,6 +106,20 @@ class CommandedCloseReasonTest extends TestCase
         $this->assertSame('partially_closed', $this->trade->fresh()->status);
     }
 
+    /**
+     * And so must the rollover flatten, for the same reason plus one more: the backtester
+     * reports `rollover_exit` in its exit breakdown, and a live fill filed as `manual`
+     * would leave the two sides describing the same exit in different words - which is
+     * exactly what the shared vocabulary exists to prevent.
+     */
+    public function test_the_rollover_flatten_is_filed_as_itself(): void
+    {
+        $this->close(reason: 'rollover_exit', note: 'closed by dashboard command (rollover_exit)')->assertOk();
+
+        $this->assertSame('rollover_exit', TradePartial::sole()->close_reason);
+        $this->assertSame('fully_closed', $this->trade->fresh()->status);
+    }
+
     public function test_a_broker_stop_is_still_a_stop_out(): void
     {
         $this->close(reason: 'sl', note: 'stop loss hit')->assertOk();
